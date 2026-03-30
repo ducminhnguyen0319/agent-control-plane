@@ -10,11 +10,21 @@ RUNTIME_SKILL_ROOT="${ROOT_RUNTIME_DIR}/skills/openclaw/agent-control-plane"
 source "${TOOL_BIN_DIR}/flow-config-lib.sh"
 failures=0
 
+contains_fixed_string() {
+  local pattern="${1:?pattern required}"
+  local file="${2:?file required}"
+  if command -v rg >/dev/null 2>&1; then
+    rg -q --fixed-strings -- "$pattern" "$file"
+  else
+    grep -F -q -- "$pattern" "$file"
+  fi
+}
+
 check_contains() {
   local file="${1:?file required}"
   local pattern="${2:?pattern required}"
   local label="${3:?label required}"
-  if rg -q --fixed-strings -- "$pattern" "$file"; then
+  if contains_fixed_string "$pattern" "$file"; then
     printf 'PASS %s\n' "$label"
   else
     printf 'FAIL %s (%s missing in %s)\n' "$label" "$pattern" "$file" >&2
@@ -26,7 +36,7 @@ check_absent() {
   local file="${1:?file required}"
   local pattern="${2:?pattern required}"
   local label="${3:?label required}"
-  if rg -q --fixed-strings -- "$pattern" "$file"; then
+  if contains_fixed_string "$pattern" "$file"; then
     printf 'FAIL %s (%s unexpectedly present in %s)\n' "$label" "$pattern" "$file" >&2
     failures=$((failures + 1))
   else
