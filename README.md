@@ -1,7 +1,7 @@
 # agent-control-plane
 
 <p>
-  <a href="https://github.com/ducminhuyen0319/agent-control-plane/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/ducminhuyen0319/agent-control-plane/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/ducminhnguyen0319/agent-control-plane/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/ducminhnguyen0319/agent-control-plane/actions/workflows/ci.yml/badge.svg?branch=main"></a>
   <a href="https://www.npmjs.com/package/agent-control-plane"><img alt="npm version" src="https://img.shields.io/npm/v/agent-control-plane?style=flat-square"></a>
   <a href="https://www.npmjs.com/package/agent-control-plane"><img alt="node version" src="https://img.shields.io/node/v/agent-control-plane?style=flat-square"></a>
   <a href="./LICENSE"><img alt="license" src="https://img.shields.io/npm/l/agent-control-plane?style=flat-square"></a>

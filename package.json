@@ -2,13 +2,13 @@
   "name": "agent-control-plane",
   "version": "0.1.0",
   "description": "Help a repo keep GitHub-driven coding agents running reliably without constant human babysitting",
-  "homepage": "https://github.com/ducminhuyen0319/agent-control-plane",
+  "homepage": "https://github.com/ducminhnguyen0319/agent-control-plane",
   "bugs": {
-    "url": "https://github.com/ducminhuyen0319/agent-control-plane/issues"
+    "url": "https://github.com/ducminhnguyen0319/agent-control-plane/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ducminhuyen0319/agent-control-plane.git"
+    "url": "git+https://github.com/ducminhnguyen0319/agent-control-plane.git"
   },
   "license": "MIT",
   "funding": [
