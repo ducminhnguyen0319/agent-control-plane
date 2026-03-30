@@ -11,6 +11,15 @@ const pkg = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
 if (!pkg.description || !pkg.description.includes("running reliably without constant human babysitting")) {
   process.exit(1);
 }
+if (pkg.homepage !== "https://github.com/ducminhuyen0319/agent-control-plane") {
+  process.exit(10);
+}
+if (!pkg.bugs || pkg.bugs.url !== "https://github.com/ducminhuyen0319/agent-control-plane/issues") {
+  process.exit(11);
+}
+if (!pkg.repository || pkg.repository.type !== "git" || pkg.repository.url !== "git+https://github.com/ducminhuyen0319/agent-control-plane.git") {
+  process.exit(12);
+}
 if (pkg.license !== "MIT") {
   process.exit(2);
 }

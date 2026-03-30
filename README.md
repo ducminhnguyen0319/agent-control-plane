@@ -1,10 +1,10 @@
 # agent-control-plane
 
 <p>
-  <a href="./.github/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/badge/ci-local%20smoke-1f6feb?style=flat-square"></a>
-  <a href="./CHANGELOG.md"><img alt="package version" src="https://img.shields.io/badge/version-0.1.0-2da44e?style=flat-square"></a>
-  <a href="./package.json"><img alt="node version" src="https://img.shields.io/badge/node-%3E%3D18-339933?style=flat-square"></a>
-  <a href="./LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-2da44e?style=flat-square"></a>
+  <a href="https://github.com/ducminhuyen0319/agent-control-plane/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/ducminhuyen0319/agent-control-plane/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="https://www.npmjs.com/package/agent-control-plane"><img alt="npm version" src="https://img.shields.io/npm/v/agent-control-plane?style=flat-square"></a>
+  <a href="https://www.npmjs.com/package/agent-control-plane"><img alt="node version" src="https://img.shields.io/node/v/agent-control-plane?style=flat-square"></a>
+  <a href="./LICENSE"><img alt="license" src="https://img.shields.io/npm/l/agent-control-plane?style=flat-square"></a>
   <a href="https://github.com/sponsors/ducminhnguyen0319"><img alt="GitHub Sponsors" src="https://img.shields.io/badge/sponsor-GitHub%20Sponsors-ea4aaa?style=flat-square&logo=githubsponsors&logoColor=white"></a>
 </p>
 
