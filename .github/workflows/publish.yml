@@ -31,9 +31,9 @@ jobs:
           sudo apt-get install -y tmux
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
 
       - name: Show tool versions
@@ -42,6 +42,39 @@ jobs:
           npm --version
           python3 --version
           tmux -V
+
+      - name: Verify trusted publishing toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          function parse(version) {
+            return version.replace(/^v/, "").split(".").map((part) => Number(part));
+          }
+          function gte(actual, minimum) {
+            const a = parse(actual);
+            const b = parse(minimum);
+            const length = Math.max(a.length, b.length);
+            for (let index = 0; index < length; index += 1) {
+              const left = a[index] ?? 0;
+              const right = b[index] ?? 0;
+              if (left > right) return true;
+              if (left < right) return false;
+            }
+            return true;
+          }
+          const nodeVersion = process.version;
+          const npmVersion = require("child_process")
+            .execSync("npm --version", { encoding: "utf8" })
+            .trim();
+          if (!gte(nodeVersion, "24.0.0")) {
+            throw new Error(`node ${nodeVersion} is below 24.0.0`);
+          }
+          if (!gte(npmVersion, "11.5.1")) {
+            throw new Error(`npm ${npmVersion} is below 11.5.1`);
+          }
+          console.log(`TRUSTED_PUBLISH_TOOLCHAIN_OK node=${nodeVersion} npm=${npmVersion}`);
+          NODE
 
       - name: Verify tag matches package version
         shell: bash
