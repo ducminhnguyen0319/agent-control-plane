@@ -17,6 +17,13 @@ layout for public releases.
 - maintainer release docs now point to trusted publishing through
   `.github/workflows/publish.yml` instead of local `npm publish`
 
+## [0.1.8] - 2026-03-31
+
+### Fixed
+
+- forced detached worker launches to start from a stable working directory, so resident issue loops no longer inherit a deleted worktree cwd and break `pnpm`/Node bootstrap with `uv_cwd`
+- added regression coverage for detached launches started from a stale parent cwd
+
 ## [0.1.7] - 2026-03-30
 
 ### Fixed

@@ -6,6 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/flow-config-lib.sh"
 CONFIG_YAML="$(resolve_flow_config_yaml "${BASH_SOURCE[0]}")"
 STATE_ROOT="$(flow_resolve_state_root "${CONFIG_YAML}")"
+AGENT_REPO_ROOT="$(flow_resolve_agent_repo_root "${CONFIG_YAML}")"
+REPO_ROOT="$(flow_resolve_repo_root "${CONFIG_YAML}")"
 
 usage() {
   cat <<'EOF'
@@ -66,6 +68,21 @@ if [[ -n "${pending_key}" ]]; then
   pending_file="${pending_dir}/${pending_key}.pid"
 fi
 
+launch_cwd="${ACP_LAUNCH_CWD:-${F_LOSNING_LAUNCH_CWD:-}}"
+if [[ -z "${launch_cwd}" ]]; then
+  for candidate in "${AGENT_REPO_ROOT}" "${REPO_ROOT}" "${STATE_ROOT}" "${HOME:-}" "/"; do
+    if [[ -n "${candidate}" && -d "${candidate}" ]]; then
+      launch_cwd="${candidate}"
+      break
+    fi
+  done
+fi
+
+if [[ -z "${launch_cwd}" || ! -d "${launch_cwd}" ]]; then
+  echo "could not determine a stable working directory for detached launch" >&2
+  exit 1
+fi
+
 python_bin="${PYTHON_BIN:-$(command -v python3 || true)}"
 if [[ -z "${python_bin}" ]]; then
   echo "python3 is required for detached launch" >&2
@@ -73,14 +90,15 @@ if [[ -z "${python_bin}" ]]; then
 fi
 
 launch_pid="$(
-  "${python_bin}" - "${log_file}" "${pending_file}" "$@" <<'PY'
+  "${python_bin}" - "${log_file}" "${pending_file}" "${launch_cwd}" "$@" <<'PY'
 import subprocess
 import sys
 from pathlib import Path
 
 log_file = Path(sys.argv[1])
 pending_file = sys.argv[2]
-argv = sys.argv[3:]
+launch_cwd = sys.argv[3]
+argv = sys.argv[4:]
 
 with log_file.open("ab", buffering=0) as log_handle:
     proc = subprocess.Popen(
@@ -88,6 +106,7 @@ with log_file.open("ab", buffering=0) as log_handle:
         stdin=subprocess.DEVNULL,
         stdout=log_handle,
         stderr=subprocess.STDOUT,
+        cwd=launch_cwd,
         start_new_session=True,
     )
 
@@ -102,6 +121,7 @@ printf 'LAUNCH_MODE=detached\n'
 printf 'LAUNCH_NAME=%s\n' "${launch_name}"
 printf 'LAUNCH_PID=%s\n' "${launch_pid}"
 printf 'LAUNCH_LOG=%s\n' "${log_file}"
+printf 'LAUNCH_CWD=%s\n' "${launch_cwd}"
 if [[ -n "${pending_file}" ]]; then
   printf 'LAUNCH_PENDING_FILE=%s\n' "${pending_file}"
 fi
