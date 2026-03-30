@@ -191,12 +191,14 @@ function runCapture(command, args, options = {}) {
   const result = spawnSync(command, args, {
     encoding: "utf8",
     env: options.env || process.env,
-    cwd: options.cwd || process.cwd()
+    cwd: options.cwd || process.cwd(),
+    timeout: options.timeoutMs || 0
   });
   return {
     status: typeof result.status === "number" ? result.status : (result.error ? 1 : 0),
     stdout: result.stdout || "",
-    stderr: result.stderr || ""
+    stderr: result.stderr || "",
+    error: result.error || null
   };
 }
 
@@ -1044,6 +1046,92 @@ function printPrereqSummary(prereq) {
   console.log(`- backend note: ${backendReadinessHint(prereq.workerCommand)}`);
 }
 
+function probeAnchorSyncReadiness(repoRoot) {
+  if (!repoRoot || !fs.existsSync(repoRoot)) {
+    return {
+      status: "deferred",
+      reason: "source-repo-missing",
+      remoteUrl: "",
+      details: ""
+    };
+  }
+
+  const remoteResult = runCapture("git", ["remote", "get-url", "origin"], {
+    cwd: repoRoot,
+    timeoutMs: 5000
+  });
+  const remoteUrl = remoteResult.stdout.trim();
+  if (remoteResult.status !== 0 || !remoteUrl) {
+    return {
+      status: "deferred",
+      reason: "no-origin-remote",
+      remoteUrl: "",
+      details: `${remoteResult.stdout}${remoteResult.stderr}`.trim()
+    };
+  }
+
+  const probeResult = runCapture("git", ["ls-remote", "--exit-code", "origin", "HEAD"], {
+    cwd: repoRoot,
+    timeoutMs: 15000
+  });
+  if (probeResult.status === 0) {
+    return {
+      status: "ready",
+      reason: "",
+      remoteUrl,
+      details: ""
+    };
+  }
+
+  const details = `${probeResult.stdout}${probeResult.stderr}`.trim();
+  let reason = "git-remote-unreachable";
+  if (probeResult.error && probeResult.error.code === "ETIMEDOUT") {
+    reason = "git-remote-timeout";
+  } else if (/could not read Username|Authentication failed|Permission denied|Repository not found|access denied|not found/i.test(details)) {
+    reason = "git-remote-auth-or-access-error";
+  } else if (/Could not resolve host|Name or service not known|Temporary failure in name resolution/i.test(details)) {
+    reason = "git-remote-dns-error";
+  }
+
+  return {
+    status: "deferred",
+    reason,
+    remoteUrl,
+    details
+  };
+}
+
+function buildAnchorSyncDecision(options, sourceRepoRoot) {
+  if (options.skipAnchorSync) {
+    return {
+      status: "skipped",
+      reason: "disabled",
+      remoteUrl: "",
+      details: "",
+      skipAnchorSync: true
+    };
+  }
+
+  const probe = probeAnchorSyncReadiness(sourceRepoRoot);
+  if (probe.status === "ready") {
+    return {
+      status: "ok",
+      reason: "",
+      remoteUrl: probe.remoteUrl,
+      details: probe.details,
+      skipAnchorSync: false
+    };
+  }
+
+  return {
+    status: "deferred",
+    reason: probe.reason,
+    remoteUrl: probe.remoteUrl,
+    details: probe.details,
+    skipAnchorSync: true
+  };
+}
+
 function profileExists(profileRegistryRoot, profileId) {
   return fs.existsSync(path.join(profileRegistryRoot, profileId, "control-plane.yaml"));
 }
@@ -1082,6 +1170,7 @@ function buildSetupDryRunPlan(options, context, config) {
   const dependencyPlan = buildDependencyInstallPlan(prereq.missingRequired);
   const workerInstallPlan = buildWorkerBackendInstallPlan(prereq.workerCommand);
   const workerGuide = backendSetupGuide(prereq.workerCommand);
+  const anchorSync = buildAnchorSyncDecision(options, config.paths.sourceRepoRoot);
 
   let dependencyAction = planStatusWithReason("not-needed");
   if (!prereq.coreToolsOk) {
@@ -1128,6 +1217,8 @@ function buildSetupDryRunPlan(options, context, config) {
       runtimeStartAction = planStatusWithReason("blocked", `missing-tools:${prereq.missingRequired.join(",")}`);
     } else if (!prereq.workerAvailable) {
       runtimeStartAction = planStatusWithReason("blocked", `missing-worker:${prereq.workerCommand}`);
+    } else if (anchorSync.status !== "ok") {
+      runtimeStartAction = planStatusWithReason("blocked", `anchor-sync-${anchorSync.reason}`);
     } else if (!prereq.ghAuthOk) {
       runtimeStartAction = planStatusWithReason("blocked", "gh-auth-not-ready");
     } else {
@@ -1156,6 +1247,7 @@ function buildSetupDryRunPlan(options, context, config) {
     workerInstallPlan,
     workerAction,
     workerGuide,
+    anchorSync,
     githubAuthAction,
     runtimeStartAction,
     launchdAction
@@ -1170,6 +1262,7 @@ function printSetupDryRunPlan(context, config, plan) {
   console.log(`- profile registry root: ${context.profileRegistryRoot}`);
   console.log(`- sync packaged runtime: would-run`);
   console.log(`- scaffold/adopt profile: would-run`);
+  console.log(`- anchor repo sync: ${plan.anchorSync.status === "ok" ? "would-run" : `${plan.anchorSync.status} (${plan.anchorSync.reason})`}`);
   console.log(`- doctor: would-run`);
   console.log(`- dependency install: ${plan.dependencyAction.status}${plan.dependencyAction.reason ? ` (${plan.dependencyAction.reason})` : ""}`);
   if (plan.dependencyAction.status !== "not-needed" && plan.dependencyPlan && plan.dependencyPlan.commands.length > 0) {
@@ -1201,6 +1294,11 @@ function buildSetupResultPayload(params) {
     coreTools: {
       status: params.coreToolsStatus,
       missingRequiredTools: params.missingRequiredTools
+    },
+    anchorSync: {
+      status: params.anchorSyncStatus,
+      reason: params.anchorSyncReason,
+      remoteUrl: params.anchorSyncRemoteUrl
     },
     workerBackend: {
       command: params.workerBackendCommand,
@@ -1252,6 +1350,9 @@ function emitSetupJsonPayload(payload) {
 
 function collectFinalSetupIssues(config, prereq, doctorKv, runtimeStartStatus) {
   const issues = [];
+  if (config.anchorSync && config.anchorSync.status !== "ok") {
+    issues.push(`anchor repo sync ${config.anchorSync.status}: ${config.anchorSync.reason}`);
+  }
   if (!prereq.coreToolsOk) {
     issues.push(`missing core tools: ${prereq.missingRequired.join(", ")}`);
   }
@@ -1271,7 +1372,11 @@ function collectFinalSetupIssues(config, prereq, doctorKv, runtimeStartStatus) {
 }
 
 async function maybeRunFinalSetupFixups(options, scopedContext, config, currentState) {
-  const issues = collectFinalSetupIssues(config, currentState.prereq, currentState.doctorKv, currentState.runtimeStartStatus);
+  const effectiveConfig = {
+    ...config,
+    anchorSync: currentState.anchorSync || config.anchorSync || null
+  };
+  const issues = collectFinalSetupIssues(effectiveConfig, currentState.prereq, currentState.doctorKv, currentState.runtimeStartStatus);
   if (issues.length === 0) {
     return {
       status: "not-needed",
@@ -1315,6 +1420,7 @@ async function maybeRunFinalSetupFixups(options, scopedContext, config, currentS
   let githubAuthStep = currentState.githubAuthStep;
   let workerSetupStep = currentState.workerSetupStep;
   let doctorKv = currentState.doctorKv;
+  let anchorSync = currentState.anchorSync || effectiveConfig.anchorSync || null;
   let runtimeStartStatus = currentState.runtimeStartStatus;
   let runtimeStartReason = currentState.runtimeStartReason;
   let runtimeStatusKv = currentState.runtimeStatusKv;
@@ -1353,6 +1459,9 @@ async function maybeRunFinalSetupFixups(options, scopedContext, config, currentS
     } else if (!prereq.workerAvailable) {
       runtimeStartStatus = "skipped";
       runtimeStartReason = `missing-worker:${prereq.workerCommand}`;
+    } else if (anchorSync && anchorSync.status !== "ok") {
+      runtimeStartStatus = "skipped";
+      runtimeStartReason = `anchor-sync-${anchorSync.reason}`;
     } else if (!prereq.ghAuthOk) {
       runtimeStartStatus = "skipped";
       runtimeStartReason = "gh-auth-not-ready";
@@ -1376,7 +1485,7 @@ async function maybeRunFinalSetupFixups(options, scopedContext, config, currentS
     launchdInstallReason = "";
   }
 
-  const finalIssues = collectFinalSetupIssues(config, prereq, doctorKv, runtimeStartStatus);
+  const finalIssues = collectFinalSetupIssues({ ...effectiveConfig, anchorSync }, prereq, doctorKv, runtimeStartStatus);
   let status = "ok";
   if (dependencyInstall.status === "failed" || githubAuthStep.status === "failed" || workerSetupStep.installStatus === "failed") {
     status = "failed";
@@ -1387,6 +1496,7 @@ async function maybeRunFinalSetupFixups(options, scopedContext, config, currentS
   return {
     status,
     actions,
+    anchorSync,
     prereq,
     dependencyInstall,
     githubAuthStep,
@@ -1564,6 +1674,9 @@ async function runSetupFlow(forwardedArgs) {
         worktreeRoot: config.paths.worktreeRoot,
         coreToolsStatus: plan.prereq.coreToolsOk ? "ok" : "missing",
         missingRequiredTools: plan.prereq.missingRequired,
+        anchorSyncStatus: plan.anchorSync.status === "ok" ? "would-run" : plan.anchorSync.status,
+        anchorSyncReason: plan.anchorSync.reason || "",
+        anchorSyncRemoteUrl: plan.anchorSync.remoteUrl || "",
         workerBackendCommand: plan.prereq.workerCommand,
         workerBackendStatus: plan.prereq.workerAvailable ? "ok" : "missing",
         workerSetupGuideStatus: "planned",
@@ -1610,6 +1723,13 @@ async function runSetupFlow(forwardedArgs) {
         console.log(`PROFILE_EXISTS=${plan.profileExists ? "yes" : "no"}`);
         console.log(`CORE_TOOLS_STATUS=${plan.prereq.coreToolsOk ? "ok" : "missing"}`);
         console.log(`MISSING_REQUIRED_TOOLS=${plan.prereq.missingRequired.join(",")}`);
+        console.log(`ANCHOR_SYNC_STATUS=${plan.anchorSync.status === "ok" ? "would-run" : plan.anchorSync.status}`);
+        if (plan.anchorSync.reason) {
+          console.log(`ANCHOR_SYNC_REASON=${plan.anchorSync.reason}`);
+        }
+        if (plan.anchorSync.remoteUrl) {
+          console.log(`ANCHOR_SYNC_REMOTE_URL=${plan.anchorSync.remoteUrl}`);
+        }
         console.log(`WORKER_BACKEND_COMMAND=${plan.prereq.workerCommand}`);
         console.log(`WORKER_BACKEND_STATUS=${plan.prereq.workerAvailable ? "ok" : "missing"}`);
         console.log(`GITHUB_AUTH_STATUS=${plan.prereq.ghAuthOk ? "ok" : "not-ready"}`);
@@ -1686,6 +1806,16 @@ async function runSetupFlow(forwardedArgs) {
     prereq = collectPrereqStatus(config.codingWorker);
 
     const scopedContext = buildScopedContext(context, config.profileId);
+    const anchorSync = buildAnchorSyncDecision(options, config.paths.sourceRepoRoot);
+
+    if (anchorSync.status === "deferred") {
+      console.log("\nAnchor repo sync will be deferred for this setup run.");
+      if (anchorSync.remoteUrl) {
+        console.log(`- remote: ${anchorSync.remoteUrl}`);
+      }
+      console.log(`- reason: ${anchorSync.reason}`);
+      console.log("- next step: authenticate Git access or fix the repo remote, then rerun `setup` or `init` without skipping anchor sync.");
+    }
 
     runSetupStep(scopedContext, "Sync packaged runtime into ~/.agent-runtime", "tools/bin/sync-shared-agent-home.sh", []);
 
@@ -1704,7 +1834,7 @@ async function runSetupFlow(forwardedArgs) {
     if (options.force) {
       initArgs.push("--force");
     }
-    if (options.skipAnchorSync) {
+    if (anchorSync.skipAnchorSync) {
       initArgs.push("--skip-anchor-sync");
     }
     if (options.skipWorkspaceSync) {
@@ -1731,6 +1861,9 @@ async function runSetupFlow(forwardedArgs) {
       } else if (!prereq.workerAvailable) {
         runtimeStartReason = `missing-worker:${prereq.workerCommand}`;
         console.log(`runtime start skipped: ${prereq.workerCommand} is not available on PATH`);
+      } else if (anchorSync.status !== "ok") {
+        runtimeStartReason = `anchor-sync-${anchorSync.reason}`;
+        console.log("runtime start skipped: ACP deferred anchor repo sync for this setup run.");
       } else if (!prereq.ghAuthOk) {
         runtimeStartReason = "gh-auth-not-ready";
         console.log("runtime start skipped: GitHub CLI is not authenticated yet. Run `gh auth login` and start the runtime afterwards.");
@@ -1760,6 +1893,7 @@ async function runSetupFlow(forwardedArgs) {
     }
 
     const finalFixup = await maybeRunFinalSetupFixups(options, scopedContext, config, {
+      anchorSync,
       prereq,
       dependencyInstall,
       githubAuthStep,
@@ -1796,6 +1930,9 @@ async function runSetupFlow(forwardedArgs) {
       worktreeRoot: config.paths.worktreeRoot,
       coreToolsStatus: prereq.coreToolsOk ? "ok" : "missing",
       missingRequiredTools: prereq.missingRequired,
+      anchorSyncStatus: anchorSync.status,
+      anchorSyncReason: anchorSync.reason || "",
+      anchorSyncRemoteUrl: anchorSync.remoteUrl || "",
       workerBackendCommand: prereq.workerCommand,
       workerBackendStatus: prereq.workerAvailable ? "ok" : "missing",
       workerSetupGuideStatus: workerSetupStep.status,
@@ -1846,6 +1983,13 @@ async function runSetupFlow(forwardedArgs) {
       console.log(`CODING_WORKER=${config.codingWorker}`);
       console.log(`CORE_TOOLS_STATUS=${prereq.coreToolsOk ? "ok" : "missing"}`);
       console.log(`MISSING_REQUIRED_TOOLS=${prereq.missingRequired.join(",")}`);
+      console.log(`ANCHOR_SYNC_STATUS=${anchorSync.status}`);
+      if (anchorSync.reason) {
+        console.log(`ANCHOR_SYNC_REASON=${anchorSync.reason}`);
+      }
+      if (anchorSync.remoteUrl) {
+        console.log(`ANCHOR_SYNC_REMOTE_URL=${anchorSync.remoteUrl}`);
+      }
       console.log(`WORKER_BACKEND_COMMAND=${prereq.workerCommand}`);
       console.log(`WORKER_BACKEND_STATUS=${prereq.workerAvailable ? "ok" : "missing"}`);
       console.log(`WORKER_SETUP_GUIDE_STATUS=${workerSetupStep.status}`);

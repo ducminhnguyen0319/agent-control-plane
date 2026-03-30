@@ -302,6 +302,9 @@ During `setup`, ACP can:
   `openclaw` when ACP knows a safe install command, and otherwise show
   backend-specific next steps, install/auth/verify examples, and a docs URL it
   can open for you on interactive machines
+- defer anchor repo sync automatically when ACP can scaffold the profile but
+  cannot reach the repo remote yet, so setup can still finish with a clear
+  follow-up instead of failing half way through
 - run one final fix-up summary at the end so you can clear whatever is still
   red instead of guessing which step to retry next
 - scaffold the profile, run doctor checks, and optionally start the runtime in
@@ -550,6 +553,9 @@ Use `--purge-paths` only when you want ACP-managed directories removed too.
   `launchd-uninstall`, and `remove`.
 - `gh` cannot access the repo
   Re-run `gh auth login` and confirm the repo slug in the profile is correct.
+- setup deferred anchor repo sync
+  ACP could not reach the repo remote yet. Fix Git access or the remote URL,
+  then rerun `setup` or `init` without `--skip-anchor-sync`.
 - backend auth failures from `codex`, `claude`, or `openclaw`
   Authenticate that backend before starting ACP in the background.
 - `node` is older than `18`

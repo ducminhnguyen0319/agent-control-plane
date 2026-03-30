@@ -206,6 +206,26 @@ grep -q '^RUNTIME_START_STATUS=skipped$' <<<"${setup_output}"
 grep -q '^RUNTIME_START_REASON=not-requested$' <<<"${setup_output}"
 test -f "${platform_home}/control-plane/profiles/setup-demo/control-plane.yaml"
 
+setup_deferred_output="$(
+  HOME="${home_dir}" \
+  AGENT_PLATFORM_HOME="${platform_home}" \
+  PATH="${fake_bin}:${PATH}" \
+  node "${CLI_SCRIPT}" setup \
+    --non-interactive \
+    --repo-root "${setup_repo}" \
+    --profile-id deferred-demo \
+    --no-start-runtime \
+    --skip-workspace-sync
+)"
+
+grep -q '^SETUP_STATUS=ok$' <<<"${setup_deferred_output}"
+grep -q '^PROFILE_ID=deferred-demo$' <<<"${setup_deferred_output}"
+grep -q '^ANCHOR_SYNC_STATUS=deferred$' <<<"${setup_deferred_output}"
+grep -q '^ANCHOR_SYNC_REASON=' <<<"${setup_deferred_output}"
+grep -q '^PROJECT_INIT_STATUS=ok$' <<<"${setup_deferred_output}"
+grep -q '^DOCTOR_STATUS=ok$' <<<"${setup_deferred_output}"
+test -f "${platform_home}/control-plane/profiles/deferred-demo/control-plane.yaml"
+
 setup_dry_run_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
@@ -248,6 +268,28 @@ printf '%s' "${setup_json_output}" | node -e '
   if (data.projectInitStatus !== "ok") process.exit(1);
   if (data.doctorStatus !== "ok") process.exit(1);
   if (!data.workerBackend || !data.githubAuth || !data.finalFixup) process.exit(1);
+'
+
+setup_deferred_json_output="$(
+  HOME="${home_dir}" \
+  AGENT_PLATFORM_HOME="${platform_home}" \
+  PATH="${fake_bin}:${PATH}" \
+  node "${CLI_SCRIPT}" setup \
+    --json \
+    --repo-root "${setup_repo}" \
+    --profile-id deferred-json \
+    --no-start-runtime \
+    --skip-workspace-sync
+)"
+
+printf '%s' "${setup_deferred_json_output}" | node -e '
+  const fs = require("fs");
+  const data = JSON.parse(fs.readFileSync(0, "utf8"));
+  if (data.setupStatus !== "ok") process.exit(1);
+  if (!data.anchorSync) process.exit(1);
+  if (data.anchorSync.status !== "deferred") process.exit(1);
+  if (!data.anchorSync.reason) process.exit(1);
+  if (data.projectInitStatus !== "ok") process.exit(1);
 '
 
 setup_dry_run_json_output="$(
