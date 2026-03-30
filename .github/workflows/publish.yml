@@ -1,0 +1,82 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: "Git ref to publish, usually a tag like v0.1.7"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.git_ref || github.ref }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tmux
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Show tool versions
+        run: |
+          node --version
+          npm --version
+          python3 --version
+          tmux -V
+
+      - name: Verify tag matches package version
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_tag="$(git describe --tags --exact-match)"
+          expected_tag="v$(node -p "require('./package.json').version")"
+          if [[ "${actual_tag}" != "${expected_tag}" ]]; then
+            echo "expected tag ${expected_tag}, got ${actual_tag}" >&2
+            exit 1
+          fi
+
+      - name: Verify public package metadata
+        run: bash tools/tests/test-package-public-metadata.sh
+
+      - name: Verify package tarball surface
+        run: bash tools/tests/test-package-tarball-surface.sh
+
+      - name: Verify funding metadata
+        run: bash tools/tests/test-package-funding-metadata.sh
+
+      - name: Verify contribution docs
+        run: bash tools/tests/test-contribution-docs.sh
+
+      - name: Verify public repo docs
+        run: bash tools/tests/test-public-repo-docs.sh
+
+      - name: Run npm tests
+        run: npm test
+
+      - name: Run smoke suite
+        run: bash tools/bin/test-smoke.sh
+
+      - name: Check package tarball
+        run: npm pack --dry-run
+
+      - name: Publish to npm
+        run: npm publish --provenance --access public

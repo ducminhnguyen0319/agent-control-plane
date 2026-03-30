@@ -33,6 +33,8 @@ Canonical documentation sources inside `agent-control-plane`:
   Reusable markdown template for GitHub release notes.
 - `.github/workflows/ci.yml`
   Public CI workflow used for the README status badge.
+- `.github/workflows/publish.yml`
+  Trusted npm publishing workflow used for tag-driven releases with provenance.
 - `references/repo-map.md`
   Layout of the control-plane repository itself.
 

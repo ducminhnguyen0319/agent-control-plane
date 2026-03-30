@@ -7,6 +7,16 @@ layout for public releases.
 
 ## [Unreleased]
 
+### Added
+
+- GitHub Actions trusted publishing workflow for tag-driven npm releases without
+  local OTP prompts
+
+### Changed
+
+- maintainer release docs now point to trusted publishing through
+  `.github/workflows/publish.yml` instead of local `npm publish`
+
 ## [0.1.7] - 2026-03-30
 
 ### Fixed

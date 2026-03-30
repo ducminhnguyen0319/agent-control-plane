@@ -33,23 +33,34 @@ npm pack --dry-run
 
 ## Publish
 
-Recommended command flow:
+Recommended release flow uses npm trusted publishing from GitHub Actions, so you
+do not have to enter an OTP during every local publish.
+
+One-time setup:
+
+- configure `agent-control-plane` for npm trusted publishing from
+  `ducminhnguyen0319/agent-control-plane`
+- verify the publish workflow file is `.github/workflows/publish.yml`
+- keep npm package publishing policy on the stricter setting you want after
+  trusted publishing is working
+
+Per-release command flow:
 
 ```bash
-npm login
 npm version <patch|minor|major>
 git push origin main --follow-tags
-npm publish --access public
 ```
 
 Then:
 
-- create a GitHub release using `.github/release-template.md`
+- watch `.github/workflows/publish.yml` for the npm publish run
+- create or update a GitHub release using `.github/release-template.md`
 - update `CHANGELOG.md` if the final shipped notes differ from the draft
 
 ## Post-Release
 
 - verify `npx agent-control-plane@latest help` works from a clean shell
+- verify the npm package shows provenance for the new version
 - verify `npm fund` shows the expected sponsor link
 - verify the repo README, sponsor button, and package metadata all point to the
   same maintainer identity
