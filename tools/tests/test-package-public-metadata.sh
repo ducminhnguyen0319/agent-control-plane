@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+PACKAGE_JSON="$ROOT_DIR/package.json"
+
+node -e '
+const fs = require("fs");
+const pkg = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+
+if (!pkg.description || !pkg.description.includes("running reliably without constant human babysitting")) {
+  process.exit(1);
+}
+if (pkg.license !== "MIT") {
+  process.exit(2);
+}
+for (const keyword of ["agents", "dashboard", "runtime"]) {
+  if (!Array.isArray(pkg.keywords) || !pkg.keywords.includes(keyword)) {
+    process.exit(3);
+  }
+}
+if (!Array.isArray(pkg.files) || !pkg.files.includes("assets/workflow-catalog.json")) {
+  process.exit(4);
+}
+if (pkg.files.includes("assets")) {
+  process.exit(5);
+}
+if (!pkg.directories || pkg.directories.bin !== "npm/public-bin") {
+  process.exit(6);
+}
+if (!Array.isArray(pkg.files) || !pkg.files.includes("npm/public-bin")) {
+  process.exit(7);
+}
+if (pkg.bin) {
+  process.exit(8);
+}
+for (const bundledPath of [
+  "tools/vendor/codex-quota/codex-quota.js",
+  "tools/vendor/codex-quota/lib",
+  "tools/vendor/codex-quota-manager/scripts"
+]) {
+  if (!pkg.files.includes(bundledPath)) {
+    process.exit(9);
+  }
+}
+' "$PACKAGE_JSON"
+
+test -f "$ROOT_DIR/LICENSE"
+grep -q '^MIT License$' "$ROOT_DIR/LICENSE"
+test -f "$ROOT_DIR/npm/public-bin/agent-control-plane"
+test -x "$ROOT_DIR/npm/public-bin/agent-control-plane"
+
+echo "package public metadata test passed"

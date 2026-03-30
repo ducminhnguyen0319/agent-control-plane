@@ -1,0 +1,247 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-cleanup-worktree --branch <branch-name> [--merged-base <ref>] [--path <worktree-path>] [--remote <name>] [--keep-remote] [--allow-unmerged] [--dry-run]
+
+Safely cleans up a dedicated task branch/worktree:
+  - optionally prunes remote refs
+  - by default verifies the branch is merged into the base ref
+  - removes the dedicated worktree
+  - deletes the local branch
+  - deletes the remote branch if it still exists unless --keep-remote is set
+
+Run this from a retained checkout, not from the task worktree being removed.
+EOF
+}
+
+branch_name=""
+merged_base=""
+worktree_path=""
+remote_name="origin"
+keep_remote="false"
+allow_unmerged="false"
+dry_run="false"
+branch_delete_flag="-d"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --branch) branch_name="${2:-}"; shift 2 ;;
+    --merged-base) merged_base="${2:-}"; shift 2 ;;
+    --path) worktree_path="${2:-}"; shift 2 ;;
+    --remote) remote_name="${2:-}"; shift 2 ;;
+    --keep-remote) keep_remote="true"; shift ;;
+    --allow-unmerged) allow_unmerged="true"; shift ;;
+    --dry-run) dry_run="true"; shift ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$branch_name" ]]; then
+  echo "--branch is required" >&2
+  usage >&2
+  exit 1
+fi
+
+if [[ "$branch_name" == "main" || "$branch_name" == "master" ]]; then
+  echo "[agent-cleanup] Refusing to clean up protected branch: $branch_name" >&2
+  exit 1
+fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+git_common_dir="$(cd "$(git rev-parse --git-common-dir)" && pwd)"
+source_root="$(dirname "$git_common_dir")"
+current_branch="$(git rev-parse --abbrev-ref HEAD)"
+current_worktree_root="$repo_root"
+local_branch_exists="false"
+remote_branch_exists="false"
+
+if [[ -z "$merged_base" ]]; then
+  remote_head="$(git symbolic-ref --quiet --short refs/remotes/${remote_name}/HEAD 2>/dev/null || true)"
+  if [[ -n "$remote_head" ]]; then
+    merged_base="${remote_head#${remote_name}/}"
+    merged_base="${remote_name}/${merged_base}"
+  elif git show-ref --verify --quiet "refs/remotes/${remote_name}/main"; then
+    merged_base="${remote_name}/main"
+  elif git show-ref --verify --quiet "refs/heads/main"; then
+    merged_base="main"
+  else
+    merged_base="HEAD"
+  fi
+fi
+
+canonicalize_existing_dir() {
+  local target="$1"
+  if [[ ! -d "$target" ]]; then
+    return 1
+  fi
+  (
+    cd "$target"
+    pwd -P
+  )
+}
+
+prune_worktree_runtime_artifacts() {
+  local target="${1:?target worktree required}"
+  local candidate=""
+  local -a paths=(
+    "$target/.openclaw-artifacts"
+    "$target/node_modules"
+    "$target/apps/api/node_modules"
+    "$target/apps/mobile/node_modules"
+    "$target/apps/web/node_modules"
+  )
+
+  if [[ -d "$target/packages" ]]; then
+    while IFS= read -r candidate; do
+      paths+=("$candidate")
+    done < <(find "$target/packages" -mindepth 2 -maxdepth 2 -type d -name node_modules | sort)
+  fi
+
+  for candidate in "${paths[@]}"; do
+    [[ -e "$candidate" ]] || continue
+    rm -rf "$candidate"
+  done
+}
+
+resolve_branch_worktree_path() {
+  local line=""
+  local worktree=""
+  local branch=""
+  local ref="refs/heads/${branch_name}"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ -z "$line" ]]; then
+      if [[ "$branch" == "$ref" ]]; then
+        printf '%s\n' "$worktree"
+        return 0
+      fi
+      worktree=""
+      branch=""
+      continue
+    fi
+    case "$line" in
+      worktree\ *) worktree="${line#worktree }" ;;
+      branch\ *) branch="${line#branch }" ;;
+    esac
+  done < <(git worktree list --porcelain)
+  if [[ "$branch" == "$ref" ]]; then
+    printf '%s\n' "$worktree"
+  fi
+}
+
+if [[ "$current_branch" == "$branch_name" ]]; then
+  echo "[agent-cleanup] Refusing to clean up the branch currently checked out: $branch_name" >&2
+  exit 1
+fi
+
+if git show-ref --verify --quiet "refs/heads/${branch_name}"; then
+  local_branch_exists="true"
+fi
+
+resolved_branch_worktree_path=""
+if [[ -z "$worktree_path" ]]; then
+  worktree_path="$(resolve_branch_worktree_path || true)"
+  resolved_branch_worktree_path="$worktree_path"
+else
+  resolved_branch_worktree_path="$(resolve_branch_worktree_path || true)"
+  if [[ -z "$resolved_branch_worktree_path" ]]; then
+    echo "[agent-cleanup] Branch $branch_name is not associated with a dedicated worktree." >&2
+    echo "[agent-cleanup] Refusing to trust explicit --path '$worktree_path' without a Git-resolved branch worktree." >&2
+    exit 1
+  fi
+
+  explicit_canonical_path="$(canonicalize_existing_dir "$worktree_path" || true)"
+  branch_canonical_path="$(canonicalize_existing_dir "$resolved_branch_worktree_path" || true)"
+  if [[ -z "$explicit_canonical_path" ]]; then
+    echo "[agent-cleanup] Explicit --path '$worktree_path' does not exist as a directory." >&2
+    exit 1
+  fi
+  if [[ -z "$branch_canonical_path" ]]; then
+    echo "[agent-cleanup] Git resolved branch worktree '$resolved_branch_worktree_path' does not exist as a directory." >&2
+    exit 1
+  fi
+  if [[ "$explicit_canonical_path" != "$branch_canonical_path" ]]; then
+    echo "[agent-cleanup] Explicit --path '$worktree_path' does not match the worktree Git associates with branch '$branch_name' ('$resolved_branch_worktree_path')." >&2
+    exit 1
+  fi
+  worktree_path="$branch_canonical_path"
+fi
+
+if [[ "$dry_run" != "true" && "$remote_name" != "" ]]; then
+  git fetch --prune "$remote_name"
+fi
+
+if git show-ref --verify --quiet "refs/remotes/${remote_name}/${branch_name}"; then
+  remote_branch_exists="true"
+fi
+
+if [[ "$allow_unmerged" != "true" && "$local_branch_exists" == "true" ]]; then
+  if ! git merge-base --is-ancestor "$branch_name" "$merged_base"; then
+    echo "[agent-cleanup] Branch $branch_name is not merged into $merged_base" >&2
+    exit 1
+  fi
+fi
+
+if [[ "$allow_unmerged" == "true" ]]; then
+  branch_delete_flag="-D"
+fi
+
+if [[ -n "$worktree_path" && "$worktree_path" == "$current_worktree_root" ]]; then
+  echo "[agent-cleanup] Refusing to remove the current worktree: $worktree_path" >&2
+  exit 1
+fi
+
+if [[ -n "$worktree_path" ]]; then
+  canonical_worktree_path="$(canonicalize_existing_dir "$worktree_path" || true)"
+  if [[ -n "$canonical_worktree_path" && "$canonical_worktree_path" == "$source_root" ]]; then
+    echo "[agent-cleanup] Refusing to remove the canonical source checkout: $canonical_worktree_path" >&2
+    exit 1
+  fi
+fi
+
+if [[ "$dry_run" == "true" ]]; then
+  if [[ -n "$worktree_path" ]]; then
+    echo "git worktree remove --force '$worktree_path'"
+  fi
+  if [[ "$local_branch_exists" == "true" ]]; then
+    echo "git branch $branch_delete_flag '$branch_name'"
+  fi
+  if [[ "$remote_branch_exists" == "true" && "$keep_remote" != "true" ]]; then
+    echo "git push '$remote_name' --delete '$branch_name'"
+  fi
+  if [[ "$remote_name" != "" ]]; then
+    echo "git fetch --prune '$remote_name'"
+  fi
+  exit 0
+fi
+
+if [[ -n "$worktree_path" ]]; then
+  prune_worktree_runtime_artifacts "$worktree_path"
+  (
+    cd "$source_root"
+    git worktree remove --force "$worktree_path"
+  )
+fi
+if [[ "$local_branch_exists" == "true" ]]; then
+  git branch "$branch_delete_flag" "$branch_name"
+fi
+if [[ "$remote_branch_exists" == "true" && "$keep_remote" != "true" ]]; then
+  remote_delete_output="$(git push "$remote_name" --delete "$branch_name" 2>&1)" || remote_delete_status=$?
+  remote_delete_status="${remote_delete_status:-0}"
+  if [[ "$remote_delete_status" -ne 0 ]]; then
+    if rg -q "remote ref does not exist|unable to delete" <<<"$remote_delete_output"; then
+      :
+    else
+      printf '%s\n' "$remote_delete_output" >&2
+      exit "$remote_delete_status"
+    fi
+  fi
+fi
+if [[ "$remote_name" != "" ]]; then
+  git fetch --prune "$remote_name"
+fi
+
+echo "[agent-cleanup] cleanup complete for $branch_name"

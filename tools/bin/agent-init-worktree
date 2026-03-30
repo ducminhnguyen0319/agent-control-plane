@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-init-worktree --branch <branch-name> --claim <task-id> [--base <ref>] [--path <worktree-path>] [--allow-unclaimed] [--no-bootstrap-deps] [--dry-run]
+
+Creates a dedicated agent branch + worktree and writes a namespaced env file:
+  .agent-session.env
+
+Options:
+  --branch <name>      Required branch name for the task
+  --base <ref>         Base ref for a new branch (default: remote HEAD, else origin/main, else main, else HEAD)
+  --path <path>        Explicit worktree path
+  --claim <task-id>    Required shared task claim, e.g. change-id:2.1
+  --allow-unclaimed    Explicitly allow bootstrap without a claim
+  --no-bootstrap-deps  Skip node_modules linking for the new worktree
+  --dry-run            Print actions without creating anything
+  --help               Show this help
+EOF
+}
+
+branch_name=""
+base_ref=""
+worktree_path=""
+claim_task_id=""
+bootstrap_deps="true"
+allow_unclaimed="false"
+dry_run="false"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --branch) branch_name="${2:-}"; shift 2 ;;
+    --base) base_ref="${2:-}"; shift 2 ;;
+    --path) worktree_path="${2:-}"; shift 2 ;;
+    --claim) claim_task_id="${2:-}"; shift 2 ;;
+    --allow-unclaimed) allow_unclaimed="true"; shift ;;
+    --no-bootstrap-deps) bootstrap_deps="false"; shift ;;
+    --dry-run) dry_run="true"; shift ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$branch_name" ]]; then
+  echo "--branch is required" >&2
+  usage >&2
+  exit 1
+fi
+
+if [[ "$branch_name" == "main" || "$branch_name" == "master" ]]; then
+  echo "[agent-init] Refusing to bootstrap protected branch: $branch_name" >&2
+  echo "[agent-init] Keep the retained checkout on $branch_name read-only for inspection only." >&2
+  echo "[agent-init] Create a dedicated task branch/worktree before doing any write work." >&2
+  exit 1
+fi
+
+if [[ -z "$claim_task_id" && "$allow_unclaimed" != "true" ]]; then
+  echo "--claim is required for agent task worktrees. Use --allow-unclaimed only for exceptional preserve/review cases." >&2
+  usage >&2
+  exit 1
+fi
+
+if [[ -z "$base_ref" ]]; then
+  remote_name="origin"
+  remote_head="$(git symbolic-ref --quiet --short "refs/remotes/${remote_name}/HEAD" 2>/dev/null || true)"
+  if [[ -n "$remote_head" ]]; then
+    base_ref="${remote_head}"
+  elif git show-ref --verify --quiet "refs/remotes/${remote_name}/main"; then
+    base_ref="${remote_name}/main"
+  elif git show-ref --verify --quiet "refs/heads/main"; then
+    base_ref="main"
+  else
+    base_ref="HEAD"
+  fi
+fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+git_common_dir="$(cd "$(git rev-parse --git-common-dir)" && pwd)"
+source_root="$(dirname "$git_common_dir")"
+repo_name="$(basename "$source_root")"
+repo_parent="$(dirname "$source_root")"
+
+branch_slug="$(
+  printf '%s' "$branch_name" |
+    tr '[:upper:]' '[:lower:]' |
+    sed 's#[^a-z0-9._/-]#-#g; s#/#-#g; s/-\{2,\}/-/g; s/^-//; s/-$//'
+)"
+
+if [[ -z "$branch_slug" ]]; then
+  echo "Failed to derive branch slug from: $branch_name" >&2
+  exit 1
+fi
+
+if [[ -z "$worktree_path" ]]; then
+  worktree_path="${repo_parent}/${repo_name}-${branch_slug}"
+fi
+
+namespace="$(
+  printf '%s' "$branch_slug" |
+    sed 's/[^a-z0-9]/-/g; s/-\{2,\}/-/g; s/^-//; s/-$//' |
+    cut -c1-24
+)"
+
+if [[ -z "$namespace" ]]; then
+  namespace="agent-local"
+fi
+
+run_id_raw="${AO_SESSION_ID:-${branch_slug}-$$}"
+env_file="${worktree_path}/.agent-session.env"
+
+branch_exists="false"
+if git show-ref --verify --quiet "refs/heads/${branch_name}"; then
+  branch_exists="true"
+fi
+
+if [[ -e "$worktree_path" ]]; then
+  echo "Worktree path already exists: $worktree_path" >&2
+  exit 1
+fi
+
+cat <<EOF
+[agent-init] repo=$repo_root
+[agent-init] source_root=$source_root
+[agent-init] branch=$branch_name
+[agent-init] base_ref=$base_ref
+[agent-init] worktree_path=$worktree_path
+[agent-init] test_namespace=$namespace
+[agent-init] branch_exists=$branch_exists
+[agent-init] bootstrap_deps=$bootstrap_deps
+[agent-init] claim_task_id=${claim_task_id:-<none>}
+[agent-init] allow_unclaimed=$allow_unclaimed
+EOF
+
+if [[ "$dry_run" == "true" ]]; then
+  echo "[agent-init] dry-run only"
+  echo
+  echo "Planned commands:"
+  if [[ "$branch_exists" == "false" ]]; then
+    echo "  git worktree add -b $branch_name $worktree_path $base_ref"
+  else
+    echo "  git worktree add $worktree_path $branch_name"
+  fi
+  cat <<EOF
+
+Planned env file: $env_file
+  export AGENT_TASK_BRANCH='$branch_name'
+  export AGENT_WORKTREE_PATH='$worktree_path'
+  export TEST_RUN_ID='$run_id_raw'
+  export API_TEST_RUN_ID='$run_id_raw'
+  export TEST_SEED_NAMESPACE='$namespace'
+  export E2E_SEED_NAMESPACE='$namespace'
+  export MOBILE_SEED_NAMESPACE='$namespace'
+EOF
+  if [[ "$bootstrap_deps" == "true" ]]; then
+    echo "  agent-bootstrap-worktree --source-root '$source_root' --path '$worktree_path'"
+  fi
+  if [[ -n "$claim_task_id" ]]; then
+    echo "  agent-claim-task --task '$claim_task_id' --branch '$branch_name' --worktree '$worktree_path'"
+  fi
+  exit 0
+fi
+
+if [[ "$branch_exists" == "true" ]]; then
+  git worktree add "$worktree_path" "$branch_name"
+else
+  git worktree add -b "$branch_name" "$worktree_path" "$base_ref"
+fi
+
+cat >"$env_file" <<EOF
+export AGENT_TASK_BRANCH='$branch_name'
+export AGENT_WORKTREE_PATH='$worktree_path'
+export TEST_RUN_ID='$run_id_raw'
+export API_TEST_RUN_ID='$run_id_raw'
+export TEST_SEED_NAMESPACE='$namespace'
+export E2E_SEED_NAMESPACE='$namespace'
+export MOBILE_SEED_NAMESPACE='$namespace'
+EOF
+
+if [[ -n "$claim_task_id" ]]; then
+  printf "export AGENT_TASK_CLAIM='%s'\n" "$claim_task_id" >>"$env_file"
+fi
+
+if [[ "$bootstrap_deps" == "true" ]]; then
+  agent-bootstrap-worktree \
+    --source-root "$source_root" \
+    --path "$worktree_path"
+fi
+
+if [[ -n "$claim_task_id" ]]; then
+  agent-claim-task \
+    --task "$claim_task_id" \
+    --branch "$branch_name" \
+    --worktree "$worktree_path"
+fi
+
+if [[ -f "$HOME/.ao/bin/ao-metadata-helper.sh" ]]; then
+  # shellcheck source=/dev/null
+  source "$HOME/.ao/bin/ao-metadata-helper.sh" || true
+  if declare -F update_ao_metadata >/dev/null 2>&1; then
+    update_ao_metadata branch "$branch_name" || true
+    update_ao_metadata worktree "$worktree_path" || true
+    update_ao_metadata test_seed_namespace "$namespace" || true
+  fi
+fi
+
+cat <<EOF
+[agent-init] created worktree: $worktree_path
+[agent-init] wrote env file: $env_file
+$(if [[ -n "$claim_task_id" ]]; then printf "[agent-init] claimed task: %s\n" "$claim_task_id"; fi)
+
+Next:
+  cd '$worktree_path'
+  source .agent-session.env
+EOF

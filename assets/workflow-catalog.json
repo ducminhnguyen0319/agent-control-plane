@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "control_plane": "agent-control-plane",
+  "default_profile": null,
+  "profile_selection": "explicit",
+  "workflows": [
+    {
+      "id": "issue-implementation",
+      "kind": "issue",
+      "trigger": "Open issue with agent-ready and without agent-running/agent-blocked",
+      "entrypoint": "tools/bin/start-issue-worker.sh",
+      "summary": "Primary implementation loop for focused issues that should end in a PR or a blocked report."
+    },
+    {
+      "id": "issue-blocked-recovery",
+      "kind": "issue",
+      "trigger": "Open issue with agent-blocked plus retry-state reason after cooldown",
+      "entrypoint": "tools/bin/start-issue-worker.sh",
+      "summary": "Retries previously blocked issue sessions in a controlled lane without mixing them with fresh intake."
+    },
+    {
+      "id": "issue-scheduled-check",
+      "kind": "issue",
+      "trigger": "Issue body contains Agent schedule/ Schedule/ Cadence metadata",
+      "entrypoint": "tools/bin/start-issue-worker.sh",
+      "summary": "Runs recurring health, checks, or smoke-style verification and updates status labels instead of shipping product changes."
+    },
+    {
+      "id": "pr-review",
+      "kind": "pull_request",
+      "trigger": "Agent-managed PR becomes eligible for double-check, human-review, or automerge decisioning",
+      "entrypoint": "tools/bin/start-pr-review-worker.sh",
+      "summary": "Evaluates final-review state and advances merge, double-check, or human-review lanes."
+    },
+    {
+      "id": "pr-fix",
+      "kind": "pull_request",
+      "trigger": "Agent-managed PR has actionable review feedback, host blocker, broad scope, or failing branch-local checks",
+      "entrypoint": "tools/bin/start-pr-fix-worker.sh",
+      "summary": "Launches a repair pass for PRs that still need code changes on the current head."
+    },
+    {
+      "id": "pr-merge-repair",
+      "kind": "pull_request",
+      "trigger": "Agent-managed PR has mergeStateStatus DIRTY",
+      "entrypoint": "tools/bin/start-pr-merge-repair-worker.sh",
+      "summary": "Handles merge-only repair when the PR needs branch reconciliation rather than a normal review fix."
+    },
+    {
+      "id": "follow-up-splitting",
+      "kind": "issue",
+      "trigger": "Issue implementation determines scope should be split into narrower follow-up issues",
+      "entrypoint": "tools/bin/create-follow-up-issue.sh",
+      "summary": "Creates focused follow-up issues and optionally closes the umbrella issue as superseded."
+    }
+  ]
+}

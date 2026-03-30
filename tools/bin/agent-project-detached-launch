@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/flow-config-lib.sh"
+CONFIG_YAML="$(resolve_flow_config_yaml "${BASH_SOURCE[0]}")"
+STATE_ROOT="$(flow_resolve_state_root "${CONFIG_YAML}")"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-project-detached-launch [--pending-key <kind-id>] <name> <command> [args...]
+
+Detach a worker bootstrap command from the current heartbeat process so the
+heartbeat can keep launching additional workers without waiting for expensive
+worktree/bootstrap/setup steps to finish.
+EOF
+}
+
+pending_key=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --pending-key)
+      pending_key="${2:-}"
+      shift 2
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+if [[ $# -lt 2 ]]; then
+  usage >&2
+  exit 1
+fi
+
+launch_name="${1:-}"
+shift
+
+if [[ -z "${launch_name}" ]]; then
+  usage >&2
+  exit 1
+fi
+
+log_root="${ACP_LAUNCHER_LOG_ROOT:-${F_LOSNING_LAUNCHER_LOG_ROOT:-${STATE_ROOT}/launcher-logs}}"
+mkdir -p "${log_root}"
+
+safe_name="$(printf '%s' "${launch_name}" | tr '/[:space:]' '__' | tr -cd '[:alnum:]_.-')"
+if [[ -z "${safe_name}" ]]; then
+  safe_name="launch"
+fi
+
+timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+log_file="${log_root}/${timestamp}-${safe_name}.log"
+pending_file=""
+pending_dir="${ACP_PENDING_LAUNCH_DIR:-${F_LOSNING_PENDING_LAUNCH_DIR:-${STATE_ROOT}/pending-launches}}"
+if [[ -n "${pending_key}" ]]; then
+  mkdir -p "${pending_dir}"
+  pending_file="${pending_dir}/${pending_key}.pid"
+fi
+
+python_bin="${PYTHON_BIN:-$(command -v python3 || true)}"
+if [[ -z "${python_bin}" ]]; then
+  echo "python3 is required for detached launch" >&2
+  exit 1
+fi
+
+launch_pid="$(
+  "${python_bin}" - "${log_file}" "${pending_file}" "$@" <<'PY'
+import subprocess
+import sys
+from pathlib import Path
+
+log_file = Path(sys.argv[1])
+pending_file = sys.argv[2]
+argv = sys.argv[3:]
+
+with log_file.open("ab", buffering=0) as log_handle:
+    proc = subprocess.Popen(
+        argv,
+        stdin=subprocess.DEVNULL,
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+
+if pending_file:
+    Path(pending_file).write_text(f"{proc.pid}\n", encoding="utf-8")
+
+print(proc.pid)
+PY
+)"
+
+printf 'LAUNCH_MODE=detached\n'
+printf 'LAUNCH_NAME=%s\n' "${launch_name}"
+printf 'LAUNCH_PID=%s\n' "${launch_pid}"
+printf 'LAUNCH_LOG=%s\n' "${log_file}"
+if [[ -n "${pending_file}" ]]; then
+  printf 'LAUNCH_PENDING_FILE=%s\n' "${pending_file}"
+fi

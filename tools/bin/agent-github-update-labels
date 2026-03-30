@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/flow-config-lib.sh"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-github-update-labels --repo-slug <owner/repo> --number <issue-or-pr-number> [--add LABEL]... [--remove LABEL]...
+
+Merge requested label adds/removals into the current issue/PR labels and patch
+the final sorted label set back to GitHub.
+EOF
+}
+
+repo_slug=""
+number=""
+add_file="$(mktemp)"
+remove_file="$(mktemp)"
+trap 'rm -f "$add_file" "$remove_file"' EXIT
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo-slug) repo_slug="${2:-}"; shift 2 ;;
+    --number) number="${2:-}"; shift 2 ;;
+    --add)
+      printf '%s\n' "${2:?missing label after --add}" >>"$add_file"
+      shift 2
+      ;;
+    --remove)
+      printf '%s\n' "${2:?missing label after --remove}" >>"$remove_file"
+      shift 2
+      ;;
+    --help|-h) usage; exit 0 ;;
+    *)
+      echo "unknown argument: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ -z "$repo_slug" || -z "$number" ]]; then
+  usage >&2
+  exit 1
+fi
+
+resource="issues/${number}"
+current_json="$(flow_github_api_repo "${repo_slug}" "${resource}")"
+add_json="$(jq -R . <"$add_file" | jq -s .)"
+remove_json="$(jq -R . <"$remove_file" | jq -s .)"
+payload="$(
+  CURRENT_JSON="$current_json" ADD_JSON="$add_json" REMOVE_JSON="$remove_json" node <<'EOF'
+const current = JSON.parse(process.env.CURRENT_JSON || '{}');
+const add = JSON.parse(process.env.ADD_JSON || '[]');
+const remove = new Set(JSON.parse(process.env.REMOVE_JSON || '[]'));
+const labels = new Set((current.labels || []).map((label) => label.name));
+for (const label of remove) labels.delete(label);
+for (const label of add) labels.add(label);
+process.stdout.write(JSON.stringify({ labels: Array.from(labels).sort() }));
+EOF
+)"
+
+printf '%s' "$payload" | flow_github_api_repo "${repo_slug}" "${resource}" --method PATCH --input - >/dev/null

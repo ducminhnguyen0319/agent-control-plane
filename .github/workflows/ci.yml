@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  package-and-docs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tmux
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Show tool versions
+        run: |
+          node --version
+          npm --version
+          python3 --version
+          tmux -V
+
+      - name: Verify public package metadata
+        run: bash tools/tests/test-package-public-metadata.sh
+
+      - name: Verify funding metadata
+        run: bash tools/tests/test-package-funding-metadata.sh
+
+      - name: Verify contribution docs
+        run: bash tools/tests/test-contribution-docs.sh
+
+      - name: Verify public repo docs
+        run: bash tools/tests/test-public-repo-docs.sh
+
+      - name: Run npm tests
+        run: npm test
+
+      - name: Run smoke suite
+        run: bash tools/bin/test-smoke.sh
+
+      - name: Check package tarball
+        run: npm pack --dry-run

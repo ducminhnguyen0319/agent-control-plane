@@ -1,0 +1,797 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Agent Control Plane Architecture Infographics</title>
+    <style>
+      :root {
+        --bg: #f7f1e8;
+        --ink: #13212b;
+        --muted: #556570;
+        --panel: rgba(255, 255, 255, 0.78);
+        --line: rgba(19, 33, 43, 0.12);
+        --teal: #0f766e;
+        --coral: #cf5c36;
+        --gold: #d2a84c;
+        --blue: #2c6aa0;
+        --slate: #304555;
+        --shadow: 0 18px 45px rgba(19, 33, 43, 0.12);
+      }
+
+      @page {
+        size: 1600px 900px;
+        margin: 0;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #e8ddd1;
+        color: var(--ink);
+        font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      }
+
+      body {
+        padding: 32px;
+      }
+
+      .page {
+        position: relative;
+        width: 1600px;
+        height: 900px;
+        margin: 0 auto 28px;
+        overflow: hidden;
+        border-radius: 28px;
+        background:
+          radial-gradient(circle at top right, rgba(210, 168, 76, 0.28), transparent 26%),
+          radial-gradient(circle at left 12% bottom 10%, rgba(15, 118, 110, 0.18), transparent 28%),
+          linear-gradient(140deg, #fcfaf6 0%, #f6ecdf 52%, #eee1d3 100%);
+        box-shadow: 0 20px 50px rgba(19, 33, 43, 0.18);
+        page-break-after: always;
+      }
+
+      .page:last-child {
+        page-break-after: auto;
+      }
+
+      .frame {
+        position: absolute;
+        inset: 18px;
+        border: 1px solid rgba(19, 33, 43, 0.08);
+        border-radius: 22px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 34px 44px 18px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        border-radius: 999px;
+        padding: 8px 14px;
+        background: rgba(19, 33, 43, 0.06);
+        color: var(--slate);
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .eyebrow::before {
+        content: "";
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: var(--coral);
+      }
+
+      .page-number {
+        color: rgba(19, 33, 43, 0.55);
+        font-size: 15px;
+        font-weight: 700;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      .hero {
+        padding: 0 44px;
+        max-width: 1120px;
+      }
+
+      .hero h1 {
+        font-size: 54px;
+        line-height: 1.02;
+        letter-spacing: -0.03em;
+      }
+
+      .hero p {
+        margin-top: 16px;
+        color: var(--muted);
+        font-size: 22px;
+        line-height: 1.45;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 18px;
+        padding: 26px 44px 10px;
+      }
+
+      .stat {
+        border-radius: 22px;
+        padding: 18px 20px;
+        background: rgba(255, 255, 255, 0.66);
+        border: 1px solid rgba(19, 33, 43, 0.08);
+        box-shadow: var(--shadow);
+      }
+
+      .stat .label {
+        color: var(--muted);
+        font-size: 14px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      .stat .value {
+        margin-top: 8px;
+        font-size: 24px;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+      }
+
+      .flow-row {
+        display: grid;
+        grid-template-columns: 1fr 48px 1fr 48px 1fr 48px 1fr 48px 1fr;
+        gap: 0;
+        align-items: center;
+        padding: 28px 44px 0;
+      }
+
+      .arrow {
+        text-align: center;
+        font-size: 34px;
+        color: rgba(19, 33, 43, 0.45);
+        font-weight: 700;
+      }
+
+      .card {
+        min-height: 300px;
+        padding: 22px 22px 18px;
+        border-radius: 26px;
+        background: var(--panel);
+        border: 1px solid rgba(19, 33, 43, 0.08);
+        box-shadow: var(--shadow);
+      }
+
+      .card h3 {
+        font-size: 26px;
+        line-height: 1.1;
+      }
+
+      .card .tag {
+        display: inline-block;
+        margin-bottom: 12px;
+        padding: 7px 11px;
+        border-radius: 999px;
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: white;
+      }
+
+      .tag.teal {
+        background: var(--teal);
+      }
+
+      .tag.coral {
+        background: var(--coral);
+      }
+
+      .tag.gold {
+        background: var(--gold);
+        color: #3d2e07;
+      }
+
+      .tag.blue {
+        background: var(--blue);
+      }
+
+      .tag.slate {
+        background: var(--slate);
+      }
+
+      .card ul,
+      .lane-card ul,
+      .state-card ul,
+      .callout ul {
+        margin: 14px 0 0;
+        padding-left: 18px;
+        color: var(--muted);
+        font-size: 18px;
+        line-height: 1.45;
+      }
+
+      .caption {
+        padding: 18px 44px 0;
+        color: rgba(19, 33, 43, 0.72);
+        font-size: 18px;
+        line-height: 1.45;
+      }
+
+      .loop-layout {
+        display: grid;
+        grid-template-columns: 1.7fr 1fr;
+        gap: 22px;
+        padding: 26px 44px 0;
+      }
+
+      .timeline {
+        position: relative;
+        padding: 24px 24px 24px 42px;
+        border-radius: 28px;
+        background: var(--panel);
+        border: 1px solid rgba(19, 33, 43, 0.08);
+        box-shadow: var(--shadow);
+      }
+
+      .timeline::before {
+        content: "";
+        position: absolute;
+        left: 34px;
+        top: 36px;
+        bottom: 36px;
+        width: 4px;
+        border-radius: 999px;
+        background: linear-gradient(180deg, var(--coral), var(--gold), var(--teal));
+      }
+
+      .step {
+        position: relative;
+        padding: 0 0 18px 34px;
+      }
+
+      .step:last-child {
+        padding-bottom: 0;
+      }
+
+      .step::before {
+        content: attr(data-step);
+        position: absolute;
+        left: -2px;
+        top: -2px;
+        width: 36px;
+        height: 36px;
+        border-radius: 999px;
+        display: grid;
+        place-items: center;
+        background: white;
+        border: 2px solid rgba(19, 33, 43, 0.12);
+        color: var(--ink);
+        font-weight: 800;
+      }
+
+      .step h3 {
+        font-size: 24px;
+        margin-bottom: 8px;
+      }
+
+      .step p {
+        color: var(--muted);
+        font-size: 18px;
+        line-height: 1.45;
+      }
+
+      .lane-stack {
+        display: grid;
+        gap: 16px;
+      }
+
+      .lane-card,
+      .callout,
+      .state-card {
+        border-radius: 24px;
+        padding: 20px 22px;
+        background: var(--panel);
+        border: 1px solid rgba(19, 33, 43, 0.08);
+        box-shadow: var(--shadow);
+      }
+
+      .lane-card h3,
+      .callout h3,
+      .state-card h3 {
+        font-size: 24px;
+        line-height: 1.15;
+      }
+
+      .lane-card p,
+      .callout p,
+      .state-card p {
+        margin-top: 10px;
+        color: var(--muted);
+        font-size: 18px;
+        line-height: 1.42;
+      }
+
+      .lifecycle-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 20px;
+        padding: 28px 44px 0;
+      }
+
+      .stage-column {
+        border-radius: 28px;
+        padding: 22px;
+        background: var(--panel);
+        border: 1px solid rgba(19, 33, 43, 0.08);
+        box-shadow: var(--shadow);
+      }
+
+      .stage-column h3 {
+        font-size: 28px;
+      }
+
+      .mini-step {
+        margin-top: 16px;
+        padding: 14px 14px 14px 16px;
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.78);
+        border: 1px solid rgba(19, 33, 43, 0.08);
+      }
+
+      .mini-step .step-label {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 30px;
+        height: 30px;
+        margin-bottom: 10px;
+        border-radius: 999px;
+        font-size: 14px;
+        font-weight: 800;
+        color: white;
+        background: var(--slate);
+      }
+
+      .mini-step h4 {
+        margin: 0;
+        font-size: 20px;
+        line-height: 1.15;
+      }
+
+      .mini-step p {
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 16px;
+        line-height: 1.42;
+      }
+
+      .state-layout {
+        display: grid;
+        grid-template-columns: 1.2fr 1fr;
+        gap: 22px;
+        padding: 28px 44px 0;
+      }
+
+      .state-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+
+      .path {
+        margin-top: 12px;
+        padding: 10px 12px;
+        border-radius: 14px;
+        background: rgba(19, 33, 43, 0.05);
+        color: var(--slate);
+        font-family: "SFMono-Regular", "Menlo", "Monaco", monospace;
+        font-size: 14px;
+        line-height: 1.45;
+      }
+
+      .pipeline {
+        display: grid;
+        gap: 14px;
+      }
+
+      .pipeline-row {
+        display: grid;
+        grid-template-columns: 1fr 40px 1fr;
+        gap: 10px;
+        align-items: stretch;
+      }
+
+      .pipeline-row .arrow {
+        display: grid;
+        place-items: center;
+        font-size: 28px;
+      }
+
+      .footer-note {
+        position: absolute;
+        left: 44px;
+        right: 44px;
+        bottom: 30px;
+        display: flex;
+        justify-content: space-between;
+        gap: 20px;
+        color: rgba(19, 33, 43, 0.68);
+        font-size: 16px;
+      }
+
+      .footer-note strong {
+        color: var(--ink);
+      }
+
+      @media print {
+        html,
+        body {
+          background: white;
+        }
+
+        body {
+          padding: 0;
+        }
+
+        .page {
+          margin: 0;
+          border-radius: 0;
+          box-shadow: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <section class="page" id="overview-page">
+      <div class="frame"></div>
+      <div class="topbar">
+        <div class="eyebrow">Architecture Overview</div>
+        <div class="page-number">01 / 04</div>
+      </div>
+      <div class="hero">
+        <h1>ACP turns repo automation into an operator-friendly system.</h1>
+        <p>
+          The package stages a shared runtime, installed profiles live outside
+          the package, the heartbeat loop owns workflow control, and reconcile
+          scripts own the final GitHub-facing outcome.
+        </p>
+      </div>
+      <div class="stats">
+        <div class="stat">
+          <div class="label">Package role</div>
+          <div class="value">Distribution + bootstrap</div>
+        </div>
+        <div class="stat">
+          <div class="label">Runtime role</div>
+          <div class="value">Supervisor + scheduler + state</div>
+        </div>
+        <div class="stat">
+          <div class="label">Worker role</div>
+          <div class="value">Produce code + result artifacts</div>
+        </div>
+        <div class="stat">
+          <div class="label">Host workflow role</div>
+          <div class="value">Interpret, publish, recover</div>
+        </div>
+      </div>
+      <div class="flow-row">
+        <div class="card">
+          <div class="tag slate">1. Package</div>
+          <h3>CLI and staged shared-home</h3>
+          <ul>
+            <li><strong>agent-control-plane.js</strong> is the public entrypoint.</li>
+            <li><strong>npx</strong> runs against a staged copy, not a temp cache forever.</li>
+            <li><strong>sync</strong> publishes the durable runtime into <strong>~/.agent-runtime</strong>.</li>
+          </ul>
+        </div>
+        <div class="arrow">-&gt;</div>
+        <div class="card">
+          <div class="tag blue">2. Profiles</div>
+          <h3>Installed profile registry</h3>
+          <ul>
+            <li>Each repo gets one explicit profile identity.</li>
+            <li>Config, prompts, and notes live outside the package.</li>
+            <li>Profiles make ACP reusable across many repos.</li>
+          </ul>
+        </div>
+        <div class="arrow">-&gt;</div>
+        <div class="card">
+          <div class="tag coral">3. Runtime</div>
+          <h3>Supervisor and heartbeat</h3>
+          <ul>
+            <li><strong>runtime start</strong> spins up a long-lived supervisor.</li>
+            <li>The supervisor re-invokes profile bootstrap safely.</li>
+            <li>The shared heartbeat loop decides what to do next.</li>
+          </ul>
+        </div>
+        <div class="arrow">-&gt;</div>
+        <div class="card">
+          <div class="tag teal">4. Workers</div>
+          <h3>Issue and PR sessions</h3>
+          <ul>
+            <li>ACP opens worktrees, renders prompts, and routes backends.</li>
+            <li>Codex, Claude, and OpenClaw fit the same host contract.</li>
+            <li>Workers emit artifacts instead of owning all policy.</li>
+          </ul>
+        </div>
+        <div class="arrow">-&gt;</div>
+        <div class="card">
+          <div class="tag gold">5. Outcomes</div>
+          <h3>Reconcile, GitHub, dashboard</h3>
+          <ul>
+            <li>Reconcile scripts update labels, comments, cooldowns, and history.</li>
+            <li>The dashboard reads state instead of guessing from terminals.</li>
+            <li>Operators get visibility without becoming the scheduler.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-note">
+        <div><strong>Key idea:</strong> ACP keeps intelligence in the workflow around the worker, not only inside the worker CLI.</div>
+        <div>agent-control-plane / architecture deck</div>
+      </div>
+    </section>
+
+    <section class="page" id="runtime-loop-page">
+      <div class="frame"></div>
+      <div class="topbar">
+        <div class="eyebrow">Runtime Scheduler Loop</div>
+        <div class="page-number">02 / 04</div>
+      </div>
+      <div class="hero">
+        <h1>After <code>runtime start</code>, ACP behaves like an operator loop.</h1>
+        <p>
+          The runtime path is designed so the shared scheduler owns concurrency,
+          cooldowns, queue order, recurring lanes, and safe relaunch behavior.
+        </p>
+      </div>
+      <div class="loop-layout">
+        <div class="timeline">
+          <div class="step" data-step="1">
+            <h3>Start a profile runtime</h3>
+            <p><strong>project-runtimectl.sh</strong> selects one installed profile and launches a dedicated supervisor for it.</p>
+          </div>
+          <div class="step" data-step="2">
+            <h3>Keep the runtime alive</h3>
+            <p><strong>project-runtime-supervisor.sh</strong> loops over profile bootstrap so the runtime can recover across passes instead of being a one-shot process.</p>
+          </div>
+          <div class="step" data-step="3">
+            <h3>Bootstrap safely</h3>
+            <p><strong>project-launchd-bootstrap.sh</strong> syncs runtime copies when needed, loads profile env, and invokes the published heartbeat script.</p>
+          </div>
+          <div class="step" data-step="4">
+            <h3>Run the shared heartbeat</h3>
+            <p><strong>heartbeat-safe-auto.sh</strong> handles locks, quota preflight, audits, and then forwards into the shared scheduler loop.</p>
+          </div>
+          <div class="step" data-step="5">
+            <h3>Select work by lane</h3>
+            <p><strong>agent-project-heartbeat-loop</strong> reconciles finished sessions, computes capacity, and chooses issue or PR flows for this pass.</p>
+          </div>
+        </div>
+        <div class="lane-stack">
+          <div class="lane-card">
+            <div class="tag coral">Shared control</div>
+            <h3>What the scheduler decides</h3>
+            <ul>
+              <li>max worker concurrency</li>
+              <li>heavy-worker limits</li>
+              <li>provider cooldown waits</li>
+              <li>blocked-recovery timing</li>
+              <li>recurring and scheduled issue lanes</li>
+            </ul>
+          </div>
+          <div class="lane-card">
+            <div class="tag teal">Workflow lanes</div>
+            <h3>What can launch from one pass</h3>
+            <ul>
+              <li>issue implementation</li>
+              <li>issue scheduled checks</li>
+              <li>issue blocked recovery</li>
+              <li>PR review</li>
+              <li>PR fix and merge repair</li>
+            </ul>
+          </div>
+          <div class="callout">
+            <div class="tag gold">Why this matters</div>
+            <h3>Workers can stay narrower.</h3>
+            <p>
+              ACP does not require every worker backend to understand the whole
+              system. The runtime loop carries policy and recovery so smaller or
+              less sophisticated workers can still succeed inside a stronger host workflow.
+            </p>
+          </div>
+        </div>
+      </div>
+      <div class="footer-note">
+        <div><strong>Control boundary:</strong> worker quality matters, but the scheduler is where reliability is enforced.</div>
+        <div>runtime / scheduler / lanes</div>
+      </div>
+    </section>
+
+    <section class="page" id="worker-lifecycle-page">
+      <div class="frame"></div>
+      <div class="topbar">
+        <div class="eyebrow">Worker Session Lifecycle</div>
+        <div class="page-number">03 / 04</div>
+      </div>
+      <div class="hero">
+        <h1>ACP treats worker execution and final outcome as separate phases.</h1>
+        <p>
+          That split is what lets the host workflow recover from weaker workers,
+          stale state, or provider hiccups without hiding what happened.
+        </p>
+      </div>
+      <div class="lifecycle-grid">
+        <div class="stage-column">
+          <div class="tag slate">ACP launch</div>
+          <h3>1. Pick and prepare work</h3>
+          <div class="mini-step">
+            <div class="step-label">1A</div>
+            <h4>Select issue or PR</h4>
+            <p>The heartbeat chooses an eligible lane and launch target.</p>
+          </div>
+          <div class="mini-step">
+            <div class="step-label">1B</div>
+            <h4>Open or reuse worktree</h4>
+            <p>ACP creates isolated workspaces and enforces guardrails around managed git state.</p>
+          </div>
+          <div class="mini-step">
+            <div class="step-label">1C</div>
+            <h4>Render prompt and context</h4>
+            <p>Templates and issue/PR context become a stable input contract for the worker.</p>
+          </div>
+        </div>
+        <div class="stage-column">
+          <div class="tag teal">Backend session</div>
+          <h3>2. Execute through an adapter</h3>
+          <div class="mini-step">
+            <div class="step-label">2A</div>
+            <h4>Route backend</h4>
+            <p><strong>run-codex-task.sh</strong> forwards the same host contract into Codex, Claude, or OpenClaw wrappers.</p>
+          </div>
+          <div class="mini-step">
+            <div class="step-label">2B</div>
+            <h4>Produce artifacts</h4>
+            <p>Workers leave behind <strong>run.env</strong>, <strong>runner.env</strong>, <strong>result.env</strong>, comments, and verification logs.</p>
+          </div>
+          <div class="mini-step">
+            <div class="step-label">2C</div>
+            <h4>Do not own all policy</h4>
+            <p>The backend can focus on work, while host-side reconcile interprets what those artifacts mean.</p>
+          </div>
+        </div>
+        <div class="stage-column">
+          <div class="tag coral">Host reconcile</div>
+          <h3>3. Interpret and publish</h3>
+          <div class="mini-step">
+            <div class="step-label">3A</div>
+            <h4>Normalize final status</h4>
+            <p>Reconcile scripts classify success, blocked, failure reason, cooldown, and resident metadata.</p>
+          </div>
+          <div class="mini-step">
+            <div class="step-label">3B</div>
+            <h4>Touch GitHub safely</h4>
+            <p>Labels, comments, PR publication, and follow-up actions happen in one host-controlled place.</p>
+          </div>
+          <div class="mini-step">
+            <div class="step-label">3C</div>
+            <h4>Archive and observe</h4>
+            <p>Runs move into history, state stays queryable, and the dashboard reflects the new reality.</p>
+          </div>
+        </div>
+      </div>
+      <div class="footer-note">
+        <div><strong>Host contract:</strong> workers produce evidence; ACP decides the durable operational outcome.</div>
+        <div>launch / execute / reconcile</div>
+      </div>
+    </section>
+
+    <section class="page" id="state-dashboard-page">
+      <div class="frame"></div>
+      <div class="topbar">
+        <div class="eyebrow">State and Visibility</div>
+        <div class="page-number">04 / 04</div>
+      </div>
+      <div class="hero">
+        <h1>The dashboard is read-only visibility over real scheduler state.</h1>
+        <p>
+          ACP keeps durable state in predictable places, then builds the
+          dashboard from those sources instead of inventing a second control path.
+        </p>
+      </div>
+      <div class="state-layout">
+        <div class="state-grid">
+          <div class="state-card">
+            <div class="tag blue">Profile registry</div>
+            <h3>Installed repo identities</h3>
+            <p>Per-repo config and notes live outside the package, so upgrades do not overwrite local operator decisions.</p>
+            <div class="path">~/.agent-runtime/control-plane/profiles/&lt;id&gt;/control-plane.yaml</div>
+          </div>
+          <div class="state-card">
+            <div class="tag teal">Runtime home</div>
+            <h3>Published shared engine</h3>
+            <p>The packaged skill is copied into runtime-home so the machine has one durable source of truth for execution.</p>
+            <div class="path">~/.agent-runtime/runtime-home/skills/openclaw/agent-control-plane</div>
+          </div>
+          <div class="state-card">
+            <div class="tag coral">Runs and state</div>
+            <h3>Per-profile operational memory</h3>
+            <p>Live runs, resident workers, retries, cooldowns, and pending launches sit under each profile's runtime root.</p>
+            <div class="path">.../projects/&lt;profile&gt;/runs and .../projects/&lt;profile&gt;/state</div>
+          </div>
+          <div class="state-card">
+            <div class="tag gold">History</div>
+            <h3>Past sessions stay inspectable</h3>
+            <p>Archived run directories preserve what happened without keeping stale live state around forever.</p>
+            <div class="path">.../projects/&lt;profile&gt;/history</div>
+          </div>
+        </div>
+        <div class="pipeline">
+          <div class="callout">
+            <div class="tag slate">Dashboard pipeline</div>
+            <h3>How the UI gets its truth</h3>
+            <p>
+              <strong>server.py</strong> serves the browser and exposes
+              <strong>/api/snapshot.json</strong>. That snapshot is built from
+              profile registry data, worker status, flow config, runs, and
+              state directories.
+            </p>
+          </div>
+          <div class="pipeline-row">
+            <div class="state-card">
+              <h3>Snapshot inputs</h3>
+              <ul>
+                <li>profile registry</li>
+                <li>render-flow-config.sh</li>
+                <li>agent-project-worker-status</li>
+                <li>runs, state, retries, controllers</li>
+              </ul>
+            </div>
+            <div class="arrow">-&gt;</div>
+            <div class="state-card">
+              <h3>Snapshot payload</h3>
+              <ul>
+                <li>active and recent runs</li>
+                <li>resident controllers</li>
+                <li>provider cooldowns</li>
+                <li>runtime process status</li>
+              </ul>
+            </div>
+          </div>
+          <div class="callout">
+            <div class="tag gold">Trust model</div>
+            <h3>Visibility without drift</h3>
+            <p>
+              Because the dashboard only reads ACP state, it can stay an honest
+              monitoring surface instead of becoming a second scheduler that
+              might disagree with the real runtime.
+            </p>
+          </div>
+        </div>
+      </div>
+      <div class="footer-note">
+        <div><strong>Operator payoff:</strong> you do not have to reconstruct runtime reality from tmux panes, branch names, and filesystem archaeology.</div>
+        <div>state / dashboard / observability</div>
+      </div>
+    </section>
+  </body>
+</html>

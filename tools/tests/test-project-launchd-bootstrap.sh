@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+FLOW_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+BOOTSTRAP_BIN="${FLOW_ROOT}/tools/bin/project-launchd-bootstrap.sh"
+
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+
+home_dir="$tmpdir/home"
+runtime_home="$tmpdir/runtime-home"
+profile_registry_root="$tmpdir/profiles"
+profile_dir="$profile_registry_root/demo"
+capture_dir="$tmpdir/capture"
+sync_script="$tmpdir/sync.sh"
+runtime_heartbeat_script="$runtime_home/skills/openclaw/agent-control-plane/tools/bin/heartbeat-safe-auto.sh"
+env_file="$profile_dir/runtime.env"
+
+mkdir -p "$home_dir" "$profile_dir" "$(dirname "$runtime_heartbeat_script")" "$capture_dir"
+
+cat >"$sync_script" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'SYNC_SOURCE=%s\n' "$1" >"${ACP_PROJECT_RUNTIME_CAPTURE_DIR}/sync.log"
+printf 'SYNC_TARGET=%s\n' "$2" >>"${ACP_PROJECT_RUNTIME_CAPTURE_DIR}/sync.log"
+EOF
+chmod +x "$sync_script"
+
+cat >"$runtime_heartbeat_script" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'PROFILE_ID=%s\n' "${ACP_PROJECT_ID:-}" >"${ACP_PROJECT_RUNTIME_CAPTURE_DIR}/heartbeat.log"
+printf 'PROFILE_REGISTRY_ROOT=%s\n' "${ACP_PROFILE_REGISTRY_ROOT:-}" >>"${ACP_PROJECT_RUNTIME_CAPTURE_DIR}/heartbeat.log"
+printf 'HOME=%s\n' "${HOME:-}" >>"${ACP_PROJECT_RUNTIME_CAPTURE_DIR}/heartbeat.log"
+printf 'PATH=%s\n' "${PATH:-}" >>"${ACP_PROJECT_RUNTIME_CAPTURE_DIR}/heartbeat.log"
+if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
+  printf 'HAS_OPENROUTER_API_KEY=yes\n' >>"${ACP_PROJECT_RUNTIME_CAPTURE_DIR}/heartbeat.log"
+else
+  printf 'HAS_OPENROUTER_API_KEY=no\n' >>"${ACP_PROJECT_RUNTIME_CAPTURE_DIR}/heartbeat.log"
+fi
+EOF
+chmod +x "$runtime_heartbeat_script"
+
+cat >"$env_file" <<'EOF'
+OPENROUTER_API_KEY=test-openrouter-key
+EOF
+
+ACP_PROJECT_RUNTIME_HOME_DIR="$home_dir" \
+ACP_PROJECT_RUNTIME_SOURCE_HOME="$tmpdir/source-home" \
+ACP_PROJECT_RUNTIME_RUNTIME_HOME="$runtime_home" \
+ACP_PROJECT_RUNTIME_PROFILE_REGISTRY_ROOT="$profile_registry_root" \
+ACP_PROJECT_RUNTIME_PROFILE_ID="demo" \
+ACP_PROJECT_RUNTIME_SYNC_SCRIPT="$sync_script" \
+ACP_PROJECT_RUNTIME_HEARTBEAT_SCRIPT="$runtime_heartbeat_script" \
+ACP_PROJECT_RUNTIME_ALWAYS_SYNC=1 \
+ACP_PROJECT_RUNTIME_CAPTURE_DIR="$capture_dir" \
+bash "$BOOTSTRAP_BIN"
+
+grep -q "^SYNC_SOURCE=$tmpdir/source-home$" "$capture_dir/sync.log"
+grep -q "^SYNC_TARGET=$runtime_home$" "$capture_dir/sync.log"
+grep -q '^PROFILE_ID=demo$' "$capture_dir/heartbeat.log"
+grep -q "^PROFILE_REGISTRY_ROOT=$profile_registry_root$" "$capture_dir/heartbeat.log"
+grep -q "^HOME=$home_dir$" "$capture_dir/heartbeat.log"
+grep -q '^HAS_OPENROUTER_API_KEY=yes$' "$capture_dir/heartbeat.log"
+
+echo "project launchd bootstrap test passed"

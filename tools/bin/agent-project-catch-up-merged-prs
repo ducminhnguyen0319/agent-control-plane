@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-project-catch-up-merged-prs --repo-slug <owner/repo> --state-root <path> --hook-file <path> [--limit <n>]
+
+Catch up merge-cleanup for managed PRs that were merged manually after their
+worker session had already been reconciled and cleaned up.
+EOF
+}
+
+repo_slug=""
+state_root=""
+hook_file=""
+limit="100"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo-slug) repo_slug="${2:-}"; shift 2 ;;
+    --state-root) state_root="${2:-}"; shift 2 ;;
+    --hook-file) hook_file="${2:-}"; shift 2 ;;
+    --limit) limit="${2:-}"; shift 2 ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$repo_slug" || -z "$state_root" || -z "$hook_file" ]]; then
+  usage >&2
+  exit 1
+fi
+
+if [[ ! -f "$hook_file" ]]; then
+  echo "missing hook file: $hook_file" >&2
+  exit 1
+fi
+
+# shellcheck source=/dev/null
+source "$hook_file"
+
+optional_hooks=(
+  pr_clear_retry
+  pr_cleanup_linked_issue_session
+  pr_cleanup_merged_residue
+  pr_linked_issue_should_close
+  pr_after_merged
+)
+
+for hook_name in "${optional_hooks[@]}"; do
+  if ! declare -F "$hook_name" >/dev/null 2>&1; then
+    eval "${hook_name}() { :; }"
+  fi
+done
+
+ledger_dir="${state_root}/merged-pr-catchup"
+mkdir -p "$ledger_dir"
+
+get_pr_risk_json() {
+  local pr_number="${1:?pr number required}"
+  if declare -F heartbeat_pr_risk_json >/dev/null 2>&1; then
+    heartbeat_pr_risk_json "$pr_number"
+    return 0
+  fi
+  if [[ -n "${ADAPTER_BIN_DIR:-}" && -x "${ADAPTER_BIN_DIR}/pr-risk.sh" ]]; then
+    "${ADAPTER_BIN_DIR}/pr-risk.sh" "$pr_number"
+    return 0
+  fi
+  echo "missing PR risk provider for catch-up" >&2
+  return 1
+}
+
+close_issue_if_needed() {
+  local pr_number="${1:?pr number required}"
+  local issue_id="${2:-}"
+  [[ -n "$issue_id" ]] || return 0
+
+  local should_close="yes"
+  should_close="$(pr_linked_issue_should_close "$issue_id" || printf 'yes\n')"
+  if [[ "$should_close" != "yes" ]]; then
+    return 0
+  fi
+
+  pr_cleanup_linked_issue_session "$issue_id" || true
+
+  local issue_state=""
+  issue_state="$(flow_github_issue_view_json "$repo_slug" "$issue_id" 2>/dev/null | jq -r '.state // empty' || true)"
+  if [[ "$issue_state" == "OPEN" ]]; then
+    flow_github_issue_close "$repo_slug" "$issue_id" "Closed automatically after PR #${pr_number} merged." >/dev/null 2>&1 || true
+    printf 'CATCHUP_CLOSED_ISSUE=%s\n' "$issue_id"
+  fi
+}
+
+merged_prs_json="$(flow_github_pr_list_json "$repo_slug" merged "$limit")"
+
+while IFS= read -r pr_number; do
+  [[ -n "$pr_number" ]] || continue
+
+  ledger_file="${ledger_dir}/${pr_number}.env"
+  if [[ -f "$ledger_file" ]]; then
+    continue
+  fi
+
+  risk_json="$(get_pr_risk_json "$pr_number" 2>/dev/null || true)"
+  if [[ -z "$risk_json" ]]; then
+    continue
+  fi
+
+  is_managed="$(jq -r '.isManagedByAgent // .isAgentBranch // false' <<<"$risk_json" 2>/dev/null || printf 'false\n')"
+  if [[ "$is_managed" != "true" ]]; then
+    continue
+  fi
+
+  linked_issue_id="$(jq -r '.linkedIssueId // empty' <<<"$risk_json" 2>/dev/null || true)"
+  merged_at="$(jq -r --arg pr "$pr_number" 'map(select((.number | tostring) == $pr)) | .[0].mergedAt // ""' <<<"$merged_prs_json")"
+
+  PR_NUMBER="$pr_number" pr_clear_retry || true
+  close_issue_if_needed "$pr_number" "$linked_issue_id"
+  if ! PR_NUMBER="$pr_number" pr_after_merged "$pr_number"; then
+    printf 'CATCHUP_FAILED_PR=%s\n' "$pr_number" >&2
+    continue
+  fi
+  if ! PR_NUMBER="$pr_number" pr_cleanup_merged_residue "$pr_number"; then
+    printf 'CATCHUP_FAILED_RESIDUE=%s\n' "$pr_number" >&2
+    continue
+  fi
+
+  {
+    printf 'PR_NUMBER=%s\n' "$pr_number"
+    printf 'ISSUE_ID=%s\n' "$linked_issue_id"
+    printf 'MERGED_AT=%s\n' "$merged_at"
+    printf 'PROCESSED_AT=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  } >"$ledger_file"
+
+  printf 'CATCHUP_MERGED_PR=%s\n' "$pr_number"
+done < <(jq -r 'sort_by(.mergedAt) | reverse | .[].number' <<<"$merged_prs_json")

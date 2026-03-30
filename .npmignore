@@ -1,0 +1,11 @@
+.git
+.DS_Store
+*.swp
+*.swo
+*~
+*.bak
+*.bak2
+*.bak3
+tools/dashboard/__pycache__/
+tools/tests/__pycache__/
+*.pyc

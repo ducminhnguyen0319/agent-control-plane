@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-project-worker-status --runs-root <path> --session <id> [--exit-marker <marker>]
+
+Reads a project-lane run directory and reports session status using tmux plus the
+worker log exit marker.
+EOF
+}
+
+runs_root="${AGENT_PROJECT_RUNS_ROOT:-}"
+session=""
+exit_marker="__CODEX_EXIT__:"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --runs-root) runs_root="${2:-}"; shift 2 ;;
+    --session) session="${2:-}"; shift 2 ;;
+    --exit-marker) exit_marker="${2:-}"; shift 2 ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$runs_root" || -z "$session" ]]; then
+  usage >&2
+  exit 1
+fi
+
+run_dir="${runs_root}/${session}"
+meta_file="${run_dir}/run.env"
+result_file="${run_dir}/result.env"
+runner_state_file="${run_dir}/runner.env"
+output_file="${run_dir}/${session}.log"
+
+status="UNKNOWN"
+exit_code=""
+result_only_completion="no"
+failure_reason=""
+runner_state=""
+thread_id=""
+last_exit_code=""
+
+if tmux has-session -t "$session" 2>/dev/null; then
+  status="RUNNING"
+fi
+
+if [[ -f "$runner_state_file" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  source "$runner_state_file"
+  set +a
+  runner_state="${RUNNER_STATE:-}"
+  thread_id="${THREAD_ID:-}"
+  last_exit_code="${LAST_EXIT_CODE:-}"
+  if [[ -z "$failure_reason" ]]; then
+    failure_reason="${LAST_FAILURE_REASON:-}"
+  fi
+fi
+
+if [[ "$status" == "UNKNOWN" ]]; then
+  case "$runner_state" in
+    succeeded)
+      status="SUCCEEDED"
+      ;;
+    failed)
+      status="FAILED"
+      if [[ -z "$exit_code" && -n "$last_exit_code" ]]; then
+        exit_code="$last_exit_code"
+      fi
+      ;;
+  esac
+fi
+
+if [[ "$status" == "UNKNOWN" && -f "$output_file" ]]; then
+  exit_match="$(rg -o "${exit_marker}[0-9]+" "$output_file" | tail -n 1 || true)"
+  if [[ -n "$exit_match" ]]; then
+    exit_code="${exit_match##*:}"
+    if [[ "$exit_code" == "0" ]]; then
+      status="SUCCEEDED"
+    else
+      status="FAILED"
+    fi
+  fi
+fi
+
+if [[ "$status" == "UNKNOWN" && -f "$result_file" ]]; then
+  # A worker that managed to persist result.env already completed its contract,
+  # even if the tmux session disappeared before the exit marker was flushed.
+  status="SUCCEEDED"
+  result_only_completion="yes"
+fi
+
+if [[ "$status" == "UNKNOWN" && -f "$output_file" ]]; then
+  if rg -qi "You've hit your usage limit|You have reached your Codex usage limits|visit https://chatgpt.com/codex/settings/usage|Upgrade to Pro|rate limit exceeded|quota exceeded|usage cap (reached|exceeded)|usage quota (reached|exceeded)" "$output_file"; then
+    status="FAILED"
+    failure_reason="usage-limit"
+  fi
+fi
+
+if [[ "$status" == "UNKNOWN" && -n "$runner_state" ]]; then
+  case "$runner_state" in
+    running|waiting-auth-refresh|switching-account)
+      status="FAILED"
+      if [[ -z "$failure_reason" ]]; then
+        failure_reason="runner-aborted-before-completion"
+      fi
+      if [[ -z "$exit_code" && -n "$last_exit_code" ]]; then
+        exit_code="$last_exit_code"
+      fi
+      ;;
+  esac
+fi
+
+printf 'SESSION=%s\n' "$session"
+printf 'STATUS=%s\n' "$status"
+if [[ -f "$meta_file" ]]; then
+  cat "$meta_file"
+  printf 'META_FILE=%s\n' "$meta_file"
+fi
+if [[ -f "$runner_state_file" ]]; then
+  cat "$runner_state_file"
+  printf 'RUNNER_STATE_FILE=%s\n' "$runner_state_file"
+fi
+if [[ -f "$result_file" ]]; then
+  cat "$result_file"
+  printf 'RESULT_FILE=%s\n' "$result_file"
+fi
+if [[ "$result_only_completion" == "yes" ]]; then
+  printf 'RESULT_ONLY_COMPLETION=yes\n'
+fi
+if [[ -n "$exit_code" ]]; then
+  printf 'EXIT_CODE=%s\n' "$exit_code"
+fi
+if [[ -n "$failure_reason" ]]; then
+  printf 'FAILURE_REASON=%s\n' "$failure_reason"
+fi
+if [[ -n "$thread_id" ]]; then
+  printf 'THREAD_ID=%s\n' "$thread_id"
+fi

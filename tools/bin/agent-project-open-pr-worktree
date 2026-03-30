@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/flow-config-lib.sh"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-project-open-pr-worktree --repo-root <path> --worktree-root <path> --pr-number <id> --head-ref <ref> [--local-branch-prefix <prefix>] [--remote <name>] [--prepare-script <path>] [--stamp <yyyymmdd-hhmmss>]
+
+Create a dedicated review/fix worktree for a PR using the shared
+agent-init-worktree helper.
+EOF
+}
+
+flow_skill_dir="$(resolve_flow_skill_dir "${BASH_SOURCE[0]}")"
+config_yaml="$(resolve_flow_config_yaml "${BASH_SOURCE[0]}")"
+repo_root="${AGENT_PROJECT_REPO_ROOT:-}"
+worktree_root="${AGENT_PROJECT_WORKTREE_ROOT:-}"
+pr_number=""
+head_ref=""
+local_branch_prefix="$(flow_resolve_pr_worktree_branch_prefix "${config_yaml}")"
+remote_name="origin"
+prepare_script=""
+stamp=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo-root) repo_root="${2:-}"; shift 2 ;;
+    --worktree-root) worktree_root="${2:-}"; shift 2 ;;
+    --pr-number) pr_number="${2:-}"; shift 2 ;;
+    --head-ref) head_ref="${2:-}"; shift 2 ;;
+    --local-branch-prefix) local_branch_prefix="${2:-}"; shift 2 ;;
+    --remote) remote_name="${2:-}"; shift 2 ;;
+    --prepare-script) prepare_script="${2:-}"; shift 2 ;;
+    --stamp) stamp="${2:-}"; shift 2 ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$repo_root" || -z "$worktree_root" || -z "$pr_number" || -z "$head_ref" ]]; then
+  usage >&2
+  exit 1
+fi
+
+if [[ -z "$stamp" ]]; then
+  stamp="$(date +%Y%m%d-%H%M%S)"
+fi
+
+worktree_path="${worktree_root}/pr-${pr_number}-${stamp}"
+local_branch="${local_branch_prefix}-${pr_number}-${stamp}"
+base_ref="${remote_name}/${head_ref}"
+init_tool="${flow_skill_dir}/tools/bin/agent-init-worktree"
+
+mkdir -p "$worktree_root"
+git -C "$repo_root" fetch \
+  "$remote_name" \
+  "+refs/heads/main:refs/remotes/${remote_name}/main" \
+  "+refs/heads/${head_ref}:refs/remotes/${remote_name}/${head_ref}" \
+  --prune
+(
+  cd "$repo_root"
+  "$init_tool" \
+    --branch "$local_branch" \
+    --base "$base_ref" \
+    --path "$worktree_path" \
+    --allow-unclaimed \
+    --no-bootstrap-deps >/dev/null
+)
+
+if [[ -n "$prepare_script" ]]; then
+  "$prepare_script" "$worktree_path" >/dev/null
+fi
+
+printf 'WORKTREE=%s\n' "$worktree_path"
+printf 'REF=%s\n' "$base_ref"
+printf 'BRANCH=%s\n' "$local_branch"

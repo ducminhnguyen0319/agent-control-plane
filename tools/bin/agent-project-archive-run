@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-project-archive-run --runs-root <path> --history-root <path> --session <id> [--remove-file <path>]
+
+Moves a completed run directory into the history root and optionally removes an
+extra file such as a sandbox result file.
+EOF
+}
+
+runs_root="${AGENT_PROJECT_RUNS_ROOT:-}"
+history_root="${AGENT_PROJECT_HISTORY_ROOT:-}"
+session=""
+remove_file=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --runs-root) runs_root="${2:-}"; shift 2 ;;
+    --history-root) history_root="${2:-}"; shift 2 ;;
+    --session) session="${2:-}"; shift 2 ;;
+    --remove-file) remove_file="${2:-}"; shift 2 ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$runs_root" || -z "$history_root" || -z "$session" ]]; then
+  usage >&2
+  exit 1
+fi
+
+run_dir="${runs_root}/${session}"
+archived_dir=""
+
+mkdir -p "$history_root"
+
+if [[ -d "$run_dir" && "$run_dir" == "${runs_root}/"* ]]; then
+  archived_dir="${history_root}/${session}-$(date +%Y%m%d-%H%M%S)"
+  mv "$run_dir" "$archived_dir"
+fi
+
+if [[ -n "$remove_file" && -f "$remove_file" ]]; then
+  rm -f "$remove_file"
+fi
+
+printf 'SESSION=%s\n' "$session"
+printf 'RUN_DIR=%s\n' "$run_dir"
+printf 'ARCHIVED_DIR=%s\n' "$archived_dir"
+printf 'REMOVED_FILE=%s\n' "$remove_file"

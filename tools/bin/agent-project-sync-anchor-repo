@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-project-sync-anchor-repo --canonical-root <path> --anchor-root <path> [--remote <name>] [--default-branch <name>]
+
+Initialize or refresh a local agent-owned anchor repository that is safe to use
+as the Git parent for per-task worktrees. The canonical checkout is only used to
+discover the authoritative remote URL.
+EOF
+}
+
+canonical_root=""
+anchor_root=""
+remote_name="origin"
+default_branch="main"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --canonical-root) canonical_root="${2:-}"; shift 2 ;;
+    --anchor-root) anchor_root="${2:-}"; shift 2 ;;
+    --remote) remote_name="${2:-}"; shift 2 ;;
+    --default-branch) default_branch="${2:-}"; shift 2 ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$canonical_root" || -z "$anchor_root" ]]; then
+  usage >&2
+  exit 1
+fi
+
+if [[ ! -d "$canonical_root/.git" && ! -f "$canonical_root/.git" ]]; then
+  echo "[agent-sync-anchor] canonical root is not a Git checkout: $canonical_root" >&2
+  exit 1
+fi
+
+origin_url="$(git -C "$canonical_root" remote get-url "$remote_name" 2>/dev/null || true)"
+if [[ -z "$origin_url" ]]; then
+  echo "[agent-sync-anchor] missing remote '$remote_name' in canonical repo: $canonical_root" >&2
+  exit 1
+fi
+
+anchor_parent="$(dirname "$anchor_root")"
+lock_dir="${anchor_root}.sync.lock"
+pid_file="${lock_dir}/pid"
+
+mkdir -p "$anchor_parent"
+
+acquire_lock() {
+  local attempts=0
+  while ! mkdir "$lock_dir" 2>/dev/null; do
+    if [[ -f "$pid_file" ]]; then
+      local existing_pid
+      existing_pid="$(cat "$pid_file" 2>/dev/null || true)"
+      if [[ -n "$existing_pid" ]] && ! kill -0 "$existing_pid" 2>/dev/null; then
+        rm -rf "$lock_dir"
+        continue
+      fi
+    else
+      rm -rf "$lock_dir"
+      continue
+    fi
+
+    attempts=$((attempts + 1))
+    if (( attempts >= 60 )); then
+      echo "[agent-sync-anchor] timed out waiting for anchor lock: $lock_dir" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+  printf '%s\n' "$$" >"$pid_file"
+}
+
+cleanup() {
+  rm -rf "$lock_dir"
+}
+
+trap cleanup EXIT
+acquire_lock
+
+if [[ -e "$anchor_root" && ! -d "$anchor_root/.git" && ! -f "$anchor_root/.git" ]]; then
+  echo "[agent-sync-anchor] anchor root exists but is not a Git checkout: $anchor_root" >&2
+  exit 1
+fi
+
+if [[ ! -d "$anchor_root/.git" && ! -f "$anchor_root/.git" ]]; then
+  git clone \
+    --origin "$remote_name" \
+    --branch "$default_branch" \
+    --single-branch \
+    --no-tags \
+    "$origin_url" \
+    "$anchor_root" >/dev/null
+fi
+
+git -C "$anchor_root" remote set-url "$remote_name" "$origin_url"
+git -C "$anchor_root" config "remote.${remote_name}.prune" true
+git -C "$anchor_root" fetch "$remote_name" --prune >/dev/null
+git -C "$anchor_root" worktree prune >/dev/null 2>&1 || true
+
+if [[ -n "$(git -C "$anchor_root" status --porcelain --untracked-files=no)" ]]; then
+  echo "[agent-sync-anchor] anchor repo is dirty; refuse to reset: $anchor_root" >&2
+  exit 1
+fi
+
+default_ref="${remote_name}/${default_branch}"
+if git -C "$anchor_root" show-ref --verify --quiet "refs/remotes/${default_ref}"; then
+  current_branch="$(git -C "$anchor_root" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+  if [[ "$current_branch" != "$default_branch" ]]; then
+    if git -C "$anchor_root" show-ref --verify --quiet "refs/heads/${default_branch}"; then
+      git -C "$anchor_root" checkout "$default_branch" >/dev/null
+    else
+      git -C "$anchor_root" checkout -b "$default_branch" "$default_ref" >/dev/null
+    fi
+  fi
+  git -C "$anchor_root" reset --hard "$default_ref" >/dev/null
+  git -C "$anchor_root" branch --set-upstream-to="$default_ref" "$default_branch" >/dev/null 2>&1 || true
+fi
+
+printf 'CANONICAL_ROOT=%s\n' "$canonical_root"
+printf 'ANCHOR_ROOT=%s\n' "$anchor_root"
+printf 'REMOTE=%s\n' "$remote_name"
+printf 'DEFAULT_BRANCH=%s\n' "$default_branch"
+printf 'ORIGIN_URL=%s\n' "$origin_url"

@@ -1,0 +1,349 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/flow-config-lib.sh"
+CONFIG_YAML="$(resolve_flow_config_yaml "${BASH_SOURCE[0]}")"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-project-publish-issue-pr --repo-slug <owner/repo> --runs-root <path> --session <id> [--history-root <path>] [--base-branch <name>] [--remote <name>] [--keep-open-label <label>] [--dry-run]
+
+Publish an issue worker branch as a PR and ensure the linked issue contains a
+single host-side PR comment.
+EOF
+}
+
+repo_slug=""
+runs_root=""
+session=""
+history_root="$(flow_resolve_history_root "${CONFIG_YAML}")"
+base_branch="main"
+remote_name="origin"
+dry_run="false"
+keep_open_label=""
+shared_agent_home="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+scope_guard_script="${shared_agent_home}/tools/bin/issue-publish-scope-guard.sh"
+verification_guard_script="${shared_agent_home}/tools/bin/branch-verification-guard.sh"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo-slug) repo_slug="${2:-}"; shift 2 ;;
+    --runs-root) runs_root="${2:-}"; shift 2 ;;
+    --session) session="${2:-}"; shift 2 ;;
+    --history-root) history_root="${2:-}"; shift 2 ;;
+    --base-branch) base_branch="${2:-}"; shift 2 ;;
+    --remote) remote_name="${2:-}"; shift 2 ;;
+    --keep-open-label) keep_open_label="${2:-}"; shift 2 ;;
+    --dry-run) dry_run="true"; shift ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$repo_slug" || -z "$runs_root" || -z "$session" ]]; then
+  usage >&2
+  exit 1
+fi
+
+find_archived_session_dir() {
+  local root="${1:-}"
+  local target_session="${2:-}"
+  [[ -n "$root" && -d "$root" && -n "$target_session" ]] || return 1
+
+  find "$root" -mindepth 1 -maxdepth 1 -type d -name "${target_session}-*" ! -name "${target_session}-stale-*" 2>/dev/null \
+    | sort -r \
+    | head -n 1
+}
+
+find_existing_worktree_for_branch() {
+  local repo_root="${1:-}"
+  local branch_name="${2:-}"
+  local current_worktree=""
+  local current_branch=""
+  [[ -n "$repo_root" && -d "$repo_root" && -n "$branch_name" ]] || return 1
+
+  while IFS= read -r line; do
+    case "$line" in
+      worktree\ *)
+        current_worktree="${line#worktree }"
+        current_branch=""
+        ;;
+      branch\ refs/heads/*)
+        current_branch="${line#branch refs/heads/}"
+        if [[ "$current_branch" == "$branch_name" && -n "$current_worktree" ]]; then
+          printf '%s\n' "$current_worktree"
+          return 0
+        fi
+        ;;
+      "")
+        current_worktree=""
+        current_branch=""
+        ;;
+    esac
+  done < <(git -C "$repo_root" worktree list --porcelain 2>/dev/null || true)
+
+  return 1
+}
+
+status_out="$(
+  "${shared_agent_home}/tools/bin/agent-project-worker-status" \
+    --runs-root "$runs_root" \
+    --session "$session"
+)"
+meta_file="$(awk -F= '/^META_FILE=/{print $2}' <<<"$status_out")"
+if [[ -z "$meta_file" || ! -f "$meta_file" ]]; then
+  archived_run_dir="$(find_archived_session_dir "$history_root" "$session" || true)"
+  if [[ -n "$archived_run_dir" && -f "${archived_run_dir}/run.env" ]]; then
+    meta_file="${archived_run_dir}/run.env"
+  fi
+fi
+if [[ -z "$meta_file" || ! -f "$meta_file" ]]; then
+  echo "missing metadata for session $session" >&2
+  exit 1
+fi
+
+run_dir="$(dirname "$meta_file")"
+
+set -a
+# shellcheck source=/dev/null
+source "$meta_file"
+set +a
+
+if [[ -z "${ISSUE_ID:-}" || -z "${BRANCH:-}" ]]; then
+  echo "session $session is missing ISSUE_ID or BRANCH" >&2
+  exit 1
+fi
+
+issue_json="$(flow_github_issue_view_json "$repo_slug" "$ISSUE_ID")"
+issue_title="$(jq -r '.title' <<<"$issue_json")"
+issue_url="$(jq -r '.url' <<<"$issue_json")"
+actor_login="${GITHUB_ACTOR:-$(gh api user --jq .login)}"
+issue_keep_open="no"
+if [[ -n "$keep_open_label" ]] && jq -e --arg label "$keep_open_label" 'any(.labels[]?; .name == $label)' >/dev/null <<<"$issue_json"; then
+  issue_keep_open="yes"
+fi
+
+sanitize_body_to_keep_issue_open() {
+  local body_file="${1:?body file required}"
+  BODY_FILE="$body_file" ISSUE_ID="$ISSUE_ID" node <<'EOF'
+const fs = require('fs');
+const bodyFile = process.env.BODY_FILE;
+const issueId = process.env.ISSUE_ID;
+let text = fs.readFileSync(bodyFile, 'utf8');
+const pattern = new RegExp(`\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\\s+#${issueId}\\b`, 'gi');
+text = text.replace(pattern, `Related to #${issueId}`);
+fs.writeFileSync(bodyFile, text);
+EOF
+}
+
+ensure_body_closes_issue() {
+  local body_file="${1:?body file required}"
+  if [[ "$issue_keep_open" == "yes" ]]; then
+    sanitize_body_to_keep_issue_open "$body_file"
+    return 0
+  fi
+
+  if rg -qi '\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#'"${ISSUE_ID}"'\b' "$body_file"; then
+    return 0
+  fi
+
+  printf '\nCloses #%s\n' "$ISSUE_ID" >>"$body_file"
+}
+
+find_pr_for_branch() {
+  flow_github_pr_list_json "$repo_slug" open 100 \
+    | jq -c --arg branch "${BRANCH}" '.[] | select(.headRefName == $branch)' \
+    | head -n 1
+}
+
+ensure_issue_pr_comment() {
+  local pr_number="${1:?pr number required}"
+  local pr_url="${2:?pr url required}"
+  local existing body
+
+  existing="$(
+    flow_github_api_repo "${repo_slug}" "issues/${ISSUE_ID}/comments?per_page=100" --paginate \
+      | jq -r --arg actor "$actor_login" --arg pr_url "$pr_url" '
+          .[]
+          | select(.user.login == $actor)
+          | select((.body // "") | contains($pr_url))
+          | .id
+        ' \
+      | head -n 1
+  )"
+  if [[ -n "$existing" ]]; then
+    return 0
+  fi
+
+  body=$(
+    cat <<EOF
+Opened PR #${pr_number}: ${pr_url}
+
+- Issue: #${ISSUE_ID} (${issue_title})
+- Session: \`${session}\`
+EOF
+  )
+
+  if [[ "$dry_run" == "true" ]]; then
+    printf 'COMMENT_ACTION=would-create\n'
+    printf 'COMMENT_BODY=%s\n' "$(printf '%s' "$body" | tr '\n' ' ' | sed 's/  */ /g')"
+    return 0
+  fi
+
+  flow_github_api_repo "${repo_slug}" "issues/${ISSUE_ID}/comments" --method POST -f body="$body" >/dev/null
+}
+
+pr_json="$(find_pr_for_branch || true)"
+publish_status=""
+pr_number=""
+pr_url=""
+
+if [[ -n "$pr_json" ]]; then
+  publish_status="existing-pr"
+  pr_number="$(jq -r '.number' <<<"$pr_json")"
+  pr_url="$(jq -r '.url' <<<"$pr_json")"
+else
+  if [[ -z "${WORKTREE:-}" || ! -d "${WORKTREE:-}" ]]; then
+    # Worktree was cleaned up before publish — try branch fallback
+    fallback_worktree=""
+    if [[ -n "${BRANCH:-}" ]]; then
+      # Resolve the baseline repo from the git common dir of the (now missing) worktree
+      local_repo_root="$(flow_resolve_agent_repo_root "${CONFIG_YAML}")"
+      local_worktree_root="$(flow_resolve_worktree_root "${CONFIG_YAML}")"
+
+      recover_branch_from_final_head() {
+        [[ -n "${FINAL_HEAD:-}" ]] || return 1
+        git -C "$local_repo_root" cat-file -e "${FINAL_HEAD}^{commit}" >/dev/null 2>&1 || return 1
+        git -C "$local_repo_root" branch "$BRANCH" "$FINAL_HEAD" >/dev/null 2>&1 || return 1
+        printf 'BRANCH_RECOVERY=from-final-head\n' >&2
+        printf 'RECOVERY_HEAD=%s\n' "$FINAL_HEAD" >&2
+      }
+
+      # Check if the branch exists in the baseline repo
+      if ! git -C "$local_repo_root" rev-parse --verify "${BRANCH}" >/dev/null 2>&1; then
+        recover_branch_from_final_head || true
+      fi
+      if git -C "$local_repo_root" rev-parse --verify "${BRANCH}" >/dev/null 2>&1; then
+        git -C "$local_repo_root" worktree prune >/dev/null 2>&1 || true
+        existing_worktree="$(find_existing_worktree_for_branch "$local_repo_root" "$BRANCH" || true)"
+        if [[ -n "$existing_worktree" && ( -f "$existing_worktree/.git" || -d "$existing_worktree/.git" ) ]]; then
+          WORKTREE="$existing_worktree"
+          fallback_worktree="$existing_worktree"
+          printf 'WORKTREE_RECOVERY=reused-existing\n' >&2
+          printf 'RECOVERY_WORKTREE=%s\n' "$existing_worktree" >&2
+        else
+          fallback_worktree="$(mktemp -d "${local_worktree_root}/recovery-XXXXXX")"
+          git -C "$local_repo_root" worktree add "$fallback_worktree" "$BRANCH" 2>/dev/null || true
+          # Validate the worktree is a real git repo, not just an empty directory
+          if [[ -f "$fallback_worktree/.git" || -d "$fallback_worktree/.git" ]]; then
+            WORKTREE="$fallback_worktree"
+            printf 'WORKTREE_RECOVERY=created\n' >&2
+            printf 'RECOVERY_WORKTREE=%s\n' "$fallback_worktree" >&2
+          else
+            rm -rf "$fallback_worktree" 2>/dev/null || true
+            fallback_worktree=""
+          fi
+        fi
+      fi
+      # Check if branch exists on remote
+      if [[ -z "${fallback_worktree}" ]]; then
+        git -C "$local_repo_root" fetch "$remote_name" 2>/dev/null || true
+        if git -C "$local_repo_root" rev-parse --verify "refs/remotes/${remote_name}/${BRANCH}" >/dev/null 2>&1; then
+          fallback_worktree="$(mktemp -d "${local_worktree_root}/recovery-XXXXXX")"
+          git -C "$local_repo_root" worktree add "$fallback_worktree" "refs/remotes/${remote_name}/${BRANCH}" 2>/dev/null || true
+          # Validate the worktree is a real git repo, not just an empty directory
+          if [[ -f "$fallback_worktree/.git" || -d "$fallback_worktree/.git" ]]; then
+            WORKTREE="$fallback_worktree"
+            printf 'WORKTREE_RECOVERY=from-remote\n' >&2
+            printf 'RECOVERY_WORKTREE=%s\n' "$fallback_worktree" >&2
+          else
+            rm -rf "$fallback_worktree" 2>/dev/null || true
+            fallback_worktree=""
+          fi
+        fi
+      fi
+    fi
+    if [[ -z "${WORKTREE:-}" || ! -d "${WORKTREE:-}" ]]; then
+      echo "session $session is missing a publishable worktree (branch ${BRANCH:-unknown} not found locally or on remote ${remote_name})" >&2
+      exit 1
+    fi
+  fi
+
+  git -C "$WORKTREE" fetch "$remote_name" "$base_branch" --prune >/dev/null
+
+  head_sha="$(git -C "$WORKTREE" rev-parse HEAD)"
+  ahead_count="$(git -C "$WORKTREE" rev-list --count "${remote_name}/${base_branch}"..HEAD)"
+  if [[ "$ahead_count" == "0" ]]; then
+    echo "branch $BRANCH has no commits ahead of ${remote_name}/${base_branch}; nothing to publish" >&2
+    exit 1
+  fi
+
+  "${scope_guard_script}" \
+    --worktree "$WORKTREE" \
+    --base-ref "${remote_name}/${base_branch}" \
+    --issue-id "$ISSUE_ID"
+
+  "${verification_guard_script}" \
+    --worktree "$WORKTREE" \
+    --base-ref "${remote_name}/${base_branch}" \
+    --run-dir "$run_dir"
+
+  pr_title="$(git -C "$WORKTREE" log -1 --pretty=%s)"
+  body_file="${run_dir}/pr-body.md"
+  tmp_body_file=""
+  if [[ ! -s "$body_file" ]]; then
+    tmp_body_file="$(mktemp)"
+    body_file="$tmp_body_file"
+    cat >"$body_file" <<EOF
+## Summary
+
+- Implements #${ISSUE_ID}: ${issue_title}
+- Host-side publication for session \`${session}\`
+- Commit: \`${head_sha}\`
+
+## Verification
+
+- Local verification was executed by the sandboxed issue worker in its isolated worktree.
+- Detailed command output is available in the run artifacts for \`${session}\`.
+EOF
+  fi
+
+  ensure_body_closes_issue "$body_file"
+
+  if [[ "$dry_run" == "true" ]]; then
+    printf 'PUBLISH_STATUS=would-create-pr\n'
+    printf 'ISSUE_ID=%s\n' "$ISSUE_ID"
+    printf 'ISSUE_URL=%s\n' "$issue_url"
+    printf 'BRANCH=%s\n' "$BRANCH"
+    printf 'PR_TITLE=%s\n' "$pr_title"
+    printf 'PR_BODY_FILE=%s\n' "$body_file"
+    [[ -n "$tmp_body_file" ]] && rm -f "$tmp_body_file"
+    exit 0
+  fi
+
+  git -C "$WORKTREE" push -u "$remote_name" "$BRANCH"
+  pr_url="$(flow_github_pr_create "$repo_slug" "$base_branch" "$BRANCH" "$pr_title" "$body_file")"
+  pr_json="$(find_pr_for_branch || true)"
+  if [[ -z "$pr_json" ]]; then
+    echo "PR creation returned ${pr_url}, but no open PR was found for branch ${BRANCH}" >&2
+    [[ -n "$tmp_body_file" ]] && rm -f "$tmp_body_file"
+    exit 1
+  fi
+
+  pr_number="$(jq -r '.number' <<<"$pr_json")"
+  pr_url="$(jq -r '.url' <<<"$pr_json")"
+  publish_status="created-pr"
+  [[ -n "$tmp_body_file" ]] && rm -f "$tmp_body_file"
+fi
+
+ensure_issue_pr_comment "$pr_number" "$pr_url"
+
+printf 'PUBLISH_STATUS=%s\n' "$publish_status"
+printf 'ISSUE_ID=%s\n' "$ISSUE_ID"
+printf 'ISSUE_URL=%s\n' "$issue_url"
+printf 'PR_NUMBER=%s\n' "$pr_number"
+printf 'PR_URL=%s\n' "$pr_url"
+printf 'BRANCH=%s\n' "$BRANCH"

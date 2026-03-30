@@ -1,0 +1,53 @@
+{
+  "name": "agent-control-plane",
+  "version": "0.1.0",
+  "description": "Help a repo keep GitHub-driven coding agents running reliably without constant human babysitting",
+  "license": "MIT",
+  "funding": [
+    "https://github.com/sponsors/ducminhnguyen0319"
+  ],
+  "directories": {
+    "bin": "npm/public-bin"
+  },
+  "files": [
+    "README.md",
+    "SKILL.md",
+    "assets/workflow-catalog.json",
+    "bin",
+    "hooks",
+    "npm/bin",
+    "npm/public-bin",
+    "tools/bin",
+    "tools/dashboard/app.js",
+    "tools/dashboard/dashboard_snapshot.py",
+    "tools/dashboard/index.html",
+    "tools/dashboard/server.py",
+    "tools/dashboard/styles.css",
+    "tools/templates",
+    "tools/tests",
+    "tools/vendor/codex-quota/LICENSE",
+    "tools/vendor/codex-quota/codex-quota.js",
+    "tools/vendor/codex-quota/lib",
+    "tools/vendor/codex-quota-manager/scripts"
+  ],
+  "scripts": {
+    "doctor": "node ./npm/bin/agent-control-plane.js doctor",
+    "smoke": "node ./npm/bin/agent-control-plane.js smoke",
+    "test": "bash tools/tests/test-agent-control-plane-npm-cli.sh"
+  },
+  "keywords": [
+    "agents",
+    "automation",
+    "background-jobs",
+    "dashboard",
+    "control-plane",
+    "developer-tools",
+    "github-actions",
+    "github",
+    "npx",
+    "runtime"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

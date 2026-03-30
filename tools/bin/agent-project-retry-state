@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-project-retry-state --state-root <path> --kind issue|pr|provider --item-id <id> --action get|schedule|clear [--reason <text>] [--cooldowns <csv>]
+
+Generic retry/cooldown state manager for project adapters.
+
+Examples:
+  agent-project-retry-state --state-root /tmp/state --kind issue --item-id 123 --action get
+  agent-project-retry-state --state-root /tmp/state --kind pr --item-id 77 --action schedule --reason worker-exit-failed
+  agent-project-retry-state --state-root /tmp/state --kind provider --item-id openclaw-stepfun-free --action schedule --reason provider-quota-limit
+EOF
+}
+
+state_root="${AGENT_PROJECT_STATE_ROOT:-}"
+kind=""
+item_id=""
+action=""
+reason=""
+cooldowns_csv="${AGENT_PROJECT_RETRY_COOLDOWNS:-300,900,1800,3600}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --state-root) state_root="${2:-}"; shift 2 ;;
+    --kind) kind="${2:-}"; shift 2 ;;
+    --item-id) item_id="${2:-}"; shift 2 ;;
+    --action) action="${2:-}"; shift 2 ;;
+    --reason) reason="${2:-}"; shift 2 ;;
+    --cooldowns) cooldowns_csv="${2:-}"; shift 2 ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$state_root" || -z "$kind" || -z "$item_id" || -z "$action" ]]; then
+  usage >&2
+  exit 1
+fi
+
+case "$kind" in
+  issue|pr|provider) ;;
+  *) echo "--kind must be issue, pr, or provider" >&2; exit 1 ;;
+esac
+
+case "$action" in
+  get|schedule|clear) ;;
+  *) echo "--action must be get, schedule, or clear" >&2; exit 1 ;;
+esac
+
+retry_root="${state_root}/retries/${kind}s"
+state_file="${retry_root}/${item_id}.env"
+
+mkdir -p "$retry_root"
+
+attempts=0
+next_attempt_epoch=0
+next_attempt_at=""
+last_reason=""
+updated_at=""
+
+if [[ -f "$state_file" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  source "$state_file"
+  set +a
+  attempts="${ATTEMPTS:-0}"
+  next_attempt_epoch="${NEXT_ATTEMPT_EPOCH:-0}"
+  next_attempt_at="${NEXT_ATTEMPT_AT:-}"
+  last_reason="${LAST_REASON:-}"
+  updated_at="${UPDATED_AT:-}"
+fi
+
+IFS=',' read -r -a cooldowns <<<"$cooldowns_csv"
+now_epoch="$(date +%s)"
+
+cooldown_seconds_for_attempt() {
+  local attempt="${1:?attempt required}"
+  local index=$((attempt - 1))
+  local last_index=$(( ${#cooldowns[@]} - 1 ))
+  if (( index < 0 )); then
+    index=0
+  fi
+  if (( index > last_index )); then
+    index=$last_index
+  fi
+  printf '%s\n' "${cooldowns[$index]}"
+}
+
+write_state() {
+  local new_attempts="${1:?attempts required}"
+  local new_next_epoch="${2:?next epoch required}"
+  local new_reason="${3:-}"
+  local new_updated_at
+  local new_next_at=""
+
+  new_updated_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  if [[ "$new_next_epoch" != "0" ]]; then
+    new_next_at="$(date -u -r "$new_next_epoch" +"%Y-%m-%dT%H:%M:%SZ")"
+  fi
+
+  cat >"$state_file" <<EOF
+ATTEMPTS=${new_attempts}
+NEXT_ATTEMPT_EPOCH=${new_next_epoch}
+NEXT_ATTEMPT_AT=${new_next_at}
+LAST_REASON=$(printf '%q' "$new_reason")
+UPDATED_AT=${new_updated_at}
+EOF
+}
+
+case "$action" in
+  get)
+    ;;
+  schedule)
+    attempts=$((attempts + 1))
+    cooldown_seconds="$(cooldown_seconds_for_attempt "$attempts")"
+    next_attempt_epoch=$((now_epoch + cooldown_seconds))
+    write_state "$attempts" "$next_attempt_epoch" "$reason"
+    next_attempt_at="$(date -u -r "$next_attempt_epoch" +"%Y-%m-%dT%H:%M:%SZ")"
+    last_reason="$reason"
+    updated_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    ;;
+  clear)
+    rm -f "$state_file"
+    attempts=0
+    next_attempt_epoch=0
+    next_attempt_at=""
+    last_reason=""
+    updated_at=""
+    ;;
+esac
+
+ready="yes"
+if [[ "$next_attempt_epoch" =~ ^[0-9]+$ ]] && (( next_attempt_epoch > now_epoch )); then
+  ready="no"
+fi
+
+printf 'KIND=%s\n' "$kind"
+printf 'ITEM_ID=%s\n' "$item_id"
+printf 'ATTEMPTS=%s\n' "$attempts"
+printf 'NEXT_ATTEMPT_EPOCH=%s\n' "$next_attempt_epoch"
+printf 'NEXT_ATTEMPT_AT=%s\n' "$next_attempt_at"
+printf 'READY=%s\n' "$ready"
+printf 'LAST_REASON=%s\n' "$last_reason"
+printf 'UPDATED_AT=%s\n' "$updated_at"

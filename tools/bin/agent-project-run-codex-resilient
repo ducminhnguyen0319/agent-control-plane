@@ -1,0 +1,718 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/flow-config-lib.sh"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-project-run-codex-resilient --mode safe|bypass --worktree <path> --prompt-file <path> --output-file <path> --host-run-dir <path> --sandbox-run-dir <path> --codex-bin <path> [options]
+
+Run Codex with persisted thread recovery for quota/auth interruptions.
+
+Options:
+  --safe-profile <name>                   Codex profile for safe mode
+  --bypass-profile <name>                 Codex profile for bypass mode
+  --max-resume-attempts <count>           Maximum resume attempts after interruption
+  --auth-refresh-timeout-seconds <secs>   How long to wait for refreshed auth before failing
+  --auth-refresh-poll-seconds <secs>      Poll interval while waiting for refreshed auth
+  --help                                  Show this help
+EOF
+}
+
+mode=""
+worktree=""
+prompt_file=""
+output_file=""
+host_run_dir=""
+sandbox_run_dir=""
+safe_profile="default"
+bypass_profile="default"
+codex_bin=""
+max_resume_attempts="${ACP_CODEX_MAX_RESUME_ATTEMPTS:-${F_LOSNING_CODEX_MAX_RESUME_ATTEMPTS:-6}}"
+auth_refresh_timeout_seconds="${ACP_CODEX_AUTH_REFRESH_TIMEOUT_SECONDS:-${F_LOSNING_CODEX_AUTH_REFRESH_TIMEOUT_SECONDS:-900}}"
+auth_refresh_poll_seconds="${ACP_CODEX_AUTH_REFRESH_POLL_SECONDS:-${F_LOSNING_CODEX_AUTH_REFRESH_POLL_SECONDS:-10}}"
+max_quota_autoswitch_attempts="${ACP_CODEX_MAX_AUTOSWITCH_ATTEMPTS:-${F_LOSNING_CODEX_MAX_AUTOSWITCH_ATTEMPTS:-1}}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --mode) mode="${2:-}"; shift 2 ;;
+    --worktree) worktree="${2:-}"; shift 2 ;;
+    --prompt-file) prompt_file="${2:-}"; shift 2 ;;
+    --output-file) output_file="${2:-}"; shift 2 ;;
+    --host-run-dir) host_run_dir="${2:-}"; shift 2 ;;
+    --sandbox-run-dir) sandbox_run_dir="${2:-}"; shift 2 ;;
+    --safe-profile) safe_profile="${2:-}"; shift 2 ;;
+    --bypass-profile) bypass_profile="${2:-}"; shift 2 ;;
+    --codex-bin) codex_bin="${2:-}"; shift 2 ;;
+    --max-resume-attempts) max_resume_attempts="${2:-}"; shift 2 ;;
+    --auth-refresh-timeout-seconds) auth_refresh_timeout_seconds="${2:-}"; shift 2 ;;
+    --auth-refresh-poll-seconds) auth_refresh_poll_seconds="${2:-}"; shift 2 ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$mode" || -z "$worktree" || -z "$prompt_file" || -z "$output_file" || -z "$host_run_dir" || -z "$sandbox_run_dir" || -z "$codex_bin" ]]; then
+  usage >&2
+  exit 1
+fi
+
+case "$mode" in
+  safe|bypass) ;;
+  *)
+    echo "--mode must be safe or bypass" >&2
+    exit 1
+    ;;
+esac
+
+case "$max_resume_attempts" in
+  ''|*[!0-9]*) echo "--max-resume-attempts must be numeric" >&2; exit 1 ;;
+esac
+case "$auth_refresh_timeout_seconds" in
+  ''|*[!0-9]*) echo "--auth-refresh-timeout-seconds must be numeric" >&2; exit 1 ;;
+esac
+case "$auth_refresh_poll_seconds" in
+  ''|*[!0-9]*) echo "--auth-refresh-poll-seconds must be numeric" >&2; exit 1 ;;
+esac
+case "$max_quota_autoswitch_attempts" in
+  ''|*[!0-9]*) echo "ACP_CODEX_MAX_AUTOSWITCH_ATTEMPTS must be numeric" >&2; exit 1 ;;
+esac
+
+FLOW_SKILL_DIR="$(resolve_flow_skill_dir "${BASH_SOURCE[0]}")"
+state_file="${host_run_dir}/runner.env"
+auth_file="${HOME}/.codex/auth.json"
+shared_agent_home="${SHARED_AGENT_HOME:-$(resolve_shared_agent_home "${FLOW_SKILL_DIR}")}"
+quota_tool_bin="$(flow_resolve_codex_quota_bin "${FLOW_SKILL_DIR}")"
+quota_manager_script="$(flow_resolve_codex_quota_manager_script "${FLOW_SKILL_DIR}")"
+quota_autoswitch_enabled="${ACP_CODEX_QUOTA_AUTOSWITCH_ENABLED:-${F_LOSNING_CODEX_QUOTA_AUTOSWITCH_ENABLED:-1}}"
+quota_threshold="${ACP_CODEX_QUOTA_THRESHOLD:-${F_LOSNING_CODEX_QUOTA_THRESHOLD:-70}}"
+quota_weekly_threshold="${ACP_CODEX_QUOTA_WEEKLY_THRESHOLD:-${F_LOSNING_CODEX_QUOTA_WEEKLY_THRESHOLD:-90}}"
+quota_soft_threshold="${ACP_CODEX_QUOTA_SOFT_THRESHOLD:-${F_LOSNING_CODEX_QUOTA_SOFT_THRESHOLD:-55}}"
+quota_soft_worker_threshold="${ACP_CODEX_QUOTA_SOFT_WORKER_THRESHOLD:-${F_LOSNING_CODEX_QUOTA_SOFT_WORKER_THRESHOLD:-8}}"
+quota_emergency_threshold="${ACP_CODEX_QUOTA_EMERGENCY_THRESHOLD:-${F_LOSNING_CODEX_QUOTA_EMERGENCY_THRESHOLD:-65}}"
+quota_emergency_worker_threshold="${ACP_CODEX_QUOTA_EMERGENCY_WORKER_THRESHOLD:-${F_LOSNING_CODEX_QUOTA_EMERGENCY_WORKER_THRESHOLD:-12}}"
+quota_switch_cooldown_seconds="${ACP_CODEX_QUOTA_SWITCH_COOLDOWN_SECONDS:-${F_LOSNING_CODEX_QUOTA_SWITCH_COOLDOWN_SECONDS:-600}}"
+quota_timeout_seconds="${ACP_CODEX_QUOTA_TIMEOUT_SECONDS:-${F_LOSNING_CODEX_QUOTA_TIMEOUT_SECONDS:-45}}"
+quota_prefer_label="${ACP_CODEX_QUOTA_PREFER_LABEL:-${F_LOSNING_CODEX_QUOTA_PREFER_LABEL:-}}"
+quota_switch_state_file="${CODEX_QUOTA_MANAGER_SWITCH_STATE_FILE:-${XDG_CACHE_HOME:-$HOME/.cache}/codex-quota-manager/last-switch.env}"
+config_yaml="$(resolve_flow_config_yaml "${BASH_SOURCE[0]}")"
+issue_session_prefix="$(flow_resolve_issue_session_prefix "${config_yaml}")"
+pr_session_prefix="$(flow_resolve_pr_session_prefix "${config_yaml}")"
+
+thread_id=""
+attempt=0
+resume_count=0
+last_exit_code=""
+last_failure_reason=""
+last_trigger_reason=""
+auth_wait_started_at=""
+last_auth_fingerprint=""
+last_attempt_start_size=0
+last_attempt_start_quota_label=""
+last_quota_switch_status=""
+last_quota_next_retry_at=""
+last_quota_selected_label=""
+quota_autoswitch_attempt_count=0
+
+mkdir -p "$host_run_dir"
+touch "$output_file"
+
+log_runner() {
+  local message="${1:-}"
+  [[ -n "$message" ]] || return 0
+  printf '[%s] %s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$message" | tee -a "$output_file"
+}
+
+write_state() {
+  local runner_state="${1:?runner state required}"
+  local failure_reason="${2:-$last_failure_reason}"
+  local updated_at
+  local tmp_file="${state_file}.tmp.$$"
+
+  updated_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  {
+    printf 'RUNNER_STATE=%q\n' "$runner_state"
+    printf 'THREAD_ID=%q\n' "$thread_id"
+    printf 'ATTEMPT=%s\n' "$attempt"
+    printf 'RESUME_COUNT=%s\n' "$resume_count"
+    printf 'LAST_EXIT_CODE=%q\n' "$last_exit_code"
+    printf 'LAST_FAILURE_REASON=%q\n' "$failure_reason"
+    printf 'LAST_TRIGGER_REASON=%q\n' "$last_trigger_reason"
+    printf 'AUTH_WAIT_STARTED_AT=%q\n' "$auth_wait_started_at"
+    printf 'LAST_AUTH_FINGERPRINT=%q\n' "$last_auth_fingerprint"
+    printf 'UPDATED_AT=%q\n' "$updated_at"
+  } >"$tmp_file"
+  mv "$tmp_file" "$state_file"
+}
+
+run_with_timeout() {
+  local timeout_seconds="${1:?timeout seconds required}"
+  shift
+
+  /opt/homebrew/bin/python3 - "$timeout_seconds" "$@" <<'PY'
+import os
+import signal
+import subprocess
+import sys
+
+timeout_seconds = float(sys.argv[1])
+argv = sys.argv[2:]
+
+if not argv:
+    sys.exit(64)
+
+proc = subprocess.Popen(argv, start_new_session=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+try:
+    stdout, stderr = proc.communicate(timeout=timeout_seconds)
+except subprocess.TimeoutExpired:
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        stdout, stderr = proc.communicate(timeout=2)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        stdout, stderr = proc.communicate()
+    if stdout:
+        sys.stdout.buffer.write(stdout)
+    if stderr:
+        sys.stderr.buffer.write(stderr)
+    sys.exit(124)
+
+if stdout:
+    sys.stdout.buffer.write(stdout)
+if stderr:
+    sys.stderr.buffer.write(stderr)
+sys.exit(proc.returncode)
+PY
+}
+
+auth_fingerprint() {
+  if [[ ! -f "$auth_file" ]]; then
+    printf 'missing\n'
+    return 0
+  fi
+
+  local mtime size sha
+  mtime="$(stat -f %m "$auth_file" 2>/dev/null || printf '0')"
+  size="$(stat -f %z "$auth_file" 2>/dev/null || printf '0')"
+  sha="$(shasum -a 256 "$auth_file" | awk '{print $1}')"
+  printf '%s:%s:%s\n' "$mtime" "$size" "$sha"
+}
+
+quota_active_label() {
+  if [[ ! -x "$quota_tool_bin" ]] || ! command -v jq >/dev/null 2>&1; then
+    printf '\n'
+    return 0
+  fi
+
+  "$quota_tool_bin" codex list --json 2>/dev/null \
+    | jq -r '
+        .activeInfo.trackedLabel
+        // .activeInfo.activeLabel
+        // ([.accounts[]? | select(.isActive == true or .isNativeActive == true)][0].label)
+        // empty
+      ' 2>/dev/null \
+    || printf '\n'
+}
+
+quota_switch_signature() {
+  if [[ ! -f "$quota_switch_state_file" ]]; then
+    printf 'missing\n'
+    return 0
+  fi
+
+  local mtime size sha
+  mtime="$(stat -f %m "$quota_switch_state_file" 2>/dev/null || printf '0')"
+  size="$(stat -f %z "$quota_switch_state_file" 2>/dev/null || printf '0')"
+  sha="$(shasum -a 256 "$quota_switch_state_file" | awk '{print $1}')"
+  printf '%s:%s:%s\n' "$mtime" "$size" "$sha"
+}
+
+running_workers() {
+  if ! command -v tmux >/dev/null 2>&1; then
+    printf '0\n'
+    return 0
+  fi
+
+  { tmux list-sessions -F '#S' 2>/dev/null || true; } \
+    | awk -v issue_prefix="$issue_session_prefix" -v pr_prefix="$pr_session_prefix" '
+        index($0, issue_prefix) == 1 || index($0, pr_prefix) == 1 { count++ }
+        END { print count + 0 }
+      '
+}
+
+extract_kv_value() {
+  local key="${1:?key required}"
+  local payload="${2:-}"
+  sed -nE "s/^${key}=(.*)$/\\1/p" <<<"$payload" | tail -n 1
+}
+
+run_quota_autoswitch() {
+  local quota_output quota_status shell_flags_before_quota_exec
+  local -a quota_cmd
+  local worker_count
+
+  quota_autoswitch_unavailable_reason() {
+    if [[ "$quota_autoswitch_enabled" == "0" ]]; then
+      printf 'disabled\n'
+      return 0
+    fi
+    if [[ ! -x "$quota_manager_script" ]]; then
+      printf 'missing-script\n'
+      return 0
+    fi
+    if [[ ! -x "$quota_tool_bin" ]]; then
+      printf 'missing-codex-quota\n'
+      return 0
+    fi
+    if ! command -v jq >/dev/null 2>&1; then
+      printf 'missing-jq\n'
+      return 0
+    fi
+    printf 'ok\n'
+  }
+
+  local unavailable_reason=""
+  last_quota_next_retry_at=""
+  last_quota_selected_label=""
+  if [[ "$quota_autoswitch_enabled" == "0" ]]; then
+    log_runner "quota auto-switch disabled; waiting for external Codex auth refresh"
+    printf 'CODEX_QUOTA_AUTOSWITCH_ENABLED=0\n' | tee -a "$output_file"
+    last_quota_switch_status="disabled"
+    return 1
+  fi
+
+  unavailable_reason="$(quota_autoswitch_unavailable_reason)"
+  if [[ "$unavailable_reason" != "ok" ]]; then
+    log_runner "quota auto-switch unavailable (${unavailable_reason}); waiting for external Codex auth refresh"
+    printf 'CODEX_QUOTA_MANAGER_UNAVAILABLE=yes\n' | tee -a "$output_file"
+    printf 'CODEX_QUOTA_MANAGER_REASON=%s\n' "$unavailable_reason" | tee -a "$output_file"
+    last_quota_switch_status="unavailable"
+    return 1
+  fi
+
+  quota_autoswitch_attempt_count=$((quota_autoswitch_attempt_count + 1))
+  worker_count="$(running_workers)"
+  quota_cmd=(
+    env
+    "CODEX_QUOTA_BIN=${quota_tool_bin}"
+    bash "$quota_manager_script"
+    --trigger-reason "$last_failure_reason"
+    --current-label "${last_attempt_start_quota_label}"
+    --five-hour-threshold "$quota_threshold"
+    --weekly-threshold "$quota_weekly_threshold"
+    --running-workers "$worker_count"
+  )
+  if [[ -n "$quota_prefer_label" ]]; then
+    quota_cmd+=(--prefer-label "$quota_prefer_label")
+  fi
+
+  log_runner "${last_failure_reason} detected; attempting failure-driven Codex account switch"
+  shell_flags_before_quota_exec="$-"
+  set +e
+  quota_output="$(run_with_timeout "$quota_timeout_seconds" "${quota_cmd[@]}" 2>&1)"
+  quota_status=$?
+  case "$shell_flags_before_quota_exec" in
+    *e*) set -e ;;
+    *) set +e ;;
+  esac
+
+  if [[ "$quota_status" == "0" ]]; then
+    last_quota_switch_status="$(extract_kv_value "SWITCH_DECISION" "$quota_output")"
+    last_quota_next_retry_at="$(extract_kv_value "NEXT_RETRY_AT" "$quota_output")"
+    last_quota_selected_label="$(extract_kv_value "SELECTED_LABEL" "$quota_output")"
+    [[ -n "$quota_output" ]] && printf '%s\n' "$quota_output" | tee -a "$output_file"
+    case "$last_quota_switch_status" in
+      switched|current-ok)
+        return 0
+        ;;
+      deferred)
+        return 10
+        ;;
+      *)
+        last_quota_switch_status="failed"
+        return 1
+        ;;
+    esac
+  fi
+
+  last_quota_next_retry_at="$(extract_kv_value "NEXT_RETRY_AT" "${quota_output:-}")"
+  last_quota_selected_label="$(extract_kv_value "SELECTED_LABEL" "${quota_output:-}")"
+  [[ -n "${quota_output:-}" ]] && printf '%s\n' "$quota_output" | tee -a "$output_file"
+  if [[ "$quota_status" == "10" ]]; then
+    last_quota_switch_status="deferred"
+    log_runner "no eligible Codex account is ready yet; waiting for the next reset window"
+    return 10
+  fi
+  last_quota_switch_status="failed"
+  if [[ "$quota_status" == "124" ]]; then
+    log_runner "quota auto-switch timed out after ${quota_timeout_seconds}s"
+  else
+    log_runner "quota auto-switch exited with status ${quota_status}"
+  fi
+  return "$quota_status"
+}
+
+new_output_since() {
+  local start_size="${1:?start size required}"
+  local file_size
+  file_size="$(stat -f %z "$output_file" 2>/dev/null || printf '0')"
+  if (( file_size <= start_size )); then
+    return 0
+  fi
+  tail -c "+$((start_size + 1))" "$output_file"
+}
+
+update_thread_id_from_output() {
+  local start_size="${1:?start size required}"
+  local new_thread_id
+
+  new_thread_id="$(new_output_since "$start_size" | extract_thread_id || true)"
+  if [[ -n "$new_thread_id" ]]; then
+    thread_id="$new_thread_id"
+  fi
+}
+
+extract_thread_id_from_line() {
+  local line="${1:-}"
+  sed -nE 's/.*"type"[[:space:]]*:[[:space:]]*"thread\.started".*"thread_id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' <<<"$line"
+}
+
+persist_thread_id_from_line() {
+  local line="${1:-}"
+  local new_thread_id=""
+
+  new_thread_id="$(extract_thread_id_from_line "$line")"
+  if [[ -n "$new_thread_id" && "$new_thread_id" != "$thread_id" ]]; then
+    thread_id="$new_thread_id"
+    write_state "running" ""
+  fi
+}
+
+stream_codex_exec() {
+  local phase="${1:?phase required}"
+  local stream_fifo=""
+  local producer_pid=""
+  local line=""
+
+  last_attempt_start_size="$(stat -f %z "$output_file" 2>/dev/null || printf '0')"
+  stream_fifo="$(mktemp -u "${TMPDIR:-/tmp}/codex-stream.XXXXXX")"
+  mkfifo "$stream_fifo"
+
+  case "$phase" in
+    initial)
+      (
+        case "$mode" in
+          safe)
+            "$codex_bin" exec --json --profile "$safe_profile" --full-auto <"$prompt_file"
+            ;;
+          bypass)
+            "$codex_bin" exec --json --profile "$bypass_profile" --dangerously-bypass-approvals-and-sandbox <"$prompt_file"
+            ;;
+        esac
+      ) >"$stream_fifo" 2>&1 &
+      ;;
+    resume)
+      (
+        case "$mode" in
+          safe)
+            resume_prompt | "$codex_bin" exec resume --json --full-auto "$thread_id" -
+            ;;
+          bypass)
+            resume_prompt | "$codex_bin" exec resume --json --dangerously-bypass-approvals-and-sandbox "$thread_id" -
+            ;;
+        esac
+      ) >"$stream_fifo" 2>&1 &
+      ;;
+    *)
+      rm -f "$stream_fifo"
+      echo "unknown codex exec phase: $phase" >&2
+      exit 1
+      ;;
+  esac
+
+  producer_pid="$!"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    printf '%s\n' "$line" | tee -a "$output_file"
+    persist_thread_id_from_line "$line"
+  done <"$stream_fifo"
+
+  rm -f "$stream_fifo"
+
+  if wait "$producer_pid"; then
+    last_exit_code="0"
+  else
+    last_exit_code="$?"
+  fi
+
+  update_thread_id_from_output "$last_attempt_start_size"
+}
+
+extract_thread_id() {
+  /opt/homebrew/bin/python3 -c '
+import json
+import sys
+
+thread_id = ""
+for raw in sys.stdin:
+    line = raw.strip()
+    if not line.startswith("{"):
+        continue
+    try:
+        payload = json.loads(line)
+    except Exception:
+        continue
+    if payload.get("type") == "thread.started" and payload.get("thread_id"):
+        thread_id = str(payload["thread_id"])
+
+if thread_id:
+    sys.stdout.write(thread_id)
+'
+}
+
+classify_failure_reason() {
+  local chunk="${1:-}"
+  local recent_chunk
+
+  recent_chunk="$(tail -n 120 <<<"$chunk")"
+
+  if grep -Eiq "You've hit your usage limit|You have reached your Codex usage limits|visit https://chatgpt.com/codex/settings/usage|Upgrade to Pro|rate limit exceeded|quota exceeded|usage cap (reached|exceeded)|usage quota (reached|exceeded)" <<<"$recent_chunk"; then
+    printf 'usage-limit\n'
+    return 0
+  fi
+
+  if grep -Eiq "(HTTP[^0-9]*)?401([^0-9]|$)|unauthorized|invalid credentials|invalid api key|authentication failed with status 401|received 401" <<<"$recent_chunk"; then
+    printf 'auth-401\n'
+    return 0
+  fi
+
+  if grep -Eiq "account (is )?(banned|suspended|disabled)|access revoked|account revoked|forbidden due to policy|account blocked|policy violation" <<<"$recent_chunk"; then
+    printf 'account-banned\n'
+    return 0
+  fi
+
+  if grep -Eiq "Authentication required|Please log in|Please login|Please authenticate|login required|run codex login|codex login required|logged out|not logged in|expired session|session expired|token expired|reauthenticate|unauthenticated|auth(entication)? failed|credentials expired" <<<"$recent_chunk"; then
+    printf 'auth-failure\n'
+    return 0
+  fi
+
+  if [[ -n "$last_exit_code" && "$last_exit_code" != "0" ]]; then
+    printf 'worker-exit-failed\n'
+  fi
+}
+
+resume_prompt() {
+  cat <<EOF
+The previous Codex exec turn in this same thread was interrupted because the host refreshed Codex authentication after a quota or auth failure.
+
+Continue the same task from the next unfinished step only. Do not restart completed work unless you need to verify or repair it.
+
+If you need to reorient, inspect the current git status plus the existing run artifacts in:
+- Host run dir: ${host_run_dir}
+- Sandbox run dir: ${sandbox_run_dir}
+EOF
+}
+
+codex_login_healthy() {
+  "$codex_bin" login status >/dev/null 2>&1
+}
+
+wait_for_auth_refresh() {
+  local baseline_fingerprint="${1:?baseline fingerprint required}"
+  local trigger_reason="${2:?trigger reason required}"
+  local baseline_quota_label="${3:-}"
+  local baseline_switch_signature="${4:-}"
+  local deadline now current_fingerprint current_quota_label current_switch_signature
+  local sleep_seconds
+
+  auth_wait_started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  last_trigger_reason="$trigger_reason"
+  write_state "waiting-auth-refresh" "$trigger_reason"
+
+  deadline=$(( $(date +%s) + auth_refresh_timeout_seconds ))
+  while :; do
+    current_fingerprint="$(auth_fingerprint)"
+    last_auth_fingerprint="$current_fingerprint"
+    case "$trigger_reason" in
+      usage-limit|auth-401|account-banned)
+        current_quota_label="$(quota_active_label)"
+        current_switch_signature="$(quota_switch_signature)"
+        if codex_login_healthy; then
+          if [[ "$current_fingerprint" != "$baseline_fingerprint" ]]; then
+            log_runner "detected refreshed Codex auth after quota interruption; resuming thread ${thread_id}"
+            auth_wait_started_at=""
+            write_state "running" ""
+            return 0
+          fi
+
+          if [[ -n "$baseline_quota_label" && -n "$current_quota_label" && "$current_quota_label" != "$baseline_quota_label" ]]; then
+            log_runner "detected rotated Codex quota account (${baseline_quota_label} -> ${current_quota_label}); resuming thread ${thread_id}"
+            auth_wait_started_at=""
+            write_state "running" ""
+            return 0
+          fi
+
+          if [[ -n "$baseline_switch_signature" && -n "$current_switch_signature" && "$current_switch_signature" != "$baseline_switch_signature" ]]; then
+            log_runner "detected quota switch state refresh; resuming thread ${thread_id}"
+            auth_wait_started_at=""
+            write_state "running" ""
+            return 0
+          fi
+
+          if [[ "$last_quota_switch_status" == "switched" && -n "$current_quota_label" ]]; then
+            log_runner "quota manager reports healthy Codex account ${current_quota_label}; resuming thread ${thread_id}"
+            auth_wait_started_at=""
+            write_state "running" ""
+            return 0
+          fi
+        fi
+
+        ;;
+      *)
+        if codex_login_healthy; then
+          if [[ "$current_fingerprint" != "$baseline_fingerprint" ]]; then
+            log_runner "detected refreshed Codex auth; resuming thread ${thread_id}"
+          else
+            log_runner "Codex auth is healthy again; resuming thread ${thread_id}"
+          fi
+          auth_wait_started_at=""
+          write_state "running" ""
+          return 0
+        fi
+        ;;
+    esac
+
+    now="$(date +%s)"
+    if (( now >= deadline )); then
+      last_failure_reason="auth-refresh-timeout"
+      write_state "failed" "$last_failure_reason"
+      return 1
+    fi
+
+    sleep_seconds="$auth_refresh_poll_seconds"
+    if (( sleep_seconds > deadline - now )); then
+      sleep_seconds=$(( deadline - now ))
+    fi
+
+    if (( sleep_seconds < 1 )); then
+      sleep_seconds=1
+    fi
+    sleep "$sleep_seconds"
+  done
+}
+
+run_initial_exec() {
+  stream_codex_exec initial
+}
+
+run_resume_exec() {
+  stream_codex_exec resume
+}
+
+attempt_run() {
+  local reason auth_before_switch quota_label_before_switch quota_switch_signature_before_switch quota_switch_result shell_flags_before_quota_switch
+
+  attempt=$((attempt + 1))
+  last_quota_switch_status=""
+  last_attempt_start_quota_label="$(quota_active_label)"
+  write_state "running" ""
+
+  if [[ -z "$thread_id" ]]; then
+    log_runner "starting Codex exec attempt ${attempt}"
+    run_initial_exec
+  else
+    log_runner "resuming Codex thread ${thread_id} (resume ${resume_count}/${max_resume_attempts})"
+    run_resume_exec
+  fi
+
+  if [[ "${last_exit_code}" == "0" ]]; then
+    last_failure_reason=""
+    write_state "succeeded" ""
+    return 0
+  fi
+
+  reason="$(classify_failure_reason "$(new_output_since "$last_attempt_start_size")")"
+  last_failure_reason="${reason:-worker-exit-failed}"
+
+  if [[ -z "$thread_id" ]]; then
+    write_state "failed" "$last_failure_reason"
+    return 1
+  fi
+
+  case "$last_failure_reason" in
+    usage-limit|auth-failure|auth-401|account-banned)
+      if (( resume_count >= max_resume_attempts )); then
+        last_failure_reason="resume-attempts-exhausted"
+        write_state "failed" "$last_failure_reason"
+        return 1
+      fi
+
+      auth_before_switch="$(auth_fingerprint)"
+      quota_label_before_switch="$last_attempt_start_quota_label"
+      quota_switch_signature_before_switch="$(quota_switch_signature)"
+      last_auth_fingerprint="$auth_before_switch"
+      if [[ "$last_failure_reason" == "usage-limit" || "$last_failure_reason" == "auth-401" || "$last_failure_reason" == "account-banned" ]]; then
+        if (( quota_autoswitch_attempt_count >= max_quota_autoswitch_attempts )); then
+          log_runner "automatic Codex quota switching already ran ${quota_autoswitch_attempt_count} time(s) in this worker; refusing another rotation"
+          last_failure_reason="quota-switch-attempt-limit"
+          write_state "failed" "$last_failure_reason"
+          return 1
+        fi
+        write_state "switching-account" "$last_failure_reason"
+        shell_flags_before_quota_switch="$-"
+        set +e
+        run_quota_autoswitch
+        quota_switch_result=$?
+        case "$shell_flags_before_quota_switch" in
+          *e*) set -e ;;
+          *) set +e ;;
+        esac
+        if [[ "$quota_switch_result" == "10" ]]; then
+          log_runner "quota manager deferred rotation until ${last_quota_next_retry_at:-unknown}; automatic timed re-tries are disabled for safety"
+          last_failure_reason="quota-switch-deferred"
+          write_state "failed" "$last_failure_reason"
+          return 1
+        fi
+      fi
+
+      if ! wait_for_auth_refresh "$auth_before_switch" "$last_failure_reason" "$quota_label_before_switch" "$quota_switch_signature_before_switch"; then
+        return 1
+      fi
+
+      resume_count=$((resume_count + 1))
+      return 2
+      ;;
+    *)
+      write_state "failed" "$last_failure_reason"
+      return 1
+      ;;
+  esac
+}
+
+write_state "running" ""
+
+while :; do
+  set +e
+  attempt_run
+  attempt_status=$?
+  set -e
+
+  if [[ "$attempt_status" == "0" ]]; then
+    exit 0
+  fi
+
+  if [[ "$attempt_status" == "2" ]]; then
+    continue
+  fi
+
+  exit "${last_exit_code:-1}"
+done

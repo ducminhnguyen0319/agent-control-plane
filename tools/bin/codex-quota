@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+QUOTA_ENTRY="${SCRIPT_DIR}/../vendor/codex-quota/codex-quota.js"
+NODE_BIN="${ACP_CODEX_QUOTA_NODE_BIN:-${F_LOSNING_CODEX_QUOTA_NODE_BIN:-}}"
+
+if [[ -z "${NODE_BIN}" ]]; then
+  NODE_BIN="$(command -v node 2>/dev/null || true)"
+fi
+
+if [[ -z "${NODE_BIN}" ]]; then
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  if [[ -s "${NVM_DIR}/nvm.sh" ]]; then
+    # shellcheck source=/dev/null
+    . "${NVM_DIR}/nvm.sh"
+    NODE_BIN="$(command -v node 2>/dev/null || true)"
+  fi
+fi
+
+if [[ -z "${NODE_BIN}" ]]; then
+  echo "node is required to run the bundled codex-quota tool" >&2
+  exit 1
+fi
+
+if [[ ! -f "${QUOTA_ENTRY}" ]]; then
+  echo "bundled codex-quota entrypoint not found: ${QUOTA_ENTRY}" >&2
+  exit 1
+fi
+
+exec "${NODE_BIN}" "${QUOTA_ENTRY}" "$@"

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-project-run-kilo-session [shared session-wrapper options]
+
+Placeholder adapter for the roadmap. The public package ships this command so
+ACP can expose and test worker routing for `kilo`, but live session execution
+is not implemented yet.
+
+Use `codex`, `claude`, or `openclaw` for real runs today. See ROADMAP.md for
+current backend maturity.
+EOF
+}
+
+case "${1:-}" in
+  --help|-h)
+    usage
+    exit 0
+    ;;
+esac
+
+echo "agent-project-run-kilo-session: kilo support is scaffolded, but execution is not implemented yet" >&2
+echo "Choose codex, claude, or openclaw for live runs today." >&2
+exit 1

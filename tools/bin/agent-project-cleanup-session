@@ -1,0 +1,244 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-project-cleanup-session --repo-root <path> [--runs-root <path> --history-root <path> --session <id>] [--worktree <path>] [--mode generic|issue|pr] [--remote <name>] [--remove-file <path>] [--keep-remote] [--allow-unmerged] [--skip-worktree-cleanup]
+
+Cleanup a project-lane worktree/branch using shared agent helpers, then archive
+the session run directory when one is provided.
+EOF
+}
+
+shared_agent_home="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+repo_root="${AGENT_PROJECT_REPO_ROOT:-}"
+runs_root="${AGENT_PROJECT_RUNS_ROOT:-}"
+history_root="${AGENT_PROJECT_HISTORY_ROOT:-}"
+session=""
+worktree_path=""
+mode="generic"
+remote_name="origin"
+remove_file=""
+keep_remote="auto"
+allow_unmerged="auto"
+merged_base=""
+skip_worktree_cleanup="false"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo-root) repo_root="${2:-}"; shift 2 ;;
+    --runs-root) runs_root="${2:-}"; shift 2 ;;
+    --history-root) history_root="${2:-}"; shift 2 ;;
+    --session) session="${2:-}"; shift 2 ;;
+    --worktree) worktree_path="${2:-}"; shift 2 ;;
+    --mode) mode="${2:-}"; shift 2 ;;
+    --remote) remote_name="${2:-}"; shift 2 ;;
+    --remove-file) remove_file="${2:-}"; shift 2 ;;
+    --merged-base) merged_base="${2:-}"; shift 2 ;;
+    --keep-remote) keep_remote="true"; shift ;;
+    --allow-unmerged) allow_unmerged="true"; shift ;;
+    --skip-worktree-cleanup) skip_worktree_cleanup="true"; shift ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$repo_root" ]]; then
+  echo "--repo-root is required" >&2
+  usage >&2
+  exit 1
+fi
+
+case "$mode" in
+  generic|issue|pr) ;;
+  *)
+    echo "--mode must be generic, issue, or pr" >&2
+    exit 1
+    ;;
+esac
+
+if [[ -z "$worktree_path" && -z "$session" ]]; then
+  echo "Provide at least one of --worktree or --session" >&2
+  usage >&2
+  exit 1
+fi
+
+if [[ -n "$session" && ( -z "$runs_root" || -z "$history_root" ) ]]; then
+  echo "--runs-root and --history-root are required when --session is set" >&2
+  usage >&2
+  exit 1
+fi
+
+if [[ "$keep_remote" == "auto" ]]; then
+  case "$mode" in
+    issue) keep_remote="true" ;;
+    *) keep_remote="false" ;;
+  esac
+fi
+
+if [[ "$allow_unmerged" == "auto" ]]; then
+  case "$mode" in
+    issue|pr) allow_unmerged="true" ;;
+    *) allow_unmerged="false" ;;
+  esac
+fi
+
+meta_file=""
+branch_name=""
+result_file=""
+cleanup_warning=""
+cleanup_status="0"
+cleanup_error=""
+cleanup_mode="noop"
+orphan_fallback_used="false"
+
+if [[ -n "$session" ]]; then
+  meta_file="${runs_root}/${session}/run.env"
+  if [[ -f "$meta_file" ]]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "$meta_file"
+    set +a
+    branch_name="${BRANCH:-}"
+    result_file="${RESULT_FILE:-}"
+    if [[ -z "$worktree_path" ]]; then
+      worktree_path="${WORKTREE:-}"
+    fi
+  fi
+fi
+
+if [[ -z "$remove_file" ]]; then
+  remove_file="$result_file"
+fi
+
+cleanup_tool="${shared_agent_home}/tools/bin/agent-cleanup-worktree"
+archive_tool="${shared_agent_home}/tools/bin/agent-project-archive-run"
+
+canonicalize_existing_dir() {
+  local target="${1:-}"
+  [[ -n "$target" && -d "$target" ]] || return 1
+  (
+    cd "$target"
+    pwd -P
+  )
+}
+
+path_is_within_root() {
+  local target="${1:-}"
+  local root="${2:-}"
+  local target_canonical=""
+  local root_canonical=""
+
+  target_canonical="$(canonicalize_existing_dir "$target" || true)"
+  root_canonical="$(canonicalize_existing_dir "$root" || true)"
+  [[ -n "$target_canonical" && -n "$root_canonical" ]] || return 1
+  [[ "$target_canonical" == "$root_canonical" || "$target_canonical" == "$root_canonical"/* ]]
+}
+
+cleanup_with_branch_tool() {
+  local include_path="${1:-yes}"
+  local -a cleanup_args
+
+  cleanup_args=(--branch "$branch_name")
+  if [[ -n "$remote_name" ]]; then
+    cleanup_args+=(--remote "$remote_name")
+  fi
+  if [[ -n "$merged_base" ]]; then
+    cleanup_args+=(--merged-base "$merged_base")
+  fi
+  if [[ "$include_path" == "yes" && -n "$worktree_path" && -d "$worktree_path" ]]; then
+    cleanup_args+=(--path "$worktree_path")
+  fi
+  if [[ "$keep_remote" == "true" ]]; then
+    cleanup_args+=(--keep-remote)
+  fi
+  if [[ "$allow_unmerged" == "true" ]]; then
+    cleanup_args+=(--allow-unmerged)
+  fi
+
+  (
+    cd "$repo_root"
+    "$cleanup_tool" "${cleanup_args[@]}"
+  )
+}
+
+cleanup_orphan_worktree_dir() {
+  local worktree_root="${AGENT_PROJECT_WORKTREE_ROOT:-${F_LOSNING_WORKTREE_ROOT:-}}"
+  local worktree_canonical=""
+
+  [[ -n "$worktree_path" && -d "$worktree_path" ]] || return 1
+  [[ ! -e "$worktree_path/.git" ]] || return 1
+  [[ -n "$worktree_root" ]] || return 1
+  path_is_within_root "$worktree_path" "$worktree_root" || return 1
+
+  worktree_canonical="$(canonicalize_existing_dir "$worktree_path" || true)"
+  [[ -n "$worktree_canonical" ]] || return 1
+  rm -rf "$worktree_canonical"
+  git -C "$repo_root" worktree prune >/dev/null 2>&1 || true
+}
+
+if [[ "$skip_worktree_cleanup" != "true" && -n "$branch_name" ]]; then
+  if cleanup_output="$(cleanup_with_branch_tool yes 2>&1)"; then
+    cleanup_mode="branch"
+  else
+    cleanup_status="$?"
+    cleanup_error="${cleanup_output}"
+    if cleanup_orphan_worktree_dir; then
+      orphan_fallback_used="true"
+      if cleanup_retry_output="$(cleanup_with_branch_tool no 2>&1)"; then
+        cleanup_mode="orphan-worktree"
+        cleanup_status="0"
+        cleanup_warning="${cleanup_error}"
+      else
+        cleanup_status="$?"
+        cleanup_error="${cleanup_error}"$'\n'"${cleanup_retry_output}"
+      fi
+    fi
+  fi
+elif [[ "$skip_worktree_cleanup" != "true" && -n "$worktree_path" ]] && git -C "$repo_root" worktree list --porcelain | rg -F -q "worktree $worktree_path"; then
+  git -C "$repo_root" worktree remove "$worktree_path" --force || true
+  git -C "$repo_root" worktree prune
+  cleanup_mode="worktree"
+elif [[ "$skip_worktree_cleanup" == "true" ]]; then
+  cleanup_mode="archived-only"
+fi
+
+archive_output=""
+if [[ -n "$session" ]]; then
+  archive_output="$(
+    "$archive_tool" \
+      --runs-root "$runs_root" \
+      --history-root "$history_root" \
+      --session "$session" \
+      --remove-file "${remove_file:-}"
+  )"
+fi
+
+if [[ "$cleanup_status" != "0" && -z "$session" ]]; then
+  [[ -n "$cleanup_error" ]] && printf '%s\n' "$cleanup_error" >&2
+  exit "$cleanup_status"
+fi
+
+printf 'SESSION=%s\n' "$session"
+printf 'MODE=%s\n' "$mode"
+printf 'WORKTREE=%s\n' "$worktree_path"
+printf 'BRANCH=%s\n' "$branch_name"
+printf 'KEEP_REMOTE=%s\n' "$keep_remote"
+printf 'ALLOW_UNMERGED=%s\n' "$allow_unmerged"
+printf 'SKIP_WORKTREE_CLEANUP=%s\n' "$skip_worktree_cleanup"
+printf 'CLEANUP_MODE=%s\n' "$cleanup_mode"
+printf 'ORPHAN_FALLBACK_USED=%s\n' "$orphan_fallback_used"
+printf 'CLEANUP_STATUS=%s\n' "$cleanup_status"
+if [[ -n "$meta_file" ]]; then
+  printf 'META_FILE=%s\n' "$meta_file"
+fi
+if [[ -n "$archive_output" ]]; then
+  printf '%s\n' "$archive_output"
+fi
+if [[ -n "$cleanup_warning" ]]; then
+  printf 'CLEANUP_WARNING=%s\n' "$(printf '%s' "$cleanup_warning" | tr '\n' ' ' | sed 's/  */ /g')"
+fi
+if [[ "$cleanup_status" != "0" && -n "$cleanup_error" ]]; then
+  printf 'CLEANUP_ERROR=%s\n' "$(printf '%s' "$cleanup_error" | tr '\n' ' ' | sed 's/  */ /g')"
+fi

@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-project-capture-worker --runs-root <path> --session <id> [--lines <n>]
+
+Print the latest worker transcript, preferring a live tmux session and falling
+back to the persisted run log.
+EOF
+}
+
+runs_root="${AGENT_PROJECT_RUNS_ROOT:-}"
+session=""
+lines="80"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --runs-root) runs_root="${2:-}"; shift 2 ;;
+    --session) session="${2:-}"; shift 2 ;;
+    --lines) lines="${2:-}"; shift 2 ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$runs_root" || -z "$session" ]]; then
+  usage >&2
+  exit 1
+fi
+
+output_file="${runs_root}/${session}/${session}.log"
+
+if tmux has-session -t "$session" 2>/dev/null; then
+  tmux capture-pane -t "$session" -p | tail -n "$lines"
+  exit 0
+fi
+
+if [[ -f "$output_file" ]]; then
+  tail -n "$lines" "$output_file"
+  exit 0
+fi
+
+echo "no tmux session or log found for $session" >&2
+exit 1

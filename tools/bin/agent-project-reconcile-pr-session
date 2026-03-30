@@ -1,0 +1,1005 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+bootstrap_flow_shell_lib() {
+  local candidate=""
+  local skill_name=""
+
+  for candidate in \
+    "${SCRIPT_DIR}/flow-shell-lib.sh" \
+    "${AGENT_CONTROL_PLANE_ROOT:-}/tools/bin/flow-shell-lib.sh" \
+    "${ACP_ROOT:-}/tools/bin/flow-shell-lib.sh" \
+    "${F_LOSNING_FLOW_ROOT:-}/tools/bin/flow-shell-lib.sh" \
+    "${AGENT_FLOW_SKILL_ROOT:-}/tools/bin/flow-shell-lib.sh" \
+    "${SHARED_AGENT_HOME:-}/tools/bin/flow-shell-lib.sh" \
+    "$(pwd)/tools/bin/flow-shell-lib.sh"; do
+    if [[ -n "${candidate}" && -f "${candidate}" ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+
+  if [[ -n "${SHARED_AGENT_HOME:-}" ]]; then
+    for skill_name in "${AGENT_CONTROL_PLANE_SKILL_NAME:-agent-control-plane}" "${AGENT_CONTROL_PLANE_COMPAT_ALIAS:-}"; do
+      [[ -n "${skill_name}" ]] || continue
+      candidate="${SHARED_AGENT_HOME}/skills/openclaw/${skill_name}/tools/bin/flow-shell-lib.sh"
+      if [[ -f "${candidate}" ]]; then
+        printf '%s\n' "${candidate}"
+        return 0
+      fi
+    done
+  fi
+
+  echo "unable to locate flow-shell-lib.sh for reconcile bootstrap" >&2
+  return 1
+}
+
+FLOW_SHELL_LIB_PATH="$(bootstrap_flow_shell_lib)"
+BOOTSTRAP_TOOLS_DIR="$(cd "$(dirname "${FLOW_SHELL_LIB_PATH}")" && pwd)"
+# shellcheck source=/dev/null
+source "${FLOW_SHELL_LIB_PATH}"
+
+resolve_reconcile_tools_dir() {
+  local candidate_root=""
+  local skill_name=""
+
+  for candidate_root in \
+    "${AGENT_CONTROL_PLANE_ROOT:-}" \
+    "${ACP_ROOT:-}" \
+    "${F_LOSNING_FLOW_ROOT:-}" \
+    "${AGENT_FLOW_SKILL_ROOT:-}"; do
+    if [[ -n "${candidate_root}" && -d "${candidate_root}/tools/bin" ]]; then
+      printf '%s/tools/bin\n' "${candidate_root}"
+      return 0
+    fi
+  done
+
+  if [[ -n "${SHARED_AGENT_HOME:-}" ]]; then
+    if [[ -d "${SHARED_AGENT_HOME}/tools/bin" ]]; then
+      printf '%s/tools/bin\n' "${SHARED_AGENT_HOME}"
+      return 0
+    fi
+    for skill_name in "${AGENT_CONTROL_PLANE_SKILL_NAME:-agent-control-plane}" "${AGENT_CONTROL_PLANE_COMPAT_ALIAS:-}"; do
+      [[ -n "${skill_name}" ]] || continue
+      candidate_root="${SHARED_AGENT_HOME}/skills/openclaw/${skill_name}"
+      if [[ -d "${candidate_root}/tools/bin" ]]; then
+        printf '%s/tools/bin\n' "${candidate_root}"
+        return 0
+      fi
+    done
+  fi
+
+  if [[ -d "${SCRIPT_DIR}" ]]; then
+    printf '%s\n' "${SCRIPT_DIR}"
+    return 0
+  fi
+
+  printf '%s\n' "${BOOTSTRAP_TOOLS_DIR}"
+}
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-project-reconcile-pr-session --session <id> --repo-slug <owner/repo> --repo-root <path> --runs-root <path> --history-root <path> [--hook-file <path>]
+
+Reconcile a completed PR worker run using shared lifecycle control flow while
+allowing project adapters to inject policy hooks.
+EOF
+}
+
+shared_tools_dir="$(resolve_reconcile_tools_dir)"
+resolve_reconcile_helper_path() {
+  local helper_name="${1:?helper name required}"
+  local candidate=""
+
+  for candidate in \
+    "${SCRIPT_DIR}/${helper_name}" \
+    "${BOOTSTRAP_TOOLS_DIR}/${helper_name}" \
+    "${shared_tools_dir}/${helper_name}"; do
+    if [[ -n "${candidate}" && -f "${candidate}" ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+
+  echo "unable to locate ${helper_name} for reconcile bootstrap" >&2
+  return 1
+}
+
+FLOW_CONFIG_LIB_PATH="$(resolve_reconcile_helper_path "flow-config-lib.sh")"
+# shellcheck source=/dev/null
+source "${FLOW_CONFIG_LIB_PATH}"
+verification_guard_script="${shared_tools_dir}/branch-verification-guard.sh"
+session=""
+repo_slug=""
+repo_root=""
+runs_root=""
+history_root=""
+hook_file=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --session) session="${2:-}"; shift 2 ;;
+    --repo-slug) repo_slug="${2:-}"; shift 2 ;;
+    --repo-root) repo_root="${2:-}"; shift 2 ;;
+    --runs-root) runs_root="${2:-}"; shift 2 ;;
+    --history-root) history_root="${2:-}"; shift 2 ;;
+    --hook-file) hook_file="${2:-}"; shift 2 ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$session" || -z "$repo_slug" || -z "$repo_root" || -z "$runs_root" || -z "$history_root" ]]; then
+  usage >&2
+  exit 1
+fi
+
+status_out="$(
+  "${shared_tools_dir}/agent-project-worker-status" \
+    --runs-root "$runs_root" \
+    --session "$session"
+)"
+status="$(awk -F= '/^STATUS=/{print $2}' <<<"$status_out")"
+failure_reason="$(awk -F= '/^FAILURE_REASON=/{print $2}' <<<"$status_out" | tail -n 1)"
+
+meta_file="$(awk -F= '/^META_FILE=/{print $2}' <<<"$status_out")"
+if [[ -z "$meta_file" || ! -f "$meta_file" ]]; then
+  echo "missing metadata for session $session" >&2
+  exit 1
+fi
+
+run_dir="$(dirname "$meta_file")"
+
+set -a
+# shellcheck source=/dev/null
+source "$meta_file"
+set +a
+pr_worktree="${WORKTREE:-}"
+
+pr_number="${PR_NUMBER:-}"
+if [[ -z "$pr_number" ]]; then
+  echo "session $session is missing PR_NUMBER" >&2
+  exit 1
+fi
+
+result_outcome=""
+result_action=""
+result_issue_id="${ISSUE_ID:-}"
+host_blocker_file="${run_dir}/host-blocker.md"
+prompt_file="${run_dir}/prompt.md"
+pr_comment_file="${run_dir}/pr-comment.md"
+session_log_file="${run_dir}/${session}.log"
+record_verification_script="${FLOW_TOOLS_DIR:-${shared_tools_dir}}/record-verification.sh"
+result_file_candidate="${run_dir}/result.env"
+if [[ ! -f "$result_file_candidate" && -n "${RESULT_FILE:-}" && -f "${RESULT_FILE}" ]]; then
+  result_file_candidate="${RESULT_FILE}"
+fi
+if [[ -f "$result_file_candidate" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  source "$result_file_candidate"
+  set +a
+  result_outcome="${OUTCOME:-}"
+  result_action="${ACTION:-}"
+  result_issue_id="${ISSUE_ID:-${result_issue_id}}"
+fi
+
+pr_schedule_retry() { :; }
+pr_clear_retry() { :; }
+pr_cleanup_linked_issue_session() { :; }
+pr_cleanup_merged_residue() { :; }
+pr_linked_issue_should_close() { printf 'yes\n'; }
+pr_after_merged() { :; }
+pr_after_closed() { :; }
+pr_automerge_allowed() { printf 'no\n'; }
+pr_review_pass_action() { printf 'merge\n'; }
+pr_after_double_check_advanced() { :; }
+pr_after_updated_branch() { :; }
+pr_after_blocked() { :; }
+pr_after_succeeded() { :; }
+pr_after_failed() { :; }
+pr_after_reconciled() { :; }
+pr_result_contract_note=""
+
+if [[ -n "$hook_file" && -f "$hook_file" ]]; then
+  # shellcheck source=/dev/null
+  source "$hook_file"
+fi
+
+provider_cooldown_script="${shared_tools_dir}/provider-cooldown-state.sh"
+
+schedule_provider_quota_cooldown() {
+  local reason="${1:-provider-quota-limit}"
+  [[ "${failure_reason:-}" == "provider-quota-limit" ]] || return 0
+  [[ -x "${provider_cooldown_script}" ]] || return 0
+
+  "${provider_cooldown_script}" schedule "${reason}" >/dev/null || true
+}
+
+clear_provider_quota_cooldown() {
+  [[ -x "${provider_cooldown_script}" ]] || return 0
+
+  "${provider_cooldown_script}" clear >/dev/null || true
+}
+
+owner="${repo_slug%%/*}"
+repo="${repo_slug#*/}"
+pr_view_json="$(flow_github_pr_view_json "$repo_slug" "$pr_number")"
+pr_state="$(jq -r '.state' <<<"$pr_view_json")"
+pr_base_ref="$(jq -r '.baseRefName // "main"' <<<"$pr_view_json")"
+
+if [[ "$status" == "RUNNING" && "$pr_state" != "MERGED" && "$pr_state" != "CLOSED" ]]; then
+  printf 'STATUS=%s\n' "$status"
+  exit 0
+fi
+
+review_pass_action_from_result_action() {
+  case "${1:-}" in
+    host-advance-double-check-2)
+      printf 'advance-double-check-2\n'
+      ;;
+    host-await-human-review)
+      printf 'wait-human\n'
+      ;;
+    host-approve-and-merge|"")
+      printf 'merge\n'
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+normalize_pr_result_contract() {
+  [[ "$status" == "SUCCEEDED" ]] || return 0
+  [[ "$pr_state" == "MERGED" ]] && return 0
+
+  case "${result_outcome:-}" in
+    approved-local-review-passed)
+      local review_pass_action expected_action legacy_action=""
+      if [[ -n "${result_action:-}" ]]; then
+        if review_pass_action="$(review_pass_action_from_result_action "${result_action}" 2>/dev/null)"; then
+          :
+        elif [[ "${result_action}" == "host-approve-and-merge" ]]; then
+          review_pass_action="merge"
+          pr_result_contract_note="normalized-legacy-review-action"
+        else
+          echo "invalid PR review result contract for session ${session}: ACTION='${result_action}'" >&2
+          return 1
+        fi
+      else
+        review_pass_action="$(pr_review_pass_action "$pr_number")"
+      fi
+      case "$review_pass_action" in
+        advance-double-check-2)
+          expected_action="host-advance-double-check-2"
+          legacy_action="host-approve-and-merge"
+          ;;
+        wait-human)
+          expected_action="host-await-human-review"
+          ;;
+        merge|"")
+          expected_action="host-approve-and-merge"
+          ;;
+        *)
+          echo "unsupported review pass action for PR ${pr_number}: ${review_pass_action}" >&2
+          return 1
+          ;;
+      esac
+      if [[ -z "${result_action:-}" ]]; then
+        result_action="$expected_action"
+        pr_result_contract_note="normalized-missing-review-action"
+        return 0
+      fi
+      if [[ "$result_action" == "$expected_action" ]]; then
+        return 0
+      fi
+      if [[ -n "$legacy_action" && "$result_action" == "$legacy_action" ]]; then
+        result_action="$expected_action"
+        pr_result_contract_note="normalized-legacy-review-action"
+        return 0
+      fi
+      echo "invalid PR review result contract for session ${session}: OUTCOME='${result_outcome}' ACTION='${result_action}' EXPECTED='${expected_action}'" >&2
+      return 1
+      ;;
+    updated-branch)
+      if [[ -z "${result_action:-}" ]]; then
+        result_action="host-push-pr-branch"
+        pr_result_contract_note="normalized-missing-updated-branch-action"
+        return 0
+      fi
+      if [[ "$result_action" == "host-push-pr-branch" ]]; then
+        return 0
+      fi
+      echo "invalid PR updated-branch result contract for session ${session}: ACTION='${result_action}'" >&2
+      return 1
+      ;;
+    no-change-needed)
+      if [[ -z "${result_action:-}" ]]; then
+        result_action="host-refresh-pr-state"
+        pr_result_contract_note="normalized-missing-no-change-needed-action"
+        return 0
+      fi
+      if [[ "$result_action" == "host-refresh-pr-state" ]]; then
+        return 0
+      fi
+      echo "invalid PR no-change-needed result contract for session ${session}: ACTION='${result_action}'" >&2
+      return 1
+      ;;
+    blocked)
+      if [[ -z "${result_action:-}" ]]; then
+        result_action="host-comment-pr-blocker"
+        pr_result_contract_note="normalized-missing-blocked-action"
+        return 0
+      fi
+      case "$result_action" in
+        host-comment-pr-blocker)
+          return 0
+          ;;
+        requested-changes-or-blocked)
+          result_action="host-comment-pr-blocker"
+          pr_result_contract_note="normalized-legacy-blocked-action"
+          return 0
+          ;;
+        *)
+          echo "invalid PR blocked result contract for session ${session}: ACTION='${result_action}'" >&2
+          return 1
+          ;;
+      esac
+      ;;
+    *)
+      echo "invalid PR worker result contract for session ${session}: OUTCOME='${result_outcome:-}' ACTION='${result_action:-}'" >&2
+      return 1
+      ;;
+  esac
+}
+
+mark_reconciled() {
+  if [[ -d "$run_dir" ]]; then
+    touch "${run_dir}/reconciled.ok"
+  fi
+}
+
+post_pr_comment_if_present() {
+  local comment_file="${run_dir}/pr-comment.md"
+  [[ -s "$comment_file" ]] || return 0
+  if pr_comment_already_posted; then
+    return 0
+  fi
+  flow_github_api_repo "${repo_slug}" "issues/${pr_number}/comments" --method POST -f body="$(cat "$comment_file")" >/dev/null
+}
+
+pr_comment_already_posted() {
+  local comment_file="${run_dir}/pr-comment.md"
+  [[ -s "$comment_file" ]] || return 1
+  local comment_body comments_json
+  comment_body="$(cat "$comment_file")"
+  comments_json="$(flow_github_pr_view_json "$repo_slug" "$pr_number" 2>/dev/null || true)"
+  [[ -n "$comments_json" ]] || return 1
+  jq -e --arg body "$comment_body" 'any(.comments[]?; .body == $body)' >/dev/null <<<"$comments_json"
+}
+
+blocked_result_indicates_local_bind_failure() {
+  local candidate_file
+  for candidate_file in "$pr_comment_file" "$session_log_file"; do
+    [[ -f "$candidate_file" ]] || continue
+    if grep -Eiq 'listen EPERM|failed to bind to local ports|Process from config\.webServer exited early' "$candidate_file"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+extract_preapproved_host_recovery_commands() {
+  [[ -f "$prompt_file" ]] || return 0
+  sed -n 's/^.*loopback retry command: `\(.*\)`$/\1/p' "$prompt_file"
+}
+
+record_host_verification_result() {
+  local verification_status="${1:?verification status required}"
+  local command_text="${2:?command text required}"
+  local note_text="${3:-}"
+
+  if [[ ! -x "$record_verification_script" ]]; then
+    return 0
+  fi
+
+  if [[ -n "$note_text" ]]; then
+    bash "$record_verification_script" --run-dir "$run_dir" --status "$verification_status" --command "$command_text" --note "$note_text" >/dev/null
+  else
+    bash "$record_verification_script" --run-dir "$run_dir" --status "$verification_status" --command "$command_text" >/dev/null
+  fi
+}
+
+run_host_verification_command() {
+  local command_text="${1:?command text required}"
+
+  {
+    printf '\n[host-recovery] command=%s\n' "$command_text"
+  } >>"$session_log_file"
+
+  if WORKTREE_DIR="$pr_worktree" HOST_COMMAND="$command_text" bash -lc 'set -euo pipefail; cd "$WORKTREE_DIR"; eval "$HOST_COMMAND"' >>"$session_log_file" 2>&1; then
+    record_host_verification_result "pass" "$command_text" "host-recovery-after-sandbox-bind-failure"
+    return 0
+  fi
+
+  record_host_verification_result "fail" "$command_text" "host-recovery-after-sandbox-bind-failure"
+  printf '[host-recovery] command failed=%s\n' "$command_text" >>"$session_log_file"
+  return 1
+}
+
+rewrite_pr_comment_for_host_recovery() {
+  local commands_text="${1:-}"
+  local tmp_comment_file="${pr_comment_file}.tmp.$$"
+  local command_text=""
+
+  if [[ -f "$pr_comment_file" ]]; then
+    awk '
+      /^\*\*Blocker\*\*$/ { exit }
+      { print }
+    ' "$pr_comment_file" >"$tmp_comment_file"
+  else
+    : >"$tmp_comment_file"
+  fi
+
+  {
+    if [[ -s "$tmp_comment_file" ]]; then
+      printf '\n\n'
+    fi
+    printf '**Host Recovery**\n'
+    printf -- '- Host reran the pre-approved verification outside the worker sandbox after sandbox-only local port bind failures.\n'
+    while IFS= read -r command_text; do
+      [[ -n "$command_text" ]] || continue
+      printf -- '- ✅ `%s`\n' "$command_text"
+    done <<<"$commands_text"
+  } >>"$tmp_comment_file"
+
+  mv "$tmp_comment_file" "$pr_comment_file"
+}
+
+persist_updated_branch_result_contract() {
+  cat >"${run_dir}/result.env" <<EOF
+OUTCOME=updated-branch
+ACTION=host-push-pr-branch
+PR_NUMBER=${pr_number}
+ISSUE_ID=${result_issue_id}
+EOF
+}
+
+attempt_blocked_pr_host_verification_recovery() {
+  local recovery_commands=""
+  local command_text=""
+
+  [[ "${result_outcome:-}" == "blocked" ]] || return 1
+  [[ -n "$pr_worktree" && -d "$pr_worktree" ]] || return 1
+  blocked_result_indicates_local_bind_failure || return 1
+
+  recovery_commands="$(extract_preapproved_host_recovery_commands)"
+  [[ -n "$recovery_commands" ]] || return 1
+
+  while IFS= read -r command_text; do
+    [[ -n "$command_text" ]] || continue
+    if ! run_host_verification_command "$command_text"; then
+      return 1
+    fi
+  done <<<"$recovery_commands"
+
+  rewrite_pr_comment_for_host_recovery "$recovery_commands"
+  persist_updated_branch_result_contract
+  result_outcome="updated-branch"
+  result_action="host-push-pr-branch"
+  failure_reason=""
+  pr_result_contract_note="host-recovered-sandbox-bind-failure"
+  return 0
+}
+
+require_transition() {
+  local step="${1:?step required}"
+  shift
+  if ! "$@"; then
+    echo "reconcile transition failed: ${step}" >&2
+    exit 1
+  fi
+}
+
+close_linked_issue_if_open() {
+  local issue_id="${1:-}"
+  [[ -n "$issue_id" ]] || return 0
+
+  local issue_state
+  issue_state="$(flow_github_issue_view_json "$repo_slug" "$issue_id" 2>/dev/null | jq -r '.state // empty' || true)"
+  if [[ "$issue_state" == "OPEN" ]]; then
+    flow_github_issue_close "$repo_slug" "$issue_id" "Closed automatically after PR #${pr_number} merged." >/dev/null 2>&1 || true
+  fi
+}
+
+push_pr_branch() {
+  if [[ -z "$pr_worktree" || ! -d "$pr_worktree" ]]; then
+    echo "missing PR worktree for session $session" >&2
+    return 1
+  fi
+  if [[ -z "${PR_HEAD_REF:-}" ]]; then
+    echo "session $session is missing PR_HEAD_REF" >&2
+    return 1
+  fi
+
+  git -C "$pr_worktree" push origin "HEAD:${PR_HEAD_REF}"
+}
+
+pr_branch_commits_ahead_remote_count() {
+  if [[ -z "$pr_worktree" || ! -d "$pr_worktree" ]]; then
+    echo "missing PR worktree for session $session" >&2
+    return 1
+  fi
+  if [[ -z "${PR_HEAD_REF:-}" ]]; then
+    echo "session $session is missing PR_HEAD_REF" >&2
+    return 1
+  fi
+  if ! git -C "$pr_worktree" fetch origin "+refs/heads/${PR_HEAD_REF}:refs/remotes/origin/${PR_HEAD_REF}" --prune >/dev/null 2>&1; then
+    echo "unable to refresh remote tracking ref for PR head ${PR_HEAD_REF}" >&2
+    return 1
+  fi
+
+  git -C "$pr_worktree" rev-list --count "origin/${PR_HEAD_REF}..HEAD"
+}
+
+guard_pr_branch_verification() {
+  local guard_output=""
+  if [[ -z "$pr_worktree" || ! -d "$pr_worktree" ]]; then
+    echo "missing PR worktree for session $session" >&2
+    return 1
+  fi
+
+  if guard_output="$(
+    "${verification_guard_script}" \
+      --worktree "$pr_worktree" \
+      --base-ref "origin/${pr_base_ref}" \
+      --run-dir "$run_dir" 2>&1
+  )"; then
+    rm -f "$host_blocker_file"
+    return 0
+  fi
+
+  printf '%s\n' "$guard_output" >"$host_blocker_file"
+  printf '%s\n' "$guard_output" >&2
+  return 1
+}
+
+collect_stageable_paths() {
+  if [[ -z "$pr_worktree" || ! -d "$pr_worktree" ]]; then
+    return 0
+  fi
+
+  {
+    git -C "$pr_worktree" diff --name-only --relative
+    git -C "$pr_worktree" diff --cached --name-only --relative
+    git -C "$pr_worktree" ls-files --others --exclude-standard 2>/dev/null || true
+  } | awk '
+      NF == 0 { next }
+      $0 ~ /(^|\/)node_modules(\/|$)/ { next }
+      $0 ~ /^\.openclaw-artifacts(\/|$)/ { next }
+      !seen[$0]++ { print $0 }
+    ' | sort
+}
+
+host_commit_pr_worktree_changes() {
+  local stageable_paths
+  local commit_message_file="${run_dir}/commit-message.txt"
+  local commit_message=""
+
+  if [[ -z "$pr_worktree" || ! -d "$pr_worktree" ]]; then
+    echo "missing PR worktree for session $session" >&2
+    return 1
+  fi
+
+  stageable_paths="$(collect_stageable_paths)"
+  if [[ -n "$stageable_paths" ]]; then
+    while IFS= read -r relative_path; do
+      [[ -n "$relative_path" ]] || continue
+      git -C "$pr_worktree" add -- "$relative_path"
+    done <<<"$stageable_paths"
+  fi
+
+  if git -C "$pr_worktree" diff --cached --quiet && git -C "$pr_worktree" diff --quiet; then
+    return 0
+  fi
+
+  if [[ -f "$commit_message_file" ]]; then
+    commit_message="$(tr -d '\r' <"$commit_message_file" | sed -n '1p')"
+  fi
+
+  if [[ -z "$commit_message" ]]; then
+    if git -C "$pr_worktree" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+      commit_message="fix(pr): resolve merge drift for PR #${pr_number}"
+    else
+      commit_message="fix(pr): apply repair for PR #${pr_number}"
+    fi
+  fi
+
+  git -C "$pr_worktree" commit -m "$commit_message" >/dev/null
+}
+
+remaining_merge_conflict_paths() {
+  local base_ref="${1:?base ref required}"
+
+  if [[ -z "$pr_worktree" || ! -d "$pr_worktree" ]]; then
+    printf '%s\n' "__missing_worktree__"
+    return 0
+  fi
+
+  if git -C "$pr_worktree" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+    git -C "$pr_worktree" ls-files -u \
+      | awk '
+          NF >= 4 {
+            path=$4
+            if (!(path in seen)) {
+              seen[path]=1
+              print path
+            }
+          }
+        '
+    return 0
+  fi
+
+  if ! git -C "$repo_root" fetch origin "+refs/heads/${base_ref}:refs/remotes/origin/${base_ref}" --prune >/dev/null 2>&1; then
+    printf '%s\n' "__unable_to_fetch_base_ref__:${base_ref}"
+    return 0
+  fi
+
+  local base_sha
+  base_sha="$(git -C "$pr_worktree" merge-base HEAD "origin/${base_ref}" 2>/dev/null || true)"
+  if [[ -z "$base_sha" ]]; then
+    printf '%s\n' "__unable_to_compute_merge_base__:${base_ref}"
+    return 0
+  fi
+
+  git -C "$pr_worktree" merge-tree "$base_sha" HEAD "origin/${base_ref}" 2>/dev/null \
+    | awk '
+        /^changed in both$/ { capture=1; next }
+        capture && /^(  base|  our|  their)  / {
+          path=$NF
+          if (!(path in seen)) {
+            seen[path]=1
+            print path
+          }
+        }
+        capture && /^@@ / { capture=0 }
+      '
+}
+
+append_host_guard_comment() {
+  local base_ref="${1:?base ref required}"
+  local conflict_paths="${2:-}"
+  local comment_file="${run_dir}/pr-comment.md"
+  local host_blocker_body=""
+
+  if [[ -s "$comment_file" ]]; then
+    printf '\n\n' >>"$comment_file"
+  fi
+
+  host_blocker_body="$(cat <<EOF
+## PR repair host guard
+
+Host rejected this repair and did not push it because local merge simulation against \`${base_ref}\` still reports unresolved conflict paths:
+
+$(printf '%s\n' "$conflict_paths" | sed 's/^/- /')
+
+No partial repair commit was pushed to the PR branch. The PR stays in fix lane and will retry after cooldown.
+EOF
+)"
+
+  printf '%s\n' "$host_blocker_body" >>"$comment_file"
+  printf '%s\n' "$host_blocker_body" >"$host_blocker_file"
+}
+
+merge_state_prepared() {
+  [[ -n "$pr_worktree" && -d "$pr_worktree" ]] || return 1
+  git -C "$pr_worktree" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1
+}
+
+approve_and_merge() {
+  local approve_output
+  if ! approve_output="$(
+    flow_github_api_repo "${repo_slug}" "pulls/${pr_number}/reviews" \
+      --method POST \
+      -f event=APPROVE \
+      -f body="Automated final review passed. Safe low-risk scope, green checks, and host-side merge approved." \
+      2>&1
+  )"; then
+    if ! grep -q "Can not approve your own pull request" <<<"$approve_output"; then
+      printf '%s\n' "$approve_output" >&2
+      return 1
+    fi
+  fi
+
+  flow_github_pr_merge "$repo_slug" "$pr_number" "squash" "yes"
+}
+
+cleanup_pr_session() {
+  "${shared_tools_dir}/agent-project-cleanup-session" \
+    --repo-root "$repo_root" \
+    --runs-root "$runs_root" \
+    --history-root "$history_root" \
+    --session "$session" \
+    --worktree "$pr_worktree" \
+    --mode pr >/dev/null || true
+}
+
+notify_pr_reconciled() {
+  pr_after_reconciled "$status" "$pr_state" "${result_outcome:-}" "${result_action:-}" "$pr_number" || true
+}
+
+handle_verification_guard_block() {
+  failure_reason="verification-guard-blocked"
+  require_transition "pr_schedule_retry" pr_schedule_retry "$failure_reason"
+  require_transition "pr_after_blocked" pr_after_blocked "$pr_number"
+  cleanup_pr_session
+  result_outcome="blocked"
+  result_action="host-verification-guard-blocked"
+  notify_pr_reconciled
+}
+
+handle_linked_issue_merge_cleanup() {
+  local issue_id="${1:-}"
+  [[ -n "$issue_id" ]] || return 0
+  pr_cleanup_linked_issue_session "$issue_id" || true
+  if [[ "$(pr_linked_issue_should_close "$issue_id" || printf 'yes\n')" == "yes" ]]; then
+    close_linked_issue_if_open "$issue_id"
+  fi
+}
+
+handle_updated_branch_result() {
+  if [[ -z "$pr_worktree" || ! -d "$pr_worktree" ]]; then
+    if pr_comment_already_posted; then
+      require_transition "pr_clear_retry" pr_clear_retry
+      require_transition "pr_after_updated_branch" pr_after_updated_branch "$pr_number"
+      cleanup_pr_session
+      result_action="${result_action:-pushed-branch-for-ci}"
+      notify_pr_reconciled
+    else
+      require_transition "pr_schedule_retry" pr_schedule_retry "missing-pr-worktree-before-publish"
+      require_transition "pr_after_blocked" pr_after_blocked "$pr_number"
+      cleanup_pr_session
+      result_outcome="blocked"
+      result_action="host-missing-pr-worktree"
+      notify_pr_reconciled
+    fi
+    return 0
+  fi
+
+  if ! guard_pr_branch_verification; then
+    handle_verification_guard_block
+    return 0
+  fi
+
+  host_commit_pr_worktree_changes
+  remaining_conflict_paths="$(remaining_merge_conflict_paths "$pr_base_ref" || true)"
+  if [[ -n "$remaining_conflict_paths" ]]; then
+    append_host_guard_comment "$pr_base_ref" "$remaining_conflict_paths"
+    # Keep host-guard notes local when nothing was pushed. Posting them to GitHub
+    # makes unchanged PR heads look like successful repairs and can re-queue review.
+    require_transition "pr_schedule_retry" pr_schedule_retry "remaining-merge-conflicts-after-updated-branch"
+    require_transition "pr_after_blocked" pr_after_blocked "$pr_number"
+    cleanup_pr_session
+    result_outcome="blocked"
+    result_action="host-rejected-partial-repair"
+    notify_pr_reconciled
+    return 0
+  fi
+
+  if ! ahead_count="$(pr_branch_commits_ahead_remote_count)"; then
+    failure_reason="updated-branch-remote-ref-unavailable"
+    require_transition "pr_schedule_retry" pr_schedule_retry "$failure_reason"
+    require_transition "pr_after_blocked" pr_after_blocked "$pr_number"
+    cleanup_pr_session
+    result_outcome="blocked"
+    result_action="host-branch-ahead-check-failed"
+    notify_pr_reconciled
+    return 0
+  fi
+
+  if [[ "${ahead_count}" == "0" ]]; then
+    failure_reason="updated-branch-no-commits-ahead"
+    require_transition "pr_schedule_retry" pr_schedule_retry "$failure_reason"
+    require_transition "pr_after_blocked" pr_after_blocked "$pr_number"
+    cleanup_pr_session
+    result_outcome="blocked"
+    result_action="host-noop-updated-branch"
+    notify_pr_reconciled
+    return 0
+  fi
+
+  push_pr_branch
+  post_pr_comment_if_present
+  require_transition "pr_clear_retry" pr_clear_retry
+  require_transition "pr_after_updated_branch" pr_after_updated_branch "$pr_number"
+  cleanup_pr_session
+  result_action="${result_action:-pushed-branch-for-ci}"
+  notify_pr_reconciled
+}
+
+if [[ "$status" == "SUCCEEDED" ]] && ! normalize_pr_result_contract; then
+  status="FAILED"
+  failure_reason="invalid-result-contract"
+  pr_result_contract_note="invalid-result-contract"
+  require_transition "pr_schedule_retry" pr_schedule_retry "$failure_reason"
+  require_transition "pr_after_failed" pr_after_failed "$pr_number"
+  cleanup_pr_session
+  result_outcome="invalid-contract"
+  result_action="queued-pr-retry"
+  notify_pr_reconciled
+elif [[ "$pr_state" == "MERGED" ]]; then
+  status="SUCCEEDED"
+  failure_reason=""
+  clear_provider_quota_cooldown
+  require_transition "pr_clear_retry" pr_clear_retry
+  require_transition "handle_linked_issue_merge_cleanup" handle_linked_issue_merge_cleanup "$result_issue_id"
+  require_transition "pr_after_merged" pr_after_merged "$pr_number"
+  require_transition "pr_cleanup_merged_residue" pr_cleanup_merged_residue "$pr_number"
+  cleanup_pr_session
+  result_outcome="${result_outcome:-merged}"
+  result_action="${result_action:-approved-and-merged}"
+  notify_pr_reconciled
+elif [[ "$pr_state" == "CLOSED" ]]; then
+  status="SUCCEEDED"
+  failure_reason=""
+  clear_provider_quota_cooldown
+  require_transition "pr_clear_retry" pr_clear_retry
+  require_transition "pr_after_closed" pr_after_closed "$pr_number"
+  cleanup_pr_session
+  result_outcome="${result_outcome:-closed}"
+  result_action="${result_action:-cleaned-closed-pr}"
+  notify_pr_reconciled
+elif [[ "$status" == "SUCCEEDED" && "$result_outcome" == "approved-local-review-passed" ]]; then
+  if ! review_pass_action="$(review_pass_action_from_result_action "${result_action:-}" 2>/dev/null)"; then
+    review_pass_action="$(pr_review_pass_action "$pr_number")"
+  fi
+  case "$review_pass_action" in
+    advance-double-check-2)
+      require_transition "pr_clear_retry" pr_clear_retry
+      require_transition "pr_after_double_check_advanced" pr_after_double_check_advanced "$pr_number" "2"
+      cleanup_pr_session
+      result_outcome="double-check-1-approved"
+      result_action="queued-double-check-2"
+      notify_pr_reconciled
+      ;;
+    wait-human)
+      require_transition "pr_clear_retry" pr_clear_retry
+      require_transition "pr_after_succeeded" pr_after_succeeded "$pr_number"
+      cleanup_pr_session
+      result_outcome="waiting-human-review"
+      result_action="queued-human-review"
+      notify_pr_reconciled
+      ;;
+    merge|"")
+      if [[ "$(pr_automerge_allowed "$pr_number")" != "yes" ]]; then
+        echo "PR ${pr_number} is no longer eligible for auto-merge" >&2
+        exit 1
+      fi
+
+      require_transition "pr_clear_retry" pr_clear_retry
+      approve_and_merge
+      pr_state="$(flow_github_pr_view_json "$repo_slug" "$pr_number" | jq -r '.state')"
+      if [[ "$pr_state" != "MERGED" ]]; then
+        echo "PR ${pr_number} did not merge successfully" >&2
+        exit 1
+      fi
+
+      require_transition "handle_linked_issue_merge_cleanup" handle_linked_issue_merge_cleanup "$result_issue_id"
+      require_transition "pr_after_merged" pr_after_merged "$pr_number"
+      require_transition "pr_cleanup_merged_residue" pr_cleanup_merged_residue "$pr_number"
+      cleanup_pr_session
+      result_outcome="merged"
+      result_action="approved-and-merged"
+      notify_pr_reconciled
+      ;;
+    *)
+      echo "unsupported review pass action for PR ${pr_number}: ${review_pass_action}" >&2
+      exit 1
+      ;;
+  esac
+elif [[ "$status" == "SUCCEEDED" && "$result_outcome" == "updated-branch" ]]; then
+  handle_updated_branch_result
+elif [[ "$status" == "SUCCEEDED" && "$result_outcome" == "no-change-needed" ]]; then
+  if merge_state_prepared; then
+    remaining_conflict_paths="$(remaining_merge_conflict_paths "$pr_base_ref" || true)"
+    if [[ -n "$remaining_conflict_paths" ]]; then
+      append_host_guard_comment "$pr_base_ref" "$remaining_conflict_paths"
+      post_pr_comment_if_present
+      require_transition "pr_schedule_retry" pr_schedule_retry "remaining-merge-conflicts-after-no-change-needed"
+      require_transition "pr_after_blocked" pr_after_blocked "$pr_number"
+      cleanup_pr_session
+      result_outcome="blocked"
+      result_action="host-rejected-no-change-needed"
+      notify_pr_reconciled
+    else
+      if ! guard_pr_branch_verification; then
+        handle_verification_guard_block
+      else
+        host_commit_pr_worktree_changes
+        if ! ahead_count="$(pr_branch_commits_ahead_remote_count)"; then
+          failure_reason="no-change-needed-remote-ref-unavailable"
+          require_transition "pr_schedule_retry" pr_schedule_retry "$failure_reason"
+          require_transition "pr_after_blocked" pr_after_blocked "$pr_number"
+          cleanup_pr_session
+          result_outcome="blocked"
+          result_action="host-branch-ahead-check-failed"
+        elif [[ "${ahead_count}" == "0" ]]; then
+          failure_reason="no-change-needed-promoted-without-branch-advance"
+          require_transition "pr_schedule_retry" pr_schedule_retry "$failure_reason"
+          require_transition "pr_after_blocked" pr_after_blocked "$pr_number"
+          cleanup_pr_session
+          result_outcome="blocked"
+          result_action="host-rejected-noop-promotion"
+        else
+          push_pr_branch
+          post_pr_comment_if_present
+          require_transition "pr_clear_retry" pr_clear_retry
+          require_transition "pr_after_updated_branch" pr_after_updated_branch "$pr_number"
+          cleanup_pr_session
+          result_outcome="updated-branch"
+          result_action="host-promoted-no-change-needed-to-updated-branch"
+        fi
+        notify_pr_reconciled
+      fi
+    fi
+  else
+    remaining_conflict_paths="$(remaining_merge_conflict_paths "$pr_base_ref" || true)"
+    if [[ -n "$remaining_conflict_paths" ]]; then
+      append_host_guard_comment "$pr_base_ref" "$remaining_conflict_paths"
+      # Keep host-guard notes local when nothing was pushed. Posting them to GitHub
+      # makes unchanged PR heads look like successful repairs and can re-queue review.
+      require_transition "pr_schedule_retry" pr_schedule_retry "remaining-merge-conflicts-after-no-change-needed"
+      require_transition "pr_after_blocked" pr_after_blocked "$pr_number"
+      cleanup_pr_session
+      result_outcome="blocked"
+      result_action="host-rejected-no-change-needed"
+      notify_pr_reconciled
+    else
+      post_pr_comment_if_present
+      require_transition "pr_clear_retry" pr_clear_retry
+      require_transition "pr_after_succeeded" pr_after_succeeded "$pr_number"
+      cleanup_pr_session
+      result_action="${result_action:-refreshed-pr-state}"
+      notify_pr_reconciled
+    fi
+  fi
+elif [[ "$status" == "SUCCEEDED" && "$result_outcome" == "blocked" ]]; then
+  if attempt_blocked_pr_host_verification_recovery; then
+    handle_updated_branch_result
+  else
+    post_pr_comment_if_present
+    require_transition "pr_clear_retry" pr_clear_retry
+    require_transition "pr_after_blocked" pr_after_blocked "$pr_number"
+    cleanup_pr_session
+    result_action="${result_action:-queued-pr-fix}"
+    notify_pr_reconciled
+  fi
+elif [[ "$status" == "SUCCEEDED" ]]; then
+  clear_provider_quota_cooldown
+  require_transition "pr_clear_retry" pr_clear_retry
+  require_transition "pr_after_succeeded" pr_after_succeeded "$pr_number"
+  cleanup_pr_session
+  notify_pr_reconciled
+elif [[ "$status" == "FAILED" ]]; then
+  schedule_provider_quota_cooldown "${failure_reason:-worker-exit-failed}"
+  require_transition "pr_schedule_retry" pr_schedule_retry "${failure_reason:-worker-exit-failed}"
+  require_transition "pr_after_failed" pr_after_failed "$pr_number"
+  notify_pr_reconciled
+fi
+
+mark_reconciled
+printf 'STATUS=%s\n' "$status"
+printf 'PR_NUMBER=%s\n' "$pr_number"
+printf 'PR_STATE=%s\n' "$pr_state"
+printf 'OUTCOME=%s\n' "${result_outcome:-unknown}"
+printf 'ACTION=%s\n' "${result_action:-unknown}"
+if [[ -n "$failure_reason" ]]; then
+  printf 'FAILURE_REASON=%s\n' "$failure_reason"
+fi
+if [[ -n "$pr_result_contract_note" ]]; then
+  printf 'RESULT_CONTRACT_NOTE=%s\n' "$pr_result_contract_note"
+fi

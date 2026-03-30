@@ -1,0 +1,984 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-project-run-openclaw-session --mode safe|bypass --session <id> --worktree <path> --prompt-file <path> --runs-root <path> --adapter-id <id> --task-kind <kind> --task-id <id> [options]
+
+Launch an OpenClaw local agent worker inside tmux for a project adapter and
+persist the standard run artifacts.
+
+Options:
+  --env-prefix <prefix>               Export prefixed runtime/context env vars inside the worker
+  --context <KEY=VALUE>               Extra metadata written to run.env and exported to the worker
+  --collect-file <name>               Copy worker artifact file into the host run dir after execution
+  --reconcile-command <cmd>           Host-side command queued after the worker exits
+  --sandbox-subdir <name>             Subdir under the worktree for worker artifacts (default: .openclaw-artifacts)
+  --openclaw-model <id>               Model id for the isolated OpenClaw agent
+  --openclaw-thinking <level>         OpenClaw thinking level
+  --openclaw-timeout-seconds <secs>   OpenClaw local-agent timeout
+  --help                              Show this help
+EOF
+}
+
+mode=""
+session=""
+worktree=""
+prompt_file=""
+runs_root=""
+adapter_id=""
+task_kind=""
+task_id=""
+env_prefix=""
+sandbox_subdir=".openclaw-artifacts"
+reconcile_command=""
+keep_agent="false"
+openclaw_model="${ACP_OPENCLAW_MODEL:-${F_LOSNING_OPENCLAW_MODEL:-openrouter/stepfun/step-3.5-flash:free}}"
+openclaw_thinking="${ACP_OPENCLAW_THINKING:-${F_LOSNING_OPENCLAW_THINKING:-adaptive}}"
+openclaw_timeout_seconds="${ACP_OPENCLAW_TIMEOUT_SECONDS:-${F_LOSNING_OPENCLAW_TIMEOUT_SECONDS:-900}}"
+provided_openclaw_agent_id=""
+provided_openclaw_session_id=""
+provided_openclaw_agent_dir=""
+provided_openclaw_state_dir=""
+provided_openclaw_config_path=""
+declare -a context_items=()
+declare -a collect_files=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --mode) mode="${2:-}"; shift 2 ;;
+    --session) session="${2:-}"; shift 2 ;;
+    --worktree) worktree="${2:-}"; shift 2 ;;
+    --prompt-file) prompt_file="${2:-}"; shift 2 ;;
+    --runs-root) runs_root="${2:-}"; shift 2 ;;
+    --adapter-id) adapter_id="${2:-}"; shift 2 ;;
+    --task-kind) task_kind="${2:-}"; shift 2 ;;
+    --task-id) task_id="${2:-}"; shift 2 ;;
+    --env-prefix) env_prefix="${2:-}"; shift 2 ;;
+    --context) context_items+=("${2:-}"); shift 2 ;;
+    --collect-file) collect_files+=("${2:-}"); shift 2 ;;
+    --reconcile-command) reconcile_command="${2:-}"; shift 2 ;;
+    --sandbox-subdir) sandbox_subdir="${2:-}"; shift 2 ;;
+    --keep-agent) keep_agent="true"; shift ;;
+    --openclaw-model) openclaw_model="${2:-}"; shift 2 ;;
+    --openclaw-thinking) openclaw_thinking="${2:-}"; shift 2 ;;
+    --openclaw-timeout-seconds) openclaw_timeout_seconds="${2:-}"; shift 2 ;;
+    --openclaw-agent-id) provided_openclaw_agent_id="${2:-}"; shift 2 ;;
+    --openclaw-session-id) provided_openclaw_session_id="${2:-}"; shift 2 ;;
+    --openclaw-agent-dir) provided_openclaw_agent_dir="${2:-}"; shift 2 ;;
+    --openclaw-state-dir) provided_openclaw_state_dir="${2:-}"; shift 2 ;;
+    --openclaw-config-path) provided_openclaw_config_path="${2:-}"; shift 2 ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$mode" || -z "$session" || -z "$worktree" || -z "$prompt_file" || -z "$runs_root" || -z "$adapter_id" || -z "$task_kind" || -z "$task_id" ]]; then
+  usage >&2
+  exit 1
+fi
+
+case "$mode" in
+  safe|bypass) ;;
+  *)
+    echo "--mode must be safe or bypass" >&2
+    exit 1
+    ;;
+esac
+
+case "$openclaw_timeout_seconds" in
+  ''|*[!0-9]*) echo "--openclaw-timeout-seconds must be numeric" >&2; exit 1 ;;
+esac
+
+if ! command -v openclaw >/dev/null 2>&1; then
+  echo "unable to resolve a runnable openclaw binary" >&2
+  exit 1
+fi
+
+artifact_dir="${runs_root}/${session}"
+output_file="${artifact_dir}/${session}.log"
+inner_script="${artifact_dir}/${session}.sh"
+meta_file="${artifact_dir}/run.env"
+result_file="${artifact_dir}/result.env"
+runner_state_file="${artifact_dir}/runner.env"
+sandbox_artifact_dir="${worktree%/}/${sandbox_subdir}"
+sandbox_run_dir="${worktree%/}/${sandbox_subdir}/${session}"
+started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+openclaw_bin="$(command -v openclaw)"
+default_openclaw_agent_id="$(
+  printf '%s-%s' "$adapter_id" "$session" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/[^a-z0-9._-]+/-/g; s/^-+//; s/-+$//; s/-+/-/g' \
+    | cut -c1-63
+)"
+openclaw_agent_id="${provided_openclaw_agent_id:-${default_openclaw_agent_id}}"
+openclaw_session_id="${provided_openclaw_session_id:-${openclaw_agent_id}}"
+openclaw_state_dir="${provided_openclaw_state_dir:-${artifact_dir}/openclaw-state}"
+openclaw_config_path="${provided_openclaw_config_path:-${artifact_dir}/openclaw-config/openclaw.json}"
+openclaw_agent_dir="${provided_openclaw_agent_dir:-${artifact_dir}/openclaw-agent}"
+
+mkdir -p "$artifact_dir"
+mkdir -p "$sandbox_run_dir"
+
+if tmux has-session -t "$session" 2>/dev/null; then
+  echo "tmux session already exists: $session" >&2
+  exit 1
+fi
+
+branch_name="$(git -C "$worktree" branch --show-current 2>/dev/null || true)"
+
+printf -v session_q '%q' "$session"
+printf -v task_kind_q '%q' "$task_kind"
+printf -v task_id_q '%q' "$task_id"
+printf -v mode_q '%q' "$mode"
+printf -v worktree_q '%q' "$worktree"
+printf -v prompt_q '%q' "$prompt_file"
+printf -v output_q '%q' "$output_file"
+printf -v artifact_dir_q '%q' "$artifact_dir"
+printf -v script_q '%q' "$inner_script"
+printf -v result_q '%q' "$result_file"
+printf -v meta_file_q '%q' "$meta_file"
+printf -v runner_state_q '%q' "$runner_state_file"
+printf -v branch_q '%q' "$branch_name"
+printf -v sandbox_artifact_dir_q '%q' "$sandbox_artifact_dir"
+printf -v sandbox_run_dir_q '%q' "$sandbox_run_dir"
+printf -v adapter_id_q '%q' "$adapter_id"
+printf -v started_at_q '%q' "$started_at"
+printf -v openclaw_bin_q '%q' "$openclaw_bin"
+printf -v openclaw_state_dir_q '%q' "$openclaw_state_dir"
+printf -v openclaw_config_path_q '%q' "$openclaw_config_path"
+printf -v openclaw_agent_dir_q '%q' "$openclaw_agent_dir"
+printf -v openclaw_agent_id_q '%q' "$openclaw_agent_id"
+printf -v openclaw_session_id_q '%q' "$openclaw_session_id"
+printf -v openclaw_model_q '%q' "$openclaw_model"
+printf -v openclaw_thinking_q '%q' "$openclaw_thinking"
+printf -v openclaw_timeout_q '%q' "$openclaw_timeout_seconds"
+printf -v keep_agent_q '%q' "$keep_agent"
+
+{
+  printf 'TASK_KIND=%s\n' "$task_kind_q"
+  printf 'TASK_ID=%s\n' "$task_id_q"
+  printf 'SESSION=%s\n' "$session_q"
+  printf 'MODE=%s\n' "$mode_q"
+  printf 'WORKTREE=%s\n' "$worktree_q"
+  printf 'PROMPT_FILE=%s\n' "$prompt_q"
+  printf 'OUTPUT_FILE=%s\n' "$output_q"
+  printf 'SCRIPT=%s\n' "$script_q"
+  printf 'BRANCH=%s\n' "$branch_q"
+  printf 'RESULT_FILE=%s\n' "$result_q"
+  printf 'RUNNER_STATE_FILE=%s\n' "$runner_state_q"
+  printf 'SANDBOX_RUN_DIR=%s\n' "$sandbox_run_dir_q"
+  printf 'ADAPTER_ID=%s\n' "$adapter_id_q"
+  printf 'STARTED_AT=%s\n' "$started_at_q"
+  printf 'OPENCLAW_BIN=%s\n' "$openclaw_bin_q"
+  printf 'OPENCLAW_STATE_DIR=%s\n' "$openclaw_state_dir_q"
+  printf 'OPENCLAW_CONFIG_PATH=%s\n' "$openclaw_config_path_q"
+  printf 'OPENCLAW_AGENT_DIR=%s\n' "$openclaw_agent_dir_q"
+  printf 'OPENCLAW_AGENT_ID=%s\n' "$openclaw_agent_id_q"
+  printf 'OPENCLAW_SESSION_ID=%s\n' "$openclaw_session_id_q"
+  printf 'OPENCLAW_MODEL=%s\n' "$openclaw_model_q"
+  printf 'OPENCLAW_THINKING=%s\n' "$openclaw_thinking_q"
+  printf 'OPENCLAW_TIMEOUT_SECONDS=%s\n' "$openclaw_timeout_q"
+  printf 'OPENCLAW_KEEP_AGENT=%s\n' "$keep_agent_q"
+} >"$meta_file"
+
+context_exports=""
+if ((${#context_items[@]} > 0)); then
+  for item in "${context_items[@]}"; do
+    if [[ "$item" != *=* ]]; then
+      echo "--context must use KEY=VALUE syntax: $item" >&2
+      exit 1
+    fi
+    key="${item%%=*}"
+    value="${item#*=}"
+    if [[ ! "$key" =~ ^[A-Z0-9_]+$ ]]; then
+      echo "Invalid context key: $key" >&2
+      exit 1
+    fi
+    printf -v value_q '%q' "$value"
+    printf '%s=%s\n' "$key" "$value_q" >>"$meta_file"
+    if [[ -n "$env_prefix" ]]; then
+      context_exports+="export ${env_prefix}${key}=${value_q}"$'\n'
+    fi
+    context_exports+="export ACP_${key}=${value_q}"$'\n'
+    if [[ "$env_prefix" != "F_LOSNING_" ]]; then
+      context_exports+="export F_LOSNING_${key}=${value_q}"$'\n'
+    fi
+  done
+fi
+
+runtime_exports=$(
+  cat <<EOF
+export AGENT_PROJECT_SESSION=${session_q}
+export AGENT_PROJECT_RUN_DIR=${sandbox_run_dir_q}
+export AGENT_PROJECT_HOST_RUN_DIR=${artifact_dir_q}
+export AGENT_PROJECT_RESULT_FILE=${sandbox_run_dir_q}/result.env
+export AGENT_PROJECT_OPENCLAW_BIN=${openclaw_bin_q}
+export ACP_SESSION=${session_q}
+export ACP_RUN_DIR=${sandbox_run_dir_q}
+export ACP_HOST_RUN_DIR=${artifact_dir_q}
+export ACP_RESULT_FILE=${sandbox_run_dir_q}/result.env
+export ACP_OPENCLAW_BIN=${openclaw_bin_q}
+export ACP_OPENCLAW_SESSION_ID=${openclaw_session_id_q}
+export F_LOSNING_SESSION=${session_q}
+export F_LOSNING_RUN_DIR=${sandbox_run_dir_q}
+export F_LOSNING_HOST_RUN_DIR=${artifact_dir_q}
+export F_LOSNING_RESULT_FILE=${sandbox_run_dir_q}/result.env
+export F_LOSNING_OPENCLAW_BIN=${openclaw_bin_q}
+export F_LOSNING_OPENCLAW_SESSION_ID=${openclaw_session_id_q}
+export OPENCLAW_STATE_DIR=${openclaw_state_dir_q}
+export OPENCLAW_CONFIG_PATH=${openclaw_config_path_q}
+EOF
+)
+
+if [[ -n "$env_prefix" ]]; then
+  runtime_exports+=$'\n'
+  runtime_exports+=$(cat <<EOF
+export ${env_prefix}SESSION=${session_q}
+export ${env_prefix}RUN_DIR=${sandbox_run_dir_q}
+export ${env_prefix}HOST_RUN_DIR=${artifact_dir_q}
+export ${env_prefix}RESULT_FILE=${sandbox_run_dir_q}/result.env
+export ${env_prefix}OPENCLAW_BIN=${openclaw_bin_q}
+export ${env_prefix}OPENCLAW_SESSION_ID=${openclaw_session_id_q}
+EOF
+)
+fi
+
+collect_copy_snippet=""
+if ((${#collect_files[@]} > 0)); then
+  for artifact_name in "${collect_files[@]}"; do
+    if [[ -z "$artifact_name" ]]; then
+      continue
+    fi
+    printf -v artifact_q '%q' "$artifact_name"
+    collect_copy_snippet+=$(
+      cat <<EOF
+if [[ -f ${sandbox_run_dir_q}/${artifact_q} ]]; then
+  cp ${sandbox_run_dir_q}/${artifact_q} ${artifact_dir_q}/${artifact_q}
+fi
+EOF
+    )
+    collect_copy_snippet+=$'\n'
+  done
+fi
+
+reconcile_snippet=""
+if [[ -n "$reconcile_command" ]]; then
+  printf -v delayed_reconcile_q '%q' "sleep 2; $reconcile_command"
+  reconcile_snippet="nohup bash -lc ${delayed_reconcile_q} >> ${output_q} 2>&1 </dev/null &"
+fi
+
+cat >"$inner_script" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+${runtime_exports}
+${context_exports}cd ${worktree_q}
+
+runner_state_file=${runner_state_q}
+output_file=${output_q}
+sandbox_artifact_dir=${sandbox_artifact_dir_q}
+sandbox_run_dir=${sandbox_run_dir_q}
+artifact_dir=${artifact_dir_q}
+run_dir=${artifact_dir_q}
+worktree=${worktree_q}
+prompt_file_path=${prompt_q}
+openclaw_state_dir=${openclaw_state_dir_q}
+openclaw_config_path=${openclaw_config_path_q}
+openclaw_agent_dir=${openclaw_agent_dir_q}
+openclaw_agent_id=${openclaw_agent_id_q}
+openclaw_session_id=${openclaw_session_id_q}
+openclaw_model=${openclaw_model_q}
+openclaw_bin=${openclaw_bin_q}
+openclaw_timeout=${openclaw_timeout_q}
+openclaw_thinking=${openclaw_thinking_q}
+keep_agent=${keep_agent_q}
+openclaw_add_log="\${sandbox_run_dir}/openclaw-agents-add.log"
+
+write_state() {
+  local runner_state="\${1:?runner state required}"
+  local last_exit_code="\${2:-}"
+  local failure_reason="\${3:-}"
+  local updated_at tmp_file
+
+  updated_at="\$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  tmp_file="\${runner_state_file}.tmp.\$\$"
+  {
+    printf 'RUNNER_STATE=%q\n' "\${runner_state}"
+    printf 'THREAD_ID=%q\n' "\${openclaw_session_id}"
+    printf 'ATTEMPT=1\n'
+    printf 'RESUME_COUNT=0\n'
+    printf 'LAST_EXIT_CODE=%q\n' "\${last_exit_code}"
+    printf 'LAST_FAILURE_REASON=%q\n' "\${failure_reason}"
+    printf 'LAST_TRIGGER_REASON=%q\n' ''
+    printf 'AUTH_WAIT_STARTED_AT=%q\n' ''
+    printf 'LAST_AUTH_FINGERPRINT=%q\n' ''
+    printf 'UPDATED_AT=%q\n' "\${updated_at}"
+  } >"\${tmp_file}"
+  mv "\${tmp_file}" "\${runner_state_file}"
+}
+
+record_final_git_state() {
+  local final_head final_branch tmp_file
+
+  final_head="\$(git -C ${worktree_q} rev-parse HEAD 2>/dev/null || true)"
+  final_branch="\$(git -C ${worktree_q} branch --show-current 2>/dev/null || true)"
+  tmp_file=${meta_file_q}.tmp.final.$$
+  grep -vE '^(FINAL_HEAD|FINAL_BRANCH)=' ${meta_file_q} >"\${tmp_file}" 2>/dev/null || true
+  {
+    printf 'FINAL_HEAD=%q\n' "\${final_head}"
+    printf 'FINAL_BRANCH=%q\n' "\${final_branch}"
+  } >>"\${tmp_file}"
+  mv "\${tmp_file}" ${meta_file_q}
+}
+
+ensure_openclaw_workspace_excludes() {
+  local exclude_file line
+  exclude_file="\$(git -C ${worktree_q} config --worktree --get core.excludesFile 2>/dev/null || true)"
+  if [[ -z "\${exclude_file}" ]]; then
+    exclude_file="\${sandbox_artifact_dir}/git-exclude"
+    git -C ${worktree_q} config extensions.worktreeConfig true >/dev/null 2>&1 || true
+    git -C ${worktree_q} config --worktree core.excludesFile "\${exclude_file}"
+  fi
+
+  mkdir -p "\$(dirname "\${exclude_file}")"
+  touch "\${exclude_file}"
+  while IFS= read -r line; do
+    [[ -n "\${line}" ]] || continue
+    if ! grep -Fqx "\${line}" "\${exclude_file}" 2>/dev/null; then
+      printf '%s\n' "\${line}" >>"\${exclude_file}"
+    fi
+  done <<'PATTERNS'
+.openclaw-artifacts
+.openclaw
+SOUL.md
+TOOLS.md
+IDENTITY.md
+USER.md
+HEARTBEAT.md
+BOOTSTRAP.md
+.agent-session.env
+\$ACP_RUN_DIR
+\$AGENT_PROJECT_RUN_DIR
+\$F_LOSNING_RUN_DIR
+\$ACP_HOST_RUN_DIR
+\$AGENT_PROJECT_HOST_RUN_DIR
+\$F_LOSNING_HOST_RUN_DIR
+\$ACP_RESULT_FILE
+\$AGENT_PROJECT_RESULT_FILE
+\$F_LOSNING_RESULT_FILE
+PATTERNS
+}
+
+install_pre_commit_scope_hook() {
+  local hooks_dir="\$(git -C ${worktree_q} rev-parse --git-path hooks 2>/dev/null || true)"
+  if [[ -z "\${hooks_dir}" ]]; then
+    hooks_dir="\$(git -C ${worktree_q} config --get core.hooksPath 2>/dev/null || true)"
+  fi
+  if [[ -z "\${hooks_dir}" ]]; then
+    hooks_dir="${worktree_q}/.git-hooks"
+  fi
+  # Resolve relative path against worktree root
+  if [[ "\${hooks_dir}" != /* ]]; then
+    hooks_dir="${worktree_q}/\${hooks_dir}"
+  fi
+  mkdir -p "\${hooks_dir}"
+  cat > "\${hooks_dir}/pre-commit" <<'HOOK_EOF'
+#!/usr/bin/env bash
+# Pre-commit scope guard: reject commits that touch too many product surfaces
+set -euo pipefail
+
+changed_files="\$(
+  git diff --cached --name-only --diff-filter=ACMR 2>/dev/null || true
+)"
+
+if [[ -z "\${changed_files}" ]]; then
+  exit 0
+fi
+
+# Count non-test product files by surface
+api_count=0
+web_count=0
+mobile_count=0
+package_count=0
+doc_count=0
+other_count=0
+
+while IFS= read -r file; do
+  [[ -n "\${file}" ]] || continue
+  case "\${file}" in
+    apps/api/*) api_count=\$((api_count + 1)) ;;
+    apps/web/*) web_count=\$((web_count + 1)) ;;
+    apps/mobile/*) mobile_count=\$((mobile_count + 1)) ;;
+    packages/*) package_count=\$((package_count + 1)) ;;
+    openspec/*|docs/*|*.md) doc_count=\$((doc_count + 1)) ;;
+    *) other_count=\$((other_count + 1)) ;;
+  esac
+done <<< "\${changed_files}"
+
+# Count how many product surfaces are touched (excluding docs-only)
+surfaces=0
+[[ \$api_count -gt 0 ]] && surfaces=\$((surfaces + 1))
+[[ \$web_count -gt 0 ]] && surfaces=\$((surfaces + 1))
+[[ \$mobile_count -gt 0 ]] && surfaces=\$((surfaces + 1))
+
+# If touching 3+ product surfaces, warn but allow (scope guard at publish is stricter)
+if [[ \$surfaces -ge 3 ]]; then
+  echo "[pre-commit scope warning] This commit touches \$surfaces product surfaces (api=\$api_count web=\$web_count mobile=\$mobile_count). Consider splitting into focused commits." >&2
+fi
+
+# Hard block: more than 20 non-doc product files in one commit
+total_product=\$((api_count + web_count + mobile_count + package_count + other_count))
+if [[ \$total_product -gt 20 ]]; then
+  echo "[pre-commit scope BLOCK] This commit touches \$total_product product files across \$surfaces surfaces. Split into smaller focused commits." >&2
+  exit 1
+fi
+
+# Hard block: more than 8 mobile product files in one commit
+if [[ \$mobile_count -gt 8 ]]; then
+  echo "[pre-commit scope BLOCK] This commit touches \$mobile_product mobile product files. Keep mobile changes to one focused route family (max 8 files)." >&2
+  exit 1
+fi
+
+exit 0
+HOOK_EOF
+  chmod +x "\${hooks_dir}/pre-commit"
+}
+
+ensure_runtime_artifact_alias() {
+  local literal_name="\${1:?literal name required}"
+  local target_path="\${2:?target path required}"
+  local alias_path="\${worktree}/\${literal_name}"
+  local current_target=""
+
+  if [[ -L "\${alias_path}" ]]; then
+    current_target="\$(readlink "\${alias_path}" 2>/dev/null || true)"
+    if [[ "\${current_target}" == "\${target_path}" ]]; then
+      return 0
+    fi
+    rm -f "\${alias_path}"
+  elif [[ -e "\${alias_path}" ]]; then
+    printf '[openclaw] runtime alias path already exists, leaving untouched: %s\n' "\${alias_path}" >>"\${output_file}" 2>/dev/null || true
+    return 0
+  fi
+
+  ln -s "\${target_path}" "\${alias_path}"
+}
+
+ensure_runtime_artifact_aliases() {
+  ensure_runtime_artifact_alias '\$ACP_RUN_DIR' "\${sandbox_run_dir}"
+  ensure_runtime_artifact_alias '\$AGENT_PROJECT_RUN_DIR' "\${sandbox_run_dir}"
+  ensure_runtime_artifact_alias '\$F_LOSNING_RUN_DIR' "\${sandbox_run_dir}"
+  ensure_runtime_artifact_alias '\$ACP_HOST_RUN_DIR' "\${artifact_dir}"
+  ensure_runtime_artifact_alias '\$AGENT_PROJECT_HOST_RUN_DIR' "\${artifact_dir}"
+  ensure_runtime_artifact_alias '\$F_LOSNING_HOST_RUN_DIR' "\${artifact_dir}"
+  ensure_runtime_artifact_alias '\$ACP_RESULT_FILE' "\${sandbox_run_dir}/result.env"
+  ensure_runtime_artifact_alias '\$AGENT_PROJECT_RESULT_FILE' "\${sandbox_run_dir}/result.env"
+  ensure_runtime_artifact_alias '\$F_LOSNING_RESULT_FILE' "\${sandbox_run_dir}/result.env"
+}
+
+cleanup_runtime_artifact_aliases() {
+  local literal_name alias_path
+  for literal_name in \
+    '\$ACP_RUN_DIR' \
+    '\$AGENT_PROJECT_RUN_DIR' \
+    '\$F_LOSNING_RUN_DIR' \
+    '\$ACP_HOST_RUN_DIR' \
+    '\$AGENT_PROJECT_HOST_RUN_DIR' \
+    '\$F_LOSNING_HOST_RUN_DIR' \
+    '\$ACP_RESULT_FILE' \
+    '\$AGENT_PROJECT_RESULT_FILE' \
+    '\$F_LOSNING_RESULT_FILE'
+  do
+    alias_path="\${worktree}/\${literal_name}"
+    if [[ -L "\${alias_path}" ]]; then
+      rm -f "\${alias_path}"
+    fi
+  done
+}
+
+recover_literal_runtime_artifacts() {
+  local literal_name literal_path actual_result_file recovered="no"
+
+  actual_result_file="\${sandbox_run_dir}/result.env"
+  for literal_name in '\$ACP_RESULT_FILE' '\$AGENT_PROJECT_RESULT_FILE' '\$F_LOSNING_RESULT_FILE'; do
+    literal_path="\${worktree}/\${literal_name}"
+    if [[ -f "\${literal_path}" && ! -L "\${literal_path}" ]]; then
+      cp "\${literal_path}" "\${actual_result_file}" 2>/dev/null || true
+      cp "\${literal_path}" "\${run_dir}/result.env" 2>/dev/null || true
+      rm -f "\${literal_path}" 2>/dev/null || true
+      printf '[openclaw] recovered literal result artifact: %s\n' "\${literal_path}" >>"\${output_file}" 2>/dev/null || true
+      recovered="yes"
+      break
+    fi
+  done
+
+  for literal_name in '\$ACP_RUN_DIR' '\$AGENT_PROJECT_RUN_DIR' '\$F_LOSNING_RUN_DIR'; do
+    literal_path="\${worktree}/\${literal_name}"
+    if [[ -d "\${literal_path}" && ! -L "\${literal_path}" ]]; then
+      for artifact_name in result.env verification.jsonl issue-comment.md pr-comment.md; do
+        if [[ -f "\${literal_path}/\${artifact_name}" ]]; then
+          cp "\${literal_path}/\${artifact_name}" "\${sandbox_run_dir}/\${artifact_name}" 2>/dev/null || true
+          cp "\${literal_path}/\${artifact_name}" "\${artifact_dir}/\${artifact_name}" 2>/dev/null || true
+          recovered="yes"
+        fi
+      done
+      rm -rf "\${literal_path}" 2>/dev/null || true
+      printf '[openclaw] recovered literal run-dir artifact tree: %s\n' "\${literal_path}" >>"\${output_file}" 2>/dev/null || true
+    fi
+  done
+
+  [[ "\${recovered}" == "yes" ]] && return 0
+  return 0
+}
+
+reset_sandbox_run_dir() {
+  mkdir -p "\${sandbox_run_dir}"
+  find "\${sandbox_run_dir}" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+}
+
+classify_failure_reason() {
+  if grep -Eiq 'Config was last written by a newer OpenClaw' "\${output_file}" 2>/dev/null; then
+    printf 'openclaw-version-mismatch\n'
+    return 0
+  fi
+  if grep -Eiq 'invalid api key|authentication failed|unauthorized|provider api key|login required|please authenticate|api_key_invalid' "\${output_file}" 2>/dev/null; then
+    printf 'auth-failure\n'
+    return 0
+  fi
+  if grep -Eiq 'rate limit exceeded|quota exceeded|usage limit|insufficient credits|payment required|too many requests|429' "\${output_file}" 2>/dev/null; then
+    printf 'provider-quota-limit\n'
+    return 0
+  fi
+  if grep -Eiq 'model not found|model .* not available|unsupported model|invalid model' "\${output_file}" 2>/dev/null; then
+    printf 'model-unavailable\n'
+    return 0
+  fi
+  if grep -Eiq 'context length exceeded|token limit|maximum context|too many tokens' "\${output_file}" 2>/dev/null; then
+    printf 'context-length-exceeded\n'
+    return 0
+  fi
+  if grep -Eiq 'timeout|timed out|ETIMEDOUT|ECONNREFUSED' "\${output_file}" 2>/dev/null; then
+    printf 'timeout\n'
+    return 0
+  fi
+  printf 'openclaw-exit-failed\n'
+}
+
+infer_result_from_output() {
+  local result_file_path="\${sandbox_run_dir}/result.env"
+  local verification_file="\${sandbox_run_dir}/verification.jsonl"
+  # Host-side result file (always writable, never inside worktree)
+  local host_result_file="\${run_dir}/result.env"
+  local write_result=''
+
+  write_result() {
+    printf '%b' "\$1" > "\${result_file_path}" 2>/dev/null || true
+    printf '%b' "\$1" > "\${host_result_file}" 2>/dev/null || true
+  }
+
+  # If sandbox result.env exists with implemented, validate it has verification
+  if [[ -f "\${result_file_path}" ]]; then
+    if grep -q 'OUTCOME=implemented' "\${result_file_path}" 2>/dev/null; then
+      if [[ ! -f "\${verification_file}" ]]; then
+        write_result 'OUTCOME=blocked\nACTION=host-comment-blocker\n'
+        printf '[infer] BLOCKED: agent wrote OUTCOME=implemented but verification.jsonl is missing\n' >> "\${output_file}" 2>/dev/null || true
+        return 0
+      fi
+    fi
+    return 0
+  fi
+
+  # Check if there are actual code changes (not just artifact files)
+  local has_product_changes="no"
+  if git -C ${worktree_q} diff --name-only HEAD 2>/dev/null | grep -qvE '\.openclaw-artifacts/|\.md$' 2>/dev/null; then
+    has_product_changes="yes"
+  fi
+  if git -C ${worktree_q} diff --cached --name-only 2>/dev/null | grep -qvE '\.openclaw-artifacts/|\.md$' 2>/dev/null; then
+    has_product_changes="yes"
+  fi
+  if git -C ${worktree_q} log --oneline origin/main..HEAD 2>/dev/null | grep -q . 2>/dev/null; then
+    has_product_changes="yes"
+  fi
+
+  # If no product changes and output suggests nothing to do, report no-changes
+  if [[ "\${has_product_changes}" == "no" ]] && grep -Eiq 'already done|no changes needed|up to date|nothing to do|no changes' "\${output_file}" 2>/dev/null; then
+    write_result 'OUTCOME=reported\nACTION=host-comment-scheduled-report\nDETAIL=no-changes-needed\n'
+    return 0
+  fi
+
+  # If there are product changes but NO verification.jsonl, this is BLOCKED
+  # The worker skipped verification — do not allow publish
+  if [[ "\${has_product_changes}" == "yes" && ! -f "\${verification_file}" ]]; then
+    write_result 'OUTCOME=blocked\nACTION=host-comment-blocker\n'
+    return 0
+  fi
+
+  # If there are product changes AND verification.jsonl exists with entries, allow implemented
+  if [[ "\${has_product_changes}" == "yes" && -f "\${verification_file}" ]] && grep -q '"status":"pass"' "\${verification_file}" 2>/dev/null; then
+    write_result 'OUTCOME=implemented\nACTION=host-publish-issue-pr\n'
+    return 0
+  fi
+
+  # If output explicitly says blocked, trust that
+  if grep -Eiq 'blocked|cannot proceed|unable to complete|not possible|missing spec' "\${output_file}" 2>/dev/null; then
+    write_result 'OUTCOME=blocked\nACTION=host-comment-blocker\n'
+    return 0
+  fi
+
+  # If output suggests implemented but we couldn't verify, still block
+  if grep -Eiq 'created PR|opened PR|PR #|pull request|implemented' "\${output_file}" 2>/dev/null; then
+    if [[ -f "\${verification_file}" ]]; then
+      write_result 'OUTCOME=implemented\nACTION=host-publish-issue-pr\n'
+    else
+      write_result 'OUTCOME=blocked\nACTION=host-comment-blocker\n'
+    fi
+    return 0
+  fi
+
+  # Default fallback: block (safe default)
+  write_result 'OUTCOME=blocked\nACTION=host-comment-blocker\n'
+}
+
+cleanup_agent() {
+  # --force required for non-interactive (tmux) sessions, otherwise delete waits for confirmation
+  "\${openclaw_bin}" agents delete "\${openclaw_agent_id}" --json --force >/dev/null 2>&1 || true
+}
+
+openclaw_agent_exists() {
+  local agents_json=""
+
+  agents_json="\$("\${openclaw_bin}" agents list --json 2>/dev/null || true)"
+  [[ -n "\${agents_json}" ]] || return 1
+
+  OPENCLAW_AGENTS_JSON="\${agents_json}" python3 - "\${openclaw_agent_id}" <<'PY'
+import json
+import os
+import sys
+
+agent_id = sys.argv[1]
+
+try:
+    payload = json.loads(os.environ.get("OPENCLAW_AGENTS_JSON", ""))
+except Exception:
+    raise SystemExit(1)
+
+agents = payload if isinstance(payload, list) else payload.get("agents", [])
+for agent in agents:
+    if not isinstance(agent, dict):
+        continue
+    if str(agent.get("id", "")) == agent_id or str(agent.get("name", "")) == agent_id:
+        raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+}
+
+sync_openclaw_agent_config() {
+  mkdir -p "\$(dirname "\${openclaw_config_path}")"
+
+  python3 - "\${openclaw_config_path}" "\${openclaw_agent_id}" "\${worktree}" "\${openclaw_agent_dir}" "\${openclaw_model}" <<'PY'
+import json
+import os
+import sys
+
+config_path, agent_id, workspace, agent_dir, model = sys.argv[1:6]
+
+payload = {}
+if os.path.exists(config_path):
+    try:
+        with open(config_path, "r", encoding="utf-8") as handle:
+            loaded = json.load(handle)
+        if isinstance(loaded, dict):
+            payload = loaded
+    except Exception:
+        payload = {}
+
+agents = payload.get("agents")
+if not isinstance(agents, dict):
+    agents = {}
+    payload["agents"] = agents
+
+agent_list = agents.get("list")
+if not isinstance(agent_list, list):
+    agent_list = []
+    agents["list"] = agent_list
+
+entry = None
+for candidate in agent_list:
+    if not isinstance(candidate, dict):
+        continue
+    candidate_id = str(candidate.get("id", ""))
+    candidate_name = str(candidate.get("name", ""))
+    if candidate_id == agent_id or candidate_name == agent_id:
+        entry = candidate
+        break
+
+if entry is None:
+    entry = {"id": agent_id}
+    agent_list.append(entry)
+
+entry["id"] = agent_id
+entry["name"] = agent_id
+entry["workspace"] = workspace
+entry["agentDir"] = agent_dir
+if model:
+    entry["model"] = model
+
+tmp_path = f"{config_path}.tmp.{os.getpid()}"
+with open(tmp_path, "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, indent=2)
+    handle.write("\n")
+os.replace(tmp_path, config_path)
+PY
+}
+
+run_openclaw_agent_command() {
+  python3 - "\${output_file}" "\${openclaw_timeout}" "\${openclaw_bin}" "\${openclaw_agent_id}" "\${openclaw_session_id}" "\${openclaw_thinking}" "\${prompt_file_path}" <<'PY'
+import os
+import re
+import selectors
+import signal
+import subprocess
+import sys
+import time
+
+output_path, timeout_seconds_raw, openclaw_bin, agent_id, session_id, thinking, prompt_path = sys.argv[1:8]
+
+with open(prompt_path, "r", encoding="utf-8") as handle:
+    prompt = handle.read()
+
+cmd = [
+    openclaw_bin,
+    "agent",
+    "--agent",
+    agent_id,
+    "--session-id",
+    session_id,
+    "--local",
+    "--json",
+    "--timeout",
+    timeout_seconds_raw,
+    "--thinking",
+    thinking,
+    "--message",
+    prompt,
+]
+
+timeout_seconds = float(timeout_seconds_raw)
+hard_deadline = time.monotonic() + timeout_seconds + 15.0
+terminal_patterns = [
+    re.compile(r"Config was last written by a newer OpenClaw", re.I),
+    re.compile(r"invalid api key|authentication failed|unauthorized|provider api key|login required|please authenticate|api_key_invalid", re.I),
+    re.compile(r"rate limit exceeded|quota exceeded|usage limit|insufficient credits|payment required|too many requests|429", re.I),
+    re.compile(r"model not found|model .* not available|unsupported model|invalid model", re.I),
+    re.compile(r"context length exceeded|token limit|maximum context|too many tokens", re.I),
+]
+
+proc = None
+sel = selectors.DefaultSelector()
+matched_terminal_error = False
+tail = ""
+
+def terminate_process_group(process: subprocess.Popen) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            return
+        time.sleep(0.1)
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+
+with open(output_path, "ab", buffering=0) as log_handle:
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    if proc.stdin is not None:
+        proc.stdin.write(prompt.encode("utf-8"))
+        proc.stdin.close()
+
+    if proc.stdout is None:
+        raise SystemExit(1)
+
+    sel.register(proc.stdout, selectors.EVENT_READ)
+
+    while True:
+        if time.monotonic() >= hard_deadline:
+          terminate_process_group(proc)
+          break
+
+        events = sel.select(timeout=0.2)
+        if not events:
+            if proc.poll() is not None:
+                break
+            continue
+
+        for key, _ in events:
+            chunk = os.read(key.fd, 4096)
+            if not chunk:
+                continue
+
+            log_handle.write(chunk)
+            text = chunk.decode("utf-8", errors="replace")
+            tail = (tail + text)[-8192:]
+
+            if not matched_terminal_error and any(pattern.search(tail) for pattern in terminal_patterns):
+                matched_terminal_error = True
+                terminate_process_group(proc)
+
+        if proc.poll() is not None:
+            break
+
+    while True:
+        if proc.stdout is None:
+            break
+        chunk = os.read(proc.stdout.fileno(), 4096)
+        if not chunk:
+            break
+        log_handle.write(chunk)
+
+return_code = proc.wait()
+if matched_terminal_error and return_code == 0:
+    raise SystemExit(1)
+raise SystemExit(return_code)
+PY
+}
+
+ensure_openclaw_auth_profiles() {
+  if [[ ! -s "\${openclaw_agent_dir}/auth-profiles.json" && -n "\${OPENROUTER_API_KEY:-}" ]]; then
+    mkdir -p "\$(dirname "\${openclaw_agent_dir}/auth-profiles.json" 2>/dev/null || true)"
+    cat > "\${openclaw_agent_dir}/auth-profiles.json" <<AUTH_EOF
+{
+  "version": 1,
+  "profiles": {
+    "openrouter:default": {
+      "type": "api_key",
+      "provider": "openrouter",
+      "keyRef": {
+        "source": "direct",
+        "provider": "default",
+        "id": "OPENROUTER_API_KEY",
+        "secret": "\${OPENROUTER_API_KEY}"
+      }
+    }
+  }
+}
+AUTH_EOF
+  fi
+
+  if [[ ! -s "\${openclaw_agent_dir}/auth-profiles.json" && -z "\${OPENROUTER_API_KEY:-}" && -f "\${openclaw_agent_dir}/../auth-profiles.json" ]]; then
+    cp "\${openclaw_agent_dir}/../auth-profiles.json" "\${openclaw_agent_dir}/auth-profiles.json" 2>/dev/null || true
+  fi
+}
+
+reset_openclaw_resident_state() {
+  rm -rf "\${openclaw_state_dir}" "\${openclaw_agent_dir}" "\$(dirname "\${openclaw_config_path}")"
+  mkdir -p "\${openclaw_state_dir}" "\$(dirname "\${openclaw_config_path}")" "\${openclaw_agent_dir}"
+  ensure_openclaw_auth_profiles
+}
+
+mkdir -p "\${sandbox_run_dir}" "\${artifact_dir}" "\${openclaw_state_dir}" "\$(dirname "\${openclaw_config_path}")" "\${openclaw_agent_dir}"
+reset_sandbox_run_dir
+ensure_openclaw_workspace_excludes
+install_pre_commit_scope_hook
+ensure_runtime_artifact_aliases
+trap cleanup_runtime_artifact_aliases EXIT
+write_state running "" ""
+
+ensure_openclaw_auth_profiles
+
+# Export API key as env var for --local mode (required alongside auth-profiles.json)
+export OPENROUTER_API_KEY="\${OPENROUTER_API_KEY:-}"
+
+prompt_content="\$(cat ${prompt_q})"
+set +e
+status=0
+failure_reason=""
+resident_reset_attempted="no"
+while true; do
+  status=0
+  if [[ "\${keep_agent}" != "true" ]] || ! openclaw_agent_exists; then
+    : >"\${openclaw_add_log}"
+    if "\${openclaw_bin}" agents add "\${openclaw_agent_id}" \
+      --model "\${openclaw_model}" \\
+      --workspace ${worktree_q} \\
+      --agent-dir "\${openclaw_agent_dir}" \\
+      --non-interactive --json >"\${openclaw_add_log}" 2>&1; then
+      status=0
+    else
+      status=\$?
+      if grep -Eiq 'already exists' "\${openclaw_add_log}" 2>/dev/null; then
+        printf '[openclaw] reusing existing agent after add race: %s\n' "\${openclaw_agent_id}" >>"\${output_file}" 2>/dev/null || true
+        status=0
+      fi
+    fi
+    cat "\${openclaw_add_log}" >>"\${output_file}" 2>/dev/null || true
+  fi
+  if [[ "\${status}" -eq 0 ]]; then
+    if sync_openclaw_agent_config; then
+      :
+    else
+      status=1
+      failure_reason="openclaw-config-sync-failed"
+      printf '[openclaw] failed to sync agent config for %s\n' "\${openclaw_agent_id}" >>"\${output_file}" 2>/dev/null || true
+    fi
+  fi
+  if [[ "\${status}" -eq 0 ]]; then
+    run_openclaw_agent_command
+    status=\$?
+  fi
+  if [[ "\${status}" -eq 0 ]]; then
+    break
+  fi
+
+  failure_reason="\$(classify_failure_reason)"
+  if [[ "\${keep_agent}" == "true" && "\${resident_reset_attempted}" != "yes" && "\${failure_reason}" == "openclaw-version-mismatch" ]]; then
+    resident_reset_attempted="yes"
+    reset_openclaw_resident_state
+    continue
+  fi
+  break
+done
+recover_literal_runtime_artifacts
+if [[ "\${status}" -eq 0 ]]; then
+  # Infer result.env from output if agent didn't create one
+  infer_result_from_output
+  write_state succeeded "0" ""
+else
+  if [[ -z "\${failure_reason}" ]]; then
+    failure_reason="\$(classify_failure_reason)"
+  fi
+  write_state failed "\${status}" "\${failure_reason}"
+fi
+record_final_git_state
+if [[ -f ${sandbox_run_dir_q}/result.env ]]; then
+  cp ${sandbox_run_dir_q}/result.env ${result_q}
+fi
+if [[ "\${keep_agent}" != "true" ]]; then
+  cleanup_agent
+fi
+${collect_copy_snippet}${reconcile_snippet}
+printf '\n__CODEX_EXIT__:%s\n' "\${status}" | tee -a ${output_q}
+exit "\${status}"
+EOF
+
+chmod +x "$inner_script"
+tmux new-session -d -s "$session" "$inner_script"
+
+printf 'SESSION=%s\n' "$session"
+printf 'TASK_KIND=%s\n' "$task_kind"
+printf 'TASK_ID=%s\n' "$task_id"
+printf 'WORKTREE=%s\n' "$worktree"
+printf 'OUTPUT=%s\n' "$output_file"
+printf 'SCRIPT=%s\n' "$inner_script"
+printf 'META=%s\n' "$meta_file"

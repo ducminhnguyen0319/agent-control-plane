@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-project-open-issue-worktree --repo-root <path> --worktree-root <path> --issue-id <id> [--slug <text>] [--branch-prefix <prefix>] [--base <ref>] [--remote <name>] [--prepare-script <path>] [--stamp <yyyymmdd-hhmmss>]
+
+Create a dedicated issue branch + worktree for a project adapter using the
+shared agent-init-worktree helper.
+EOF
+}
+
+shared_agent_home="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+repo_root="${AGENT_PROJECT_REPO_ROOT:-}"
+worktree_root="${AGENT_PROJECT_WORKTREE_ROOT:-}"
+issue_id=""
+slug_input="task"
+branch_prefix="agent/project/issue"
+base_ref="origin/main"
+remote_name="origin"
+prepare_script=""
+stamp=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo-root) repo_root="${2:-}"; shift 2 ;;
+    --worktree-root) worktree_root="${2:-}"; shift 2 ;;
+    --issue-id) issue_id="${2:-}"; shift 2 ;;
+    --slug) slug_input="${2:-}"; shift 2 ;;
+    --branch-prefix) branch_prefix="${2:-}"; shift 2 ;;
+    --base) base_ref="${2:-}"; shift 2 ;;
+    --remote) remote_name="${2:-}"; shift 2 ;;
+    --prepare-script) prepare_script="${2:-}"; shift 2 ;;
+    --stamp) stamp="${2:-}"; shift 2 ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$repo_root" || -z "$worktree_root" || -z "$issue_id" ]]; then
+  usage >&2
+  exit 1
+fi
+
+if [[ -z "$stamp" ]]; then
+  stamp="$(date +%Y%m%d-%H%M%S)"
+fi
+
+safe_slug="$(printf '%s' "$slug_input" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-')"
+safe_slug="${safe_slug#-}"
+safe_slug="${safe_slug%-}"
+if [[ -z "$safe_slug" ]]; then
+  safe_slug="task"
+fi
+
+branch_name="${branch_prefix}-${issue_id}-${safe_slug}-${stamp}"
+worktree_path="${worktree_root}/issue-${issue_id}-${stamp}"
+init_tool="${shared_agent_home}/tools/bin/agent-init-worktree"
+fetch_ref="$base_ref"
+
+if [[ "$fetch_ref" == "${remote_name}/"* ]]; then
+  fetch_ref="${fetch_ref#${remote_name}/}"
+  git -C "$repo_root" fetch \
+    "$remote_name" \
+    "+refs/heads/${fetch_ref}:refs/remotes/${remote_name}/${fetch_ref}" \
+    --prune
+else
+  git -C "$repo_root" fetch "$remote_name" "$fetch_ref" --prune
+fi
+
+mkdir -p "$worktree_root"
+(
+  cd "$repo_root"
+  "$init_tool" \
+    --branch "$branch_name" \
+    --base "$base_ref" \
+    --path "$worktree_path" \
+    --allow-unclaimed \
+    --no-bootstrap-deps >/dev/null
+)
+
+if [[ -n "$prepare_script" ]]; then
+  "$prepare_script" "$worktree_path" >/dev/null
+fi
+
+printf 'WORKTREE=%s\n' "$worktree_path"
+printf 'BRANCH=%s\n' "$branch_name"
+printf 'BASE_REF=%s\n' "$base_ref"

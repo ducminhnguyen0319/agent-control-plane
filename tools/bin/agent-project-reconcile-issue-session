@@ -1,0 +1,1128 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+bootstrap_flow_shell_lib() {
+  local candidate=""
+  local skill_name=""
+
+  for candidate in \
+    "${SCRIPT_DIR}/flow-shell-lib.sh" \
+    "${AGENT_CONTROL_PLANE_ROOT:-}/tools/bin/flow-shell-lib.sh" \
+    "${ACP_ROOT:-}/tools/bin/flow-shell-lib.sh" \
+    "${F_LOSNING_FLOW_ROOT:-}/tools/bin/flow-shell-lib.sh" \
+    "${AGENT_FLOW_SKILL_ROOT:-}/tools/bin/flow-shell-lib.sh" \
+    "${SHARED_AGENT_HOME:-}/tools/bin/flow-shell-lib.sh" \
+    "$(pwd)/tools/bin/flow-shell-lib.sh"; do
+    if [[ -n "${candidate}" && -f "${candidate}" ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+
+  if [[ -n "${SHARED_AGENT_HOME:-}" ]]; then
+    for skill_name in "${AGENT_CONTROL_PLANE_SKILL_NAME:-agent-control-plane}" "${AGENT_CONTROL_PLANE_COMPAT_ALIAS:-}"; do
+      [[ -n "${skill_name}" ]] || continue
+      candidate="${SHARED_AGENT_HOME}/skills/openclaw/${skill_name}/tools/bin/flow-shell-lib.sh"
+      if [[ -f "${candidate}" ]]; then
+        printf '%s\n' "${candidate}"
+        return 0
+      fi
+    done
+  fi
+
+  echo "unable to locate flow-shell-lib.sh for reconcile bootstrap" >&2
+  return 1
+}
+
+FLOW_SHELL_LIB_PATH="$(bootstrap_flow_shell_lib)"
+BOOTSTRAP_TOOLS_DIR="$(cd "$(dirname "${FLOW_SHELL_LIB_PATH}")" && pwd)"
+# shellcheck source=/dev/null
+source "${FLOW_SHELL_LIB_PATH}"
+
+resolve_reconcile_tools_dir() {
+  local candidate_root=""
+  local skill_name=""
+
+  for candidate_root in \
+    "${AGENT_CONTROL_PLANE_ROOT:-}" \
+    "${ACP_ROOT:-}" \
+    "${F_LOSNING_FLOW_ROOT:-}" \
+    "${AGENT_FLOW_SKILL_ROOT:-}"; do
+    if [[ -n "${candidate_root}" && -d "${candidate_root}/tools/bin" ]]; then
+      printf '%s/tools/bin\n' "${candidate_root}"
+      return 0
+    fi
+  done
+
+  if [[ -n "${SHARED_AGENT_HOME:-}" ]]; then
+    if [[ -d "${SHARED_AGENT_HOME}/tools/bin" ]]; then
+      printf '%s/tools/bin\n' "${SHARED_AGENT_HOME}"
+      return 0
+    fi
+    for skill_name in "${AGENT_CONTROL_PLANE_SKILL_NAME:-agent-control-plane}" "${AGENT_CONTROL_PLANE_COMPAT_ALIAS:-}"; do
+      [[ -n "${skill_name}" ]] || continue
+      candidate_root="${SHARED_AGENT_HOME}/skills/openclaw/${skill_name}"
+      if [[ -d "${candidate_root}/tools/bin" ]]; then
+        printf '%s/tools/bin\n' "${candidate_root}"
+        return 0
+      fi
+    done
+  fi
+
+  if [[ -d "${SCRIPT_DIR}" ]]; then
+    printf '%s\n' "${SCRIPT_DIR}"
+    return 0
+  fi
+
+  printf '%s\n' "${BOOTSTRAP_TOOLS_DIR}"
+}
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-project-reconcile-issue-session --session <id> --repo-slug <owner/repo> --repo-root <path> --runs-root <path> --history-root <path> [--hook-file <path>]
+
+Reconcile a completed issue worker run using shared lifecycle control flow while
+allowing project adapters to inject policy hooks.
+EOF
+}
+
+shared_tools_dir="$(resolve_reconcile_tools_dir)"
+resolve_reconcile_helper_path() {
+  local helper_name="${1:?helper name required}"
+  local candidate=""
+
+  for candidate in \
+    "${SCRIPT_DIR}/${helper_name}" \
+    "${BOOTSTRAP_TOOLS_DIR}/${helper_name}" \
+    "${shared_tools_dir}/${helper_name}"; do
+    if [[ -n "${candidate}" && -f "${candidate}" ]]; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+
+  echo "unable to locate ${helper_name} for reconcile bootstrap" >&2
+  return 1
+}
+
+FLOW_CONFIG_LIB_PATH="$(resolve_reconcile_helper_path "flow-config-lib.sh")"
+FLOW_RESIDENT_WORKER_LIB_PATH="$(resolve_reconcile_helper_path "flow-resident-worker-lib.sh")"
+# shellcheck source=/dev/null
+source "${FLOW_CONFIG_LIB_PATH}"
+# shellcheck source=/dev/null
+source "${FLOW_RESIDENT_WORKER_LIB_PATH}"
+session=""
+repo_slug=""
+repo_root=""
+runs_root=""
+history_root=""
+hook_file=""
+record_verification_script="${shared_tools_dir}/record-verification.sh"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --session) session="${2:-}"; shift 2 ;;
+    --repo-slug) repo_slug="${2:-}"; shift 2 ;;
+    --repo-root) repo_root="${2:-}"; shift 2 ;;
+    --runs-root) runs_root="${2:-}"; shift 2 ;;
+    --history-root) history_root="${2:-}"; shift 2 ;;
+    --hook-file) hook_file="${2:-}"; shift 2 ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$session" || -z "$repo_slug" || -z "$repo_root" || -z "$runs_root" || -z "$history_root" ]]; then
+  usage >&2
+  exit 1
+fi
+
+status_out="$(
+  "${shared_tools_dir}/agent-project-worker-status" \
+    --runs-root "$runs_root" \
+    --session "$session"
+)"
+status="$(awk -F= '/^STATUS=/{print $2}' <<<"$status_out")"
+failure_reason="$(awk -F= '/^FAILURE_REASON=/{print $2}' <<<"$status_out" | tail -n 1)"
+
+if [[ "$status" == "RUNNING" ]]; then
+  printf 'STATUS=%s\n' "$status"
+  exit 0
+fi
+
+find_archived_session_dir() {
+  local root="${1:-}"
+  local target_session="${2:-}"
+  [[ -n "$root" && -d "$root" && -n "$target_session" ]] || return 1
+
+  find "$root" -mindepth 1 -maxdepth 1 -type d -name "${target_session}-*" ! -name "${target_session}-stale-*" 2>/dev/null \
+    | sort -r \
+    | head -n 1
+}
+
+meta_file="$(awk -F= '/^META_FILE=/{print $2}' <<<"$status_out")"
+if [[ -z "$meta_file" || ! -f "$meta_file" ]]; then
+  archived_run_dir="$(find_archived_session_dir "$history_root" "$session" || true)"
+  if [[ -n "$archived_run_dir" && -f "${archived_run_dir}/run.env" ]]; then
+    meta_file="${archived_run_dir}/run.env"
+    if [[ "$status" == "UNKNOWN" && -f "${archived_run_dir}/runner.env" ]]; then
+      set -a
+      # shellcheck source=/dev/null
+      source "${archived_run_dir}/runner.env"
+      set +a
+      case "${RUNNER_STATE:-}" in
+        succeeded)
+          status="SUCCEEDED"
+          ;;
+        failed)
+          status="FAILED"
+          failure_reason="${LAST_FAILURE_REASON:-${failure_reason:-}}"
+          ;;
+      esac
+    fi
+    if [[ "$status" == "UNKNOWN" && -f "${archived_run_dir}/result.env" ]]; then
+      status="SUCCEEDED"
+    fi
+  fi
+fi
+if [[ -z "$meta_file" || ! -f "$meta_file" ]]; then
+  echo "missing metadata for session $session" >&2
+  exit 1
+fi
+
+run_dir="$(dirname "$meta_file")"
+
+set -a
+# shellcheck source=/dev/null
+source "$meta_file"
+set +a
+
+result_outcome=""
+result_action=""
+result_file_candidate="${run_dir}/result.env"
+if [[ ! -f "$result_file_candidate" && -n "${RESULT_FILE:-}" && -f "${RESULT_FILE:-}" ]]; then
+  result_file_candidate="${RESULT_FILE}"
+fi
+if [[ -f "$result_file_candidate" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  source "$result_file_candidate"
+  set +a
+  result_outcome="${OUTCOME:-}"
+  result_action="${ACTION:-}"
+fi
+
+issue_summary_outcome=""
+issue_summary_action=""
+issue_summary_failure_reason=""
+
+issue_set_reconcile_summary() {
+  local summary_status="${1:-${status:-}}"
+  local summary_outcome="__ISSUE_DEFAULT__"
+  local summary_action="__ISSUE_DEFAULT__"
+  local summary_failure_reason="__ISSUE_DEFAULT__"
+
+  if [[ $# -ge 2 ]]; then
+    summary_outcome="${2}"
+  fi
+  if [[ $# -ge 3 ]]; then
+    summary_action="${3}"
+  fi
+  if [[ $# -ge 4 ]]; then
+    summary_failure_reason="${4}"
+  fi
+
+  if [[ "${summary_outcome}" == "__ISSUE_DEFAULT__" ]]; then
+    if [[ "${summary_status}" == "SUCCEEDED" ]]; then
+      summary_outcome="${result_outcome:-}"
+    else
+      summary_outcome=""
+    fi
+  fi
+
+  if [[ "${summary_action}" == "__ISSUE_DEFAULT__" ]]; then
+    if [[ "${summary_status}" == "SUCCEEDED" ]]; then
+      summary_action="${result_action:-}"
+    else
+      summary_action=""
+    fi
+  fi
+
+  if [[ "${summary_failure_reason}" == "__ISSUE_DEFAULT__" ]]; then
+    summary_failure_reason="${failure_reason:-}"
+  fi
+
+  issue_summary_outcome="${summary_outcome}"
+  issue_summary_action="${summary_action}"
+  issue_summary_failure_reason="${summary_failure_reason}"
+}
+
+issue_set_reconcile_summary "$status"
+
+issue_id="${ISSUE_ID:-}"
+if [[ -z "$issue_id" ]]; then
+  echo "session $session is missing ISSUE_ID" >&2
+  exit 1
+fi
+
+owner="${repo_slug%%/*}"
+repo="${repo_slug#*/}"
+pr_number=""
+
+issue_before_success() { :; }
+issue_before_blocked() { :; }
+issue_schedule_retry() { :; }
+issue_mark_ready() { :; }
+issue_clear_retry() { :; }
+issue_remove_running() { :; }
+issue_mark_blocked() { issue_remove_running; }
+issue_should_close_as_superseded() { return 1; }
+issue_close_as_superseded() { :; }
+issue_after_pr_created() { :; }
+issue_after_reconciled() { :; }
+issue_publish_extra_args() { :; }
+issue_result_contract_note=""
+
+if [[ -n "$hook_file" && -f "$hook_file" ]]; then
+  # shellcheck source=/dev/null
+  source "$hook_file"
+fi
+
+provider_cooldown_script="${shared_tools_dir}/provider-cooldown-state.sh"
+
+schedule_provider_quota_cooldown() {
+  local reason="${1:-provider-quota-limit}"
+  [[ "${failure_reason:-}" == "provider-quota-limit" ]] || return 0
+  [[ -x "${provider_cooldown_script}" ]] || return 0
+
+  "${provider_cooldown_script}" schedule "${reason}" >/dev/null || true
+}
+
+clear_provider_quota_cooldown() {
+  [[ -x "${provider_cooldown_script}" ]] || return 0
+
+  "${provider_cooldown_script}" clear >/dev/null || true
+}
+
+normalize_issue_result_contract() {
+  [[ "$status" == "SUCCEEDED" ]] || return 0
+
+  case "${result_outcome:-}:${result_action:-}" in
+    implemented:host-publish-issue-pr)
+      return 0
+      ;;
+    blocked:host-comment-blocker)
+      return 0
+      ;;
+    reported:host-comment-scheduled-report)
+      return 0
+      ;;
+    reported:host-comment-scheduled-alert)
+      return 0
+      ;;
+    *)
+      echo "invalid issue worker result contract for session ${session}: OUTCOME='${result_outcome:-}' ACTION='${result_action:-}'" >&2
+      return 1
+      ;;
+  esac
+}
+
+post_issue_comment_if_present() {
+  local comment_file="${run_dir}/issue-comment.md"
+  [[ -s "$comment_file" ]] || return 0
+  if issue_latest_comment_matches_artifact; then
+    return 0
+  fi
+  flow_github_api_repo "${repo_slug}" "issues/${issue_id}/comments" --method POST -f body="$(cat "$comment_file")" >/dev/null || true
+}
+
+issue_latest_comment_matches_artifact() {
+  local comment_file="${run_dir}/issue-comment.md"
+  local comment_body issue_json
+  [[ -s "${comment_file}" ]] || return 1
+  comment_body="$(cat "${comment_file}")"
+  issue_json="$(flow_github_issue_view_json "${repo_slug}" "${issue_id}" 2>/dev/null || true)"
+  [[ -n "${issue_json}" ]] || return 1
+  jq -e --arg body "${comment_body}" '((.comments // [])[-1]?.body // "") == $body' >/dev/null <<<"${issue_json}"
+}
+
+write_issue_comment_artifact() {
+  local comment_body="${1:-}"
+  local comment_file="${run_dir}/issue-comment.md"
+  [[ -n "${comment_body}" ]] || return 1
+  printf '%s\n' "${comment_body}" >"${comment_file}"
+}
+
+issue_has_no_publishable_delta() {
+  local worktree_path="${WORKTREE:-}"
+  local default_branch="${ACP_DEFAULT_BRANCH:-${F_LOSNING_DEFAULT_BRANCH:-main}}"
+  local baseline_ref=""
+  local ahead_count=""
+  local dirty_state=""
+  local ref=""
+  local candidate_refs=(
+    "origin/${default_branch}"
+    "${default_branch}"
+    "origin/main"
+    "main"
+    "origin/master"
+    "master"
+  )
+  local seen_refs=" "
+
+  [[ -n "${worktree_path}" && -d "${worktree_path}" ]] || return 1
+  git -C "${worktree_path}" rev-parse --git-dir >/dev/null 2>&1 || return 1
+
+  for ref in "${candidate_refs[@]}"; do
+    [[ -n "${ref}" ]] || continue
+    if [[ "${seen_refs}" == *" ${ref} "* ]]; then
+      continue
+    fi
+    seen_refs="${seen_refs}${ref} "
+    if git -C "${worktree_path}" rev-parse --verify "${ref}" >/dev/null 2>&1; then
+      baseline_ref="${ref}"
+      break
+    fi
+  done
+
+  [[ -n "${baseline_ref}" ]] || return 1
+
+  ahead_count="$(git -C "${worktree_path}" rev-list --count "${baseline_ref}..HEAD" 2>/dev/null || true)"
+  case "${ahead_count}" in
+    0) ;;
+    *) return 1 ;;
+  esac
+
+  dirty_state="$(git -C "${worktree_path}" status --porcelain --untracked-files=no 2>/dev/null || true)"
+  [[ -z "${dirty_state}" ]] || return 1
+
+  return 0
+}
+
+ensure_issue_blocked_comment_artifact() {
+  local comment_file="${run_dir}/issue-comment.md"
+  local blocker_reason=""
+  local verification_file=""
+  local comment_body=""
+
+  [[ -s "${comment_file}" ]] && return 0
+
+  if issue_has_no_publishable_delta; then
+    blocker_reason="no-publishable-commits"
+  fi
+
+  if [[ -z "${blocker_reason}" ]]; then
+    verification_file="$(issue_verification_file)"
+    if [[ ! -f "${verification_file}" ]] || ! grep -q '"status":"pass"' "${verification_file}" 2>/dev/null; then
+      blocker_reason="verification-guard-blocked"
+    fi
+  fi
+
+  comment_body="$(build_issue_publish_blocker_comment "${blocker_reason}" "")"
+  write_issue_comment_artifact "${comment_body}" || true
+}
+
+issue_verification_file() {
+  printf '%s\n' "${run_dir}/verification.jsonl"
+}
+
+normalize_issue_runner_state() {
+  local normalized_state="${1:?normalized state required}"
+  local normalized_exit_code="${2:-}"
+  local normalized_failure_reason="${3:-}"
+  local runner_state_file="${run_dir}/runner.env"
+  local thread_id=""
+  local attempt="1"
+  local resume_count="0"
+  local last_exit_code=""
+  local last_failure_reason=""
+  local last_trigger_reason=""
+  local auth_wait_started_at=""
+  local last_auth_fingerprint=""
+
+  [[ -f "${runner_state_file}" ]] || return 0
+
+  set +u
+  set -a
+  # shellcheck source=/dev/null
+  source "${runner_state_file}"
+  set +a
+  set -u
+
+  thread_id="${THREAD_ID:-}"
+  attempt="${ATTEMPT:-1}"
+  resume_count="${RESUME_COUNT:-0}"
+  last_exit_code="${LAST_EXIT_CODE:-}"
+  last_failure_reason="${LAST_FAILURE_REASON:-}"
+  last_trigger_reason="${LAST_TRIGGER_REASON:-}"
+  auth_wait_started_at="${AUTH_WAIT_STARTED_AT:-}"
+  last_auth_fingerprint="${LAST_AUTH_FINGERPRINT:-}"
+
+  if [[ -n "${normalized_exit_code}" ]]; then
+    last_exit_code="${normalized_exit_code}"
+  fi
+  if [[ -n "${normalized_failure_reason}" || "${normalized_state}" == "succeeded" ]]; then
+    last_failure_reason="${normalized_failure_reason}"
+  fi
+
+  flow_resident_write_metadata "${runner_state_file}" \
+    "RUNNER_STATE=${normalized_state}" \
+    "THREAD_ID=${thread_id}" \
+    "ATTEMPT=${attempt}" \
+    "RESUME_COUNT=${resume_count}" \
+    "LAST_EXIT_CODE=${last_exit_code}" \
+    "LAST_FAILURE_REASON=${last_failure_reason}" \
+    "LAST_TRIGGER_REASON=${last_trigger_reason}" \
+    "AUTH_WAIT_STARTED_AT=${auth_wait_started_at}" \
+    "LAST_AUTH_FINGERPRINT=${last_auth_fingerprint}" \
+    "UPDATED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+}
+
+issue_has_recorded_verification() {
+  local verification_file
+  verification_file="$(issue_verification_file)"
+  [[ -f "$verification_file" ]] || return 1
+  grep -q '"status":"pass"' "$verification_file" 2>/dev/null
+}
+
+extract_issue_host_recovery_commands() {
+  local prompt_file="${run_dir}/prompt.md"
+  local worktree_path="${WORKTREE:-}"
+  local verification_file
+  verification_file="$(issue_verification_file)"
+
+  [[ -n "$worktree_path" && -d "$worktree_path" ]] || return 0
+
+  PROMPT_FILE="$prompt_file" \
+  WORKTREE_PATH="$worktree_path" \
+  VERIFICATION_FILE="$verification_file" \
+  node <<'EOF'
+const fs = require('fs');
+const path = require('path');
+const cp = require('child_process');
+
+const promptFile = process.env.PROMPT_FILE || '';
+const worktreePath = process.env.WORKTREE_PATH || '';
+const verificationFile = process.env.VERIFICATION_FILE || '';
+
+const commands = [];
+const seen = new Set();
+
+const addCommand = (value) => {
+  const command = String(value || '').trim();
+  if (!command) return;
+  if (seen.has(command)) return;
+  seen.add(command);
+  commands.push(command);
+};
+
+let recordedPassCommands = new Set();
+if (verificationFile && fs.existsSync(verificationFile)) {
+  const raw = fs.readFileSync(verificationFile, 'utf8');
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const entry = JSON.parse(trimmed);
+      if (entry && entry.status === 'pass' && typeof entry.command === 'string') {
+        recordedPassCommands.add(entry.command.trim());
+      }
+    } catch (_error) {
+      // Ignore malformed history entries during recovery.
+    }
+  }
+}
+
+let packageJson = null;
+const packageJsonPath = path.join(worktreePath, 'package.json');
+if (fs.existsSync(packageJsonPath)) {
+  try {
+    packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+  } catch (_error) {
+    packageJson = null;
+  }
+}
+
+const gitChangedFiles = [];
+try {
+  const raw = cp.execFileSync(
+    'git',
+    [
+      '-C',
+      worktreePath,
+      'show',
+      '--pretty=',
+      '--name-only',
+      'HEAD',
+    ],
+    { encoding: 'utf8' },
+  );
+  for (const line of raw.split('\n')) {
+    const file = line.trim();
+    if (file) gitChangedFiles.push(file);
+  }
+} catch (_error) {
+  // Ignore; recovery can still use prompt-derived commands.
+}
+
+const changedFilesLower = gitChangedFiles.map((file) => file.toLowerCase());
+const repoHasScript = (scriptName) => Boolean(packageJson?.scripts && Object.prototype.hasOwnProperty.call(packageJson.scripts, scriptName));
+const commandLooksRunnable = (command) => {
+  if (/^npm test(?:\s|$)?/.test(command)) return repoHasScript('test');
+  if (/^pnpm test(?:\s|$)?/.test(command)) return repoHasScript('test');
+  if (/^npm run\s+([a-z0-9:_-]+)/i.test(command)) return repoHasScript(command.match(/^npm run\s+([a-z0-9:_-]+)/i)[1]);
+  if (/^pnpm run\s+([a-z0-9:_-]+)/i.test(command)) return repoHasScript(command.match(/^pnpm run\s+([a-z0-9:_-]+)/i)[1]);
+  if (/^node\s+--test(?:\s|$)/.test(command)) return true;
+  return true;
+};
+
+if (promptFile && fs.existsSync(promptFile)) {
+  const lines = fs.readFileSync(promptFile, 'utf8').split(/\r?\n/).slice(0, 40);
+  for (const line of lines) {
+    if (!/^\s*-\s+/.test(line)) continue;
+    if (!/(?:\bRun\b|\balso run\b|\bafter code changes\b|\bevery completed cycle\b)/i.test(line)) continue;
+
+    const trimmed = line.trim();
+    if (/^- If /i.test(trimmed)) {
+      const lowered = trimmed.toLowerCase();
+      if (lowered.includes('cli') || lowered.includes('fixture')) {
+        const cliOrFixtureTouched = changedFilesLower.some((file) => /(?:^|\/)(src\/summary-cli|fixtures?\/|fixtures?\.|cli\b)/.test(file));
+        if (!cliOrFixtureTouched) {
+          continue;
+        }
+      } else {
+        continue;
+      }
+    }
+
+    for (const match of line.matchAll(/`([^`]+)`/g)) {
+      const command = String(match[1] || '').trim();
+      if (commandLooksRunnable(command)) {
+        addCommand(command);
+      }
+    }
+  }
+}
+
+const changedTestFiles = [...new Set(gitChangedFiles.filter((file) => /\.(?:spec|test)\.[cm]?[jt]sx?$/.test(file)))];
+const rootTestScript = String(packageJson?.scripts?.test || '').trim();
+if (/^node\s+--test(?:\s|$)/.test(rootTestScript)) {
+  for (const file of changedTestFiles) {
+    addCommand(`node --test ${file}`);
+  }
+}
+
+if (commands.length === 0 && rootTestScript) {
+  addCommand('npm test');
+}
+
+const filtered = commands.filter((command) => !recordedPassCommands.has(command));
+process.stdout.write(filtered.join('\n'));
+EOF
+}
+
+run_issue_host_verification_command() {
+  local command_text="${1:?command text required}"
+  local session_log_file="${run_dir}/${session}.log"
+
+  {
+    printf '\n[host-issue-recovery] command=%s\n' "$command_text"
+  } >>"$session_log_file"
+
+  if WORKTREE_DIR="${WORKTREE:?missing worktree for host recovery}" HOST_COMMAND="$command_text" bash -lc 'set -euo pipefail; cd "$WORKTREE_DIR"; eval "$HOST_COMMAND"' >>"$session_log_file" 2>&1; then
+    if [[ -x "$record_verification_script" ]]; then
+      bash "$record_verification_script" --run-dir "$run_dir" --status pass --command "$command_text" --note "host-recovery-after-missing-worker-verification" >/dev/null
+    fi
+    return 0
+  fi
+
+  if [[ -x "$record_verification_script" ]]; then
+    bash "$record_verification_script" --run-dir "$run_dir" --status fail --command "$command_text" --note "host-recovery-after-missing-worker-verification" >/dev/null
+  fi
+  printf '[host-issue-recovery] command failed=%s\n' "$command_text" >>"$session_log_file"
+  return 1
+}
+
+attempt_issue_host_verification_recovery() {
+  local recovery_reason="${1:-missing-worker-verification}"
+  local recovery_commands=""
+  local command_text=""
+
+  [[ "${result_outcome:-}" == "implemented" ]] || return 1
+  [[ -n "${WORKTREE:-}" && -d "${WORKTREE:-}" ]] || return 1
+
+  recovery_commands="$(extract_issue_host_recovery_commands)"
+  [[ -n "$recovery_commands" ]] || return 1
+
+  while IFS= read -r command_text; do
+    [[ -n "$command_text" ]] || continue
+    if ! run_issue_host_verification_command "$command_text"; then
+      return 1
+    fi
+  done <<<"$recovery_commands"
+
+  issue_result_contract_note="host-recovered-${recovery_reason}"
+  return 0
+}
+
+classify_issue_publish_blocker() {
+  local publish_out="${1:-}"
+
+  if grep -Fq 'Scope guard blocked issue' <<<"$publish_out"; then
+    printf 'scope-guard-blocked\n'
+    return 0
+  fi
+
+  if grep -Fq 'Verification guard blocked branch publication.' <<<"$publish_out"; then
+    printf 'verification-guard-blocked\n'
+    return 0
+  fi
+
+  if grep -Fq 'has no commits ahead of' <<<"$publish_out"; then
+    printf 'no-publishable-commits\n'
+    return 0
+  fi
+
+  return 1
+}
+
+refresh_recurring_issue_checklist() {
+  local sync_script="${shared_tools_dir}/sync-recurring-issue-checklist.sh"
+  [[ -x "${sync_script}" ]] || return 1
+  bash "${sync_script}" --repo-slug "${repo_slug}" --issue-id "${issue_id}" 2>/dev/null || return 1
+}
+
+build_issue_publish_blocker_comment() {
+  local blocker_reason="${1:-}"
+  local publish_out="${2:-}"
+  local sync_out=""
+  local checklist_total="0"
+  local checklist_unchecked="0"
+  local checklist_matched_prs=""
+
+  if [[ "${blocker_reason}" == "no-publishable-commits" ]]; then
+    sync_out="$(refresh_recurring_issue_checklist || true)"
+    checklist_total="$(awk -F= '/^CHECKLIST_TOTAL=/{print $2; exit}' <<<"${sync_out:-}")"
+    checklist_unchecked="$(awk -F= '/^CHECKLIST_UNCHECKED=/{print $2; exit}' <<<"${sync_out:-}")"
+    checklist_matched_prs="$(awk -F= '/^CHECKLIST_MATCHED_PR_NUMBERS=/{print $2; exit}' <<<"${sync_out:-}")"
+
+    case "${checklist_total}" in
+      ''|*[!0-9]*) checklist_total="0" ;;
+    esac
+    case "${checklist_unchecked}" in
+      ''|*[!0-9]*) checklist_unchecked="0" ;;
+    esac
+
+    if [[ "${checklist_total}" -gt 0 && "${checklist_unchecked}" -eq 0 ]]; then
+      cat <<EOF
+# Blocker: All checklist items already completed
+
+All checklist items for issue #${issue_id} appear to be satisfied on the current baseline.
+
+Why it was blocked:
+- the worker completed a cycle, but the resulting branch had no commits ahead of \`origin/main\`
+- recurring automation should not force another PR when the requested checklist is already done
+
+Next step:
+- refresh the issue body with new unchecked improvement items before re-queueing this issue
+EOF
+      if [[ -n "${checklist_matched_prs}" ]]; then
+        printf '\nRecently matched PRs: #%s\n' "$(sed 's/,/, #/g' <<<"${checklist_matched_prs}")"
+      fi
+      return 0
+    fi
+
+    cat <<EOF
+# Blocker: Worker produced no publishable delta
+
+The worker finished its cycle, but the resulting branch had no commits ahead of \`origin/main\`.
+
+Why it was blocked:
+- the selected target likely overlapped work that is already on the current baseline, or
+- the worker ended with no net code/doc/test changes to publish
+
+Next step:
+- pick one remaining unchecked checklist item that is still missing on \`main\`
+- if the checklist is stale, refresh the issue body before re-queueing
+EOF
+      return 0
+  fi
+
+  if [[ "${blocker_reason}" == "scope-guard-blocked" ]]; then
+    cat <<EOF
+# Blocker: Change scope was too broad
+
+Host publication stopped this cycle because the branch touched too much surface area for a safe recurring issue PR.
+
+Why it was blocked:
+- recurring issues should ship one focused slice at a time
+- the publish scope guard detected a multi-surface change set
+
+\`\`\`text
+${publish_out}
+\`\`\`
+EOF
+    return 0
+  fi
+
+  if [[ "${blocker_reason}" == "verification-guard-blocked" ]]; then
+    cat <<EOF
+# Blocker: Verification requirements were not satisfied
+
+Host publication stopped this cycle because the branch did not carry the required verification signal for a safe recurring issue PR.
+
+Why it was blocked:
+- the verification guard could not confirm the expected checks for this change
+- recurring issue publication should stop rather than open an unverifiable PR
+
+\`\`\`text
+${publish_out}
+\`\`\`
+EOF
+    return 0
+  fi
+
+  cat <<EOF
+Host-side publish blocked for session \`${session}\`.
+
+\`\`\`text
+${publish_out}
+\`\`\`
+EOF
+}
+
+extract_recovery_worktree_from_publish_output() {
+  local publish_out="${1:-}"
+  awk -F= '/^RECOVERY_WORKTREE=/{print $2}' <<<"$publish_out" | tail -n 1
+}
+
+require_transition() {
+  local step="${1:?step required}"
+  shift
+  if ! "$@"; then
+    echo "reconcile transition failed: ${step}" >&2
+    exit 1
+  fi
+}
+
+mark_reconciled() {
+  if [[ -d "$run_dir" ]]; then
+    touch "${run_dir}/reconciled.ok"
+  fi
+}
+
+update_resident_issue_metadata() {
+  local metadata_file="${RESIDENT_WORKER_META_FILE:-}"
+  local finished_at=""
+  local task_count="${RESIDENT_TASK_COUNT:-1}"
+  local resident_worker_scope=""
+  local resident_worker_key=""
+  local resident_lane_kind=""
+  local resident_lane_value=""
+  local openclaw_agent_id=""
+  local openclaw_session_id=""
+  local openclaw_agent_dir=""
+  local openclaw_state_dir=""
+  local openclaw_config_path=""
+  local worktree_realpath=""
+  local last_worktree_reused=""
+
+  [[ "${RESIDENT_WORKER_ENABLED:-}" == "yes" ]] || return 0
+  [[ -n "${metadata_file}" ]] || return 0
+
+  finished_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  resident_worker_scope="${RESIDENT_WORKER_SCOPE:-$(flow_resident_metadata_value "${metadata_file}" "RESIDENT_WORKER_SCOPE" 2>/dev/null || true)}"
+  resident_worker_key="${RESIDENT_WORKER_KEY:-$(flow_resident_metadata_value "${metadata_file}" "RESIDENT_WORKER_KEY" 2>/dev/null || true)}"
+  resident_lane_kind="${RESIDENT_LANE_KIND:-$(flow_resident_metadata_value "${metadata_file}" "RESIDENT_LANE_KIND" 2>/dev/null || true)}"
+  resident_lane_value="${RESIDENT_LANE_VALUE:-$(flow_resident_metadata_value "${metadata_file}" "RESIDENT_LANE_VALUE" 2>/dev/null || true)}"
+  if [[ -z "${resident_lane_kind}" ]]; then
+    resident_lane_kind="$(flow_resident_issue_lane_field_from_key "${resident_worker_key:-}" kind 2>/dev/null || true)"
+  fi
+  if [[ -z "${resident_lane_value}" ]]; then
+    resident_lane_value="$(flow_resident_issue_lane_field_from_key "${resident_worker_key:-}" value 2>/dev/null || true)"
+  fi
+  openclaw_agent_id="${RESIDENT_OPENCLAW_AGENT_ID:-${OPENCLAW_AGENT_ID:-$(flow_resident_metadata_value "${metadata_file}" "OPENCLAW_AGENT_ID" 2>/dev/null || true)}}"
+  openclaw_session_id="${RESIDENT_OPENCLAW_SESSION_ID:-${OPENCLAW_SESSION_ID:-$(flow_resident_metadata_value "${metadata_file}" "OPENCLAW_SESSION_ID" 2>/dev/null || true)}}"
+  openclaw_agent_dir="${RESIDENT_OPENCLAW_AGENT_DIR:-${OPENCLAW_AGENT_DIR:-$(flow_resident_metadata_value "${metadata_file}" "OPENCLAW_AGENT_DIR" 2>/dev/null || true)}}"
+  openclaw_state_dir="${RESIDENT_OPENCLAW_STATE_DIR:-${OPENCLAW_STATE_DIR:-$(flow_resident_metadata_value "${metadata_file}" "OPENCLAW_STATE_DIR" 2>/dev/null || true)}}"
+  openclaw_config_path="${RESIDENT_OPENCLAW_CONFIG_PATH:-${OPENCLAW_CONFIG_PATH:-$(flow_resident_metadata_value "${metadata_file}" "OPENCLAW_CONFIG_PATH" 2>/dev/null || true)}}"
+  worktree_realpath="${RESIDENT_WORKTREE_REALPATH:-$(flow_resident_metadata_value "${metadata_file}" "WORKTREE_REALPATH" 2>/dev/null || true)}"
+  last_worktree_reused="${RESIDENT_WORKTREE_REUSED:-$(flow_resident_metadata_value "${metadata_file}" "LAST_WORKTREE_REUSED" 2>/dev/null || true)}"
+
+  flow_resident_write_metadata "${metadata_file}" \
+    "RESIDENT_WORKER_KIND=issue" \
+    "RESIDENT_WORKER_SCOPE=${resident_worker_scope:-lane}" \
+    "RESIDENT_WORKER_KEY=${resident_worker_key:-issue-${issue_id}}" \
+    "RESIDENT_LANE_KIND=${resident_lane_kind:-}" \
+    "RESIDENT_LANE_VALUE=${resident_lane_value:-}" \
+    "ISSUE_ID=${issue_id}" \
+    "ADAPTER_ID=${ADAPTER_ID:-}" \
+    "CODING_WORKER=${CODING_WORKER:-openclaw}" \
+    "WORKTREE=${WORKTREE:-}" \
+    "WORKTREE_REALPATH=${worktree_realpath:-${WORKTREE:-}}" \
+    "LAST_BRANCH=${BRANCH:-}" \
+    "OPENCLAW_AGENT_ID=${openclaw_agent_id:-}" \
+    "OPENCLAW_SESSION_ID=${openclaw_session_id:-}" \
+    "OPENCLAW_AGENT_DIR=${openclaw_agent_dir:-}" \
+    "OPENCLAW_STATE_DIR=${openclaw_state_dir:-}" \
+    "OPENCLAW_CONFIG_PATH=${openclaw_config_path:-}" \
+    "TASK_COUNT=${task_count}" \
+    "LAST_STARTED_AT=${STARTED_AT:-}" \
+    "LAST_FINISHED_AT=${finished_at}" \
+    "LAST_RUN_SESSION=${session}" \
+    "LAST_STATUS=${status}" \
+    "LAST_OUTCOME=${issue_summary_outcome:-}" \
+    "LAST_ACTION=${issue_summary_action:-}" \
+    "LAST_FAILURE_REASON=${issue_summary_failure_reason:-}" \
+    "LAST_WORKTREE_REUSED=${last_worktree_reused:-no}"
+}
+
+cleanup_issue_session() {
+  local -a cleanup_args=(
+    --repo-root "$repo_root"
+    --runs-root "$runs_root"
+    --history-root "$history_root"
+    --session "$session"
+    --worktree "${WORKTREE:-}"
+    --mode issue
+  )
+
+  update_resident_issue_metadata
+  if [[ "${RESIDENT_WORKER_ENABLED:-}" == "yes" ]]; then
+    cleanup_args+=(--skip-worktree-cleanup)
+  fi
+
+  "${shared_tools_dir}/agent-project-cleanup-session" "${cleanup_args[@]}" >/dev/null
+}
+
+notify_issue_reconciled() {
+  issue_after_reconciled "$status" "${issue_summary_outcome:-}" "${issue_summary_action:-}" "${pr_number:-}" || true
+}
+
+case "$status" in
+  SUCCEEDED)
+    clear_provider_quota_cooldown
+    if ! normalize_issue_result_contract; then
+      status="FAILED"
+      failure_reason="invalid-result-contract"
+      issue_result_contract_note="invalid-result-contract"
+      normalize_issue_runner_state "failed" "${LAST_EXIT_CODE:-}" "${failure_reason}"
+      post_issue_comment_if_present
+      require_transition "issue_schedule_retry" issue_schedule_retry "$failure_reason"
+      require_transition "issue_mark_ready" issue_mark_ready
+      result_outcome="invalid-contract"
+      result_action="queued-issue-retry"
+      issue_set_reconcile_summary "$status" "$result_outcome" "$result_action" "$failure_reason"
+      cleanup_issue_session
+      notify_issue_reconciled
+      mark_reconciled
+      printf 'STATUS=%s\n' "$status"
+      printf 'ISSUE_ID=%s\n' "$issue_id"
+      printf 'PR_NUMBER=%s\n' "$pr_number"
+      printf 'OUTCOME=%s\n' "$result_outcome"
+      printf 'ACTION=%s\n' "$result_action"
+      printf 'FAILURE_REASON=%s\n' "$failure_reason"
+      printf 'RESULT_CONTRACT_NOTE=%s\n' "$issue_result_contract_note"
+      exit 0
+    fi
+    require_transition "issue_before_success" issue_before_success
+    if [[ "$result_outcome" == "blocked" ]]; then
+      ensure_issue_blocked_comment_artifact
+      require_transition "issue_before_blocked" issue_before_blocked
+      post_issue_comment_if_present
+      if issue_should_close_as_superseded; then
+        require_transition "issue_clear_retry" issue_clear_retry
+        require_transition "issue_remove_running" issue_remove_running
+        require_transition "issue_close_as_superseded" issue_close_as_superseded
+        result_action="closed-superseded"
+        issue_set_reconcile_summary "$status" "$result_outcome" "$result_action" "${failure_reason:-}"
+        cleanup_issue_session
+        notify_issue_reconciled
+        mark_reconciled
+        printf 'STATUS=%s\n' "$status"
+        printf 'ISSUE_ID=%s\n' "$issue_id"
+        printf 'PR_NUMBER=%s\n' "$pr_number"
+        printf 'OUTCOME=%s\n' "$result_outcome"
+        printf 'ACTION=%s\n' "$result_action"
+        exit 0
+      fi
+      failure_reason="issue-worker-blocked"
+      normalize_issue_runner_state "succeeded" "0" ""
+      require_transition "issue_schedule_retry" issue_schedule_retry "$failure_reason"
+      require_transition "issue_mark_blocked" issue_mark_blocked
+      issue_set_reconcile_summary "$status" "$result_outcome" "$result_action" "$failure_reason"
+      cleanup_issue_session
+      notify_issue_reconciled
+      mark_reconciled
+      printf 'STATUS=%s\n' "$status"
+      printf 'ISSUE_ID=%s\n' "$issue_id"
+      printf 'PR_NUMBER=%s\n' "$pr_number"
+      printf 'OUTCOME=%s\n' "$result_outcome"
+      printf 'ACTION=%s\n' "$result_action"
+      printf 'FAILURE_REASON=%s\n' "$failure_reason"
+      exit 0
+    fi
+
+    if [[ "$result_outcome" == "reported" ]]; then
+      normalize_issue_runner_state "succeeded" "0" ""
+      post_issue_comment_if_present
+      require_transition "issue_clear_retry" issue_clear_retry
+      require_transition "issue_remove_running" issue_remove_running
+      cleanup_issue_session
+      notify_issue_reconciled
+      mark_reconciled
+      printf 'STATUS=%s\n' "$status"
+      printf 'ISSUE_ID=%s\n' "$issue_id"
+      printf 'PR_NUMBER=%s\n' "$pr_number"
+      printf 'OUTCOME=%s\n' "$result_outcome"
+      printf 'ACTION=%s\n' "$result_action"
+      exit 0
+    fi
+
+    # Push branch to remote BEFORE publish to preserve commits
+    # even if worktree gets cleaned up during publish process
+    if [[ -n "${BRANCH:-}" && -n "${WORKTREE:-}" && -d "${WORKTREE:-}" ]]; then
+      if git -C "${WORKTREE}" rev-parse --git-dir >/dev/null 2>&1; then
+        if ! git -C "${WORKTREE}" push -u origin "${BRANCH}" 2>/dev/null; then
+          printf 'PRE_PUBLISH_PUSH=failed branch=%s\n' "${BRANCH}" >&2
+        else
+          printf 'PRE_PUBLISH_PUSH=ok branch=%s\n' "${BRANCH}" >&2
+        fi
+      fi
+    fi
+
+    if ! issue_has_recorded_verification; then
+      attempt_issue_host_verification_recovery "missing-worker-verification" || true
+    fi
+
+    publish_args=()
+    while IFS= read -r publish_arg; do
+      [[ -n "$publish_arg" ]] || continue
+      publish_args+=("$publish_arg")
+    done < <(issue_publish_extra_args || true)
+
+    publish_cmd=(
+      "${shared_tools_dir}/agent-project-publish-issue-pr"
+      --repo-slug "$repo_slug"
+      --runs-root "$runs_root"
+      --history-root "$history_root"
+      --session "$session"
+    )
+    if [[ ${#publish_args[@]} -gt 0 ]]; then
+      publish_cmd+=("${publish_args[@]}")
+    fi
+
+    if ! publish_out="$("${publish_cmd[@]}" 2>&1)"; then
+      publish_blocker_reason="$(classify_issue_publish_blocker "$publish_out" || true)"
+      if [[ "$publish_blocker_reason" == "verification-guard-blocked" ]]; then
+        recovered_worktree="$(extract_recovery_worktree_from_publish_output "$publish_out" || true)"
+        if [[ -n "$recovered_worktree" && -d "$recovered_worktree" ]]; then
+          WORKTREE="$recovered_worktree"
+        fi
+        if attempt_issue_host_verification_recovery "verification-guard-blocked"; then
+          if publish_out="$("${publish_cmd[@]}" 2>&1)"; then
+            pr_number="$(awk -F= '/^PR_NUMBER=/{print $2}' <<<"$publish_out")"
+            normalize_issue_runner_state "succeeded" "0" ""
+            require_transition "issue_clear_retry" issue_clear_retry
+            require_transition "issue_remove_running" issue_remove_running
+            if [[ -n "$pr_number" ]]; then
+              require_transition "issue_after_pr_created" issue_after_pr_created "$pr_number"
+            fi
+            cleanup_issue_session
+            notify_issue_reconciled
+            mark_reconciled
+            printf 'STATUS=%s\n' "$status"
+            printf 'ISSUE_ID=%s\n' "$issue_id"
+            printf 'PR_NUMBER=%s\n' "$pr_number"
+            printf 'OUTCOME=%s\n' "$result_outcome"
+            printf 'ACTION=%s\n' "$result_action"
+            if [[ -n "$issue_result_contract_note" ]]; then
+              printf 'RESULT_CONTRACT_NOTE=%s\n' "$issue_result_contract_note"
+            fi
+            exit 0
+          fi
+          publish_blocker_reason="$(classify_issue_publish_blocker "$publish_out" || true)"
+        fi
+      fi
+      blocker_body="$(build_issue_publish_blocker_comment "${publish_blocker_reason:-}" "${publish_out}")"
+      write_issue_comment_artifact "${blocker_body}" || true
+      post_issue_comment_if_present
+      if [[ -n "$publish_blocker_reason" ]]; then
+        require_transition "issue_before_blocked" issue_before_blocked
+        normalize_issue_runner_state "succeeded" "0" ""
+        require_transition "issue_schedule_retry" issue_schedule_retry "$publish_blocker_reason"
+        require_transition "issue_mark_blocked" issue_mark_blocked
+        result_outcome="blocked"
+        result_action="host-comment-blocker"
+        failure_reason="$publish_blocker_reason"
+        issue_set_reconcile_summary "$status" "$result_outcome" "$result_action" "$failure_reason"
+        cleanup_issue_session
+        notify_issue_reconciled
+        mark_reconciled
+        printf 'STATUS=%s\n' "$status"
+        printf 'ISSUE_ID=%s\n' "$issue_id"
+        printf 'PR_NUMBER=%s\n' "$pr_number"
+        printf 'OUTCOME=%s\n' "$result_outcome"
+        printf 'ACTION=%s\n' "$result_action"
+        printf 'FAILURE_REASON=%s\n' "$failure_reason"
+        printf 'PUBLISH_ERROR=%s\n' "$(printf '%s' "$publish_out" | tr '\n' ' ' | sed 's/  */ /g')"
+        exit 0
+      fi
+      require_transition "issue_schedule_retry" issue_schedule_retry "host-publish-failed"
+      require_transition "issue_mark_ready" issue_mark_ready
+      issue_set_reconcile_summary "$status" "" "" "host-publish-failed"
+      # Push branch to remote before cleanup to preserve commits for next retry
+      if [[ -n "${BRANCH:-}" && -d "${WORKTREE:-}" && ( -f "${WORKTREE:-}/.git" || -d "${WORKTREE:-}/.git" ) ]]; then
+        if ! git -C "$WORKTREE" push -u origin "$BRANCH" 2>/dev/null; then
+          printf 'WORKTREE_PUSH_BEFORE_CLEANUP=failed\n' >&2
+        else
+          printf 'WORKTREE_PUSH_BEFORE_CLEANUP=ok\n' >&2
+        fi
+      fi
+      cleanup_issue_session
+      notify_issue_reconciled
+      mark_reconciled
+      printf 'STATUS=%s\n' "$status"
+      printf 'ISSUE_ID=%s\n' "$issue_id"
+      printf 'PR_NUMBER=%s\n' "$pr_number"
+      printf 'PUBLISH_ERROR=%s\n' "$(printf '%s' "$publish_out" | tr '\n' ' ' | sed 's/  */ /g')"
+      exit 0
+    fi
+
+    pr_number="$(awk -F= '/^PR_NUMBER=/{print $2}' <<<"$publish_out")"
+    normalize_issue_runner_state "succeeded" "0" ""
+    require_transition "issue_clear_retry" issue_clear_retry
+    require_transition "issue_remove_running" issue_remove_running
+    if [[ -n "$pr_number" ]]; then
+      require_transition "issue_after_pr_created" issue_after_pr_created "$pr_number"
+    fi
+    cleanup_issue_session
+    notify_issue_reconciled
+    ;;
+  FAILED)
+    failure_reason="${failure_reason:-worker-exit-failed}"
+    schedule_provider_quota_cooldown "${failure_reason}"
+    normalize_issue_runner_state "failed" "${LAST_EXIT_CODE:-}" "${failure_reason}"
+    require_transition "issue_schedule_retry" issue_schedule_retry "${failure_reason}"
+    require_transition "issue_mark_ready" issue_mark_ready
+    issue_set_reconcile_summary "$status" "" "" "$failure_reason"
+    cleanup_issue_session
+    notify_issue_reconciled
+    ;;
+  *)
+    ;;
+esac
+
+mark_reconciled
+printf 'STATUS=%s\n' "$status"
+printf 'ISSUE_ID=%s\n' "$issue_id"
+printf 'PR_NUMBER=%s\n' "$pr_number"
+if [[ -n "$failure_reason" ]]; then
+  printf 'FAILURE_REASON=%s\n' "$failure_reason"
+fi
+if [[ -n "$issue_result_contract_note" ]]; then
+  printf 'RESULT_CONTRACT_NOTE=%s\n' "$issue_result_contract_note"
+fi

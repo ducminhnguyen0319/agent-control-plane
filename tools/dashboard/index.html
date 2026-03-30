@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ACP Worker Dashboard</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Agent Control Plane</p>
+          <h1>Worker Dashboard</h1>
+          <p class="subtitle">
+            Track active runs, resident controllers, queue pressure, and provider failover in one place.
+          </p>
+          <p class="subtitle">
+            Lifecycle shows whether a worker session finished cleanly. Result shows whether that cycle implemented work, reported findings, or stopped blocked.
+          </p>
+        </div>
+        <div class="hero-actions">
+          <button id="refresh-button" type="button">Refresh now</button>
+          <div class="meta">
+            <div>Auto refresh: <strong>5s</strong></div>
+            <div id="generated-at">Loading snapshot...</div>
+          </div>
+        </div>
+      </header>
+
+      <section id="overview" class="overview"></section>
+      <section id="profiles" class="profiles"></section>
+    </main>
+
+    <template id="empty-table-template">
+      <div class="empty-state">No data right now.</div>
+    </template>
+
+    <script src="./app.js" defer></script>
+  </body>
+  </html>

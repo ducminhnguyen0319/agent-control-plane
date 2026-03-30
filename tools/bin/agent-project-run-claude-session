@@ -1,0 +1,657 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-project-run-claude-session --mode safe|bypass --session <id> --worktree <path> --prompt-file <path> --runs-root <path> --adapter-id <id> --task-kind <kind> --task-id <id> [options]
+
+Launch a Claude Code worker session inside tmux for a project adapter and
+persist the standard run artifacts.
+
+Options:
+  --claude-model <name>             Claude model alias or full name
+  --claude-permission-mode <mode>   Claude permission mode (e.g. dontAsk, bypassPermissions)
+  --claude-effort <level>           Claude effort level (low, medium, high, max)
+  --claude-timeout-seconds <secs>   Claude command timeout (default: 900)
+  --claude-max-attempts <count>     Retry transient failures this many times (default: 3)
+  --claude-retry-backoff-seconds <s>
+                                   Sleep between transient retries (default: 30)
+  --env-prefix <prefix>             Export prefixed runtime/context env vars inside the worker
+  --context <KEY=VALUE>             Extra metadata written to run.env and exported to the worker
+  --collect-file <name>             Copy sandbox artifact file into the host run dir after execution
+  --reconcile-command <cmd>         Host-side command queued after the worker exits
+  --sandbox-subdir <name>           Subdir under the worktree for worker artifacts (default: .openclaw-artifacts)
+  --help                            Show this help
+EOF
+}
+
+mode=""
+session=""
+worktree=""
+prompt_file=""
+runs_root=""
+adapter_id=""
+task_kind=""
+task_id=""
+claude_model="${ACP_CLAUDE_MODEL:-${F_LOSNING_CLAUDE_MODEL:-sonnet}}"
+claude_permission_mode="${ACP_CLAUDE_PERMISSION_MODE:-${F_LOSNING_CLAUDE_PERMISSION_MODE:-dontAsk}}"
+claude_effort="${ACP_CLAUDE_EFFORT:-${F_LOSNING_CLAUDE_EFFORT:-medium}}"
+claude_timeout_seconds="${ACP_CLAUDE_TIMEOUT_SECONDS:-${F_LOSNING_CLAUDE_TIMEOUT_SECONDS:-900}}"
+claude_max_attempts="${ACP_CLAUDE_MAX_ATTEMPTS:-${F_LOSNING_CLAUDE_MAX_ATTEMPTS:-3}}"
+claude_retry_backoff_seconds="${ACP_CLAUDE_RETRY_BACKOFF_SECONDS:-${F_LOSNING_CLAUDE_RETRY_BACKOFF_SECONDS:-30}}"
+env_prefix=""
+sandbox_subdir=".openclaw-artifacts"
+reconcile_command=""
+declare -a context_items=()
+declare -a collect_files=()
+
+resolve_claude_bin() {
+  local configured_bin="${CLAUDE_BIN:-${ACP_CLAUDE_BIN:-${F_LOSNING_CLAUDE_BIN:-}}}"
+
+  if [[ -n "${configured_bin}" && -x "${configured_bin}" ]]; then
+    printf '%s\n' "${configured_bin}"
+    return 0
+  fi
+
+  if command -v claude >/dev/null 2>&1; then
+    command -v claude
+    return 0
+  fi
+
+  return 1
+}
+
+resolve_python_bin() {
+  if command -v python3 >/dev/null 2>&1; then
+    command -v python3
+    return 0
+  fi
+  if [[ -x /opt/homebrew/bin/python3 ]]; then
+    printf '%s\n' "/opt/homebrew/bin/python3"
+    return 0
+  fi
+  if command -v python >/dev/null 2>&1; then
+    command -v python
+    return 0
+  fi
+  return 1
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --mode) mode="${2:-}"; shift 2 ;;
+    --session) session="${2:-}"; shift 2 ;;
+    --worktree) worktree="${2:-}"; shift 2 ;;
+    --prompt-file) prompt_file="${2:-}"; shift 2 ;;
+    --runs-root) runs_root="${2:-}"; shift 2 ;;
+    --adapter-id) adapter_id="${2:-}"; shift 2 ;;
+    --task-kind) task_kind="${2:-}"; shift 2 ;;
+    --task-id) task_id="${2:-}"; shift 2 ;;
+    --claude-model) claude_model="${2:-}"; shift 2 ;;
+    --claude-permission-mode) claude_permission_mode="${2:-}"; shift 2 ;;
+    --claude-effort) claude_effort="${2:-}"; shift 2 ;;
+    --claude-timeout-seconds) claude_timeout_seconds="${2:-}"; shift 2 ;;
+    --claude-max-attempts) claude_max_attempts="${2:-}"; shift 2 ;;
+    --claude-retry-backoff-seconds) claude_retry_backoff_seconds="${2:-}"; shift 2 ;;
+    --env-prefix) env_prefix="${2:-}"; shift 2 ;;
+    --context) context_items+=("${2:-}"); shift 2 ;;
+    --collect-file) collect_files+=("${2:-}"); shift 2 ;;
+    --reconcile-command) reconcile_command="${2:-}"; shift 2 ;;
+    --sandbox-subdir) sandbox_subdir="${2:-}"; shift 2 ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$mode" || -z "$session" || -z "$worktree" || -z "$prompt_file" || -z "$runs_root" || -z "$adapter_id" || -z "$task_kind" || -z "$task_id" ]]; then
+  usage >&2
+  exit 1
+fi
+
+case "$mode" in
+  safe|bypass) ;;
+  *)
+    echo "--mode must be safe or bypass" >&2
+    exit 1
+    ;;
+esac
+
+case "$claude_effort" in
+  low|medium|high|max) ;;
+  *)
+    echo "--claude-effort must be one of: low, medium, high, max" >&2
+    exit 1
+    ;;
+esac
+
+case "$claude_timeout_seconds" in
+  ''|*[!0-9]*|0) echo "--claude-timeout-seconds must be a positive integer" >&2; exit 1 ;;
+esac
+
+case "$claude_max_attempts" in
+  ''|*[!0-9]*|0) echo "--claude-max-attempts must be a positive integer" >&2; exit 1 ;;
+esac
+
+case "$claude_retry_backoff_seconds" in
+  ''|*[!0-9]*) echo "--claude-retry-backoff-seconds must be numeric" >&2; exit 1 ;;
+esac
+
+claude_bin="$(resolve_claude_bin || true)"
+if [[ -z "${claude_bin}" || ! -x "${claude_bin}" ]]; then
+  echo "unable to resolve a runnable claude binary" >&2
+  exit 1
+fi
+
+python_bin="$(resolve_python_bin || true)"
+if [[ -z "${python_bin}" || ! -x "${python_bin}" ]]; then
+  echo "unable to resolve a runnable python interpreter for claude timeout control" >&2
+  exit 1
+fi
+
+artifact_dir="${runs_root}/${session}"
+output_file="${artifact_dir}/${session}.log"
+inner_script="${artifact_dir}/${session}.sh"
+meta_file="${artifact_dir}/run.env"
+result_file="${artifact_dir}/result.env"
+runner_state_file="${artifact_dir}/runner.env"
+sandbox_run_dir="${worktree%/}/${sandbox_subdir}/${session}"
+started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+mkdir -p "$artifact_dir"
+mkdir -p "$sandbox_run_dir"
+
+if tmux has-session -t "$session" 2>/dev/null; then
+  echo "tmux session already exists: $session" >&2
+  exit 1
+fi
+
+branch_name="$(git -C "$worktree" branch --show-current 2>/dev/null || true)"
+
+printf -v session_q '%q' "$session"
+printf -v task_kind_q '%q' "$task_kind"
+printf -v task_id_q '%q' "$task_id"
+printf -v mode_q '%q' "$mode"
+printf -v worktree_q '%q' "$worktree"
+printf -v prompt_q '%q' "$prompt_file"
+printf -v output_q '%q' "$output_file"
+printf -v artifact_dir_q '%q' "$artifact_dir"
+printf -v script_q '%q' "$inner_script"
+printf -v result_q '%q' "$result_file"
+printf -v meta_file_q '%q' "$meta_file"
+printf -v runner_state_q '%q' "$runner_state_file"
+printf -v branch_q '%q' "$branch_name"
+printf -v sandbox_run_dir_q '%q' "$sandbox_run_dir"
+printf -v adapter_id_q '%q' "$adapter_id"
+printf -v started_at_q '%q' "$started_at"
+printf -v claude_bin_q '%q' "$claude_bin"
+printf -v claude_model_q '%q' "$claude_model"
+printf -v claude_permission_mode_q '%q' "$claude_permission_mode"
+printf -v claude_effort_q '%q' "$claude_effort"
+printf -v claude_timeout_q '%q' "$claude_timeout_seconds"
+printf -v claude_max_attempts_q '%q' "$claude_max_attempts"
+printf -v claude_retry_backoff_q '%q' "$claude_retry_backoff_seconds"
+printf -v python_bin_q '%q' "$python_bin"
+printf -v sandbox_subdir_q '%q' "$sandbox_subdir"
+printf -v claude_thread_id_q '%q' "claude-print-${session}"
+
+{
+  printf 'TASK_KIND=%s\n' "$task_kind_q"
+  printf 'TASK_ID=%s\n' "$task_id_q"
+  printf 'SESSION=%s\n' "$session_q"
+  printf 'MODE=%s\n' "$mode_q"
+  printf 'WORKTREE=%s\n' "$worktree_q"
+  printf 'PROMPT_FILE=%s\n' "$prompt_q"
+  printf 'OUTPUT_FILE=%s\n' "$output_q"
+  printf 'SCRIPT=%s\n' "$script_q"
+  printf 'BRANCH=%s\n' "$branch_q"
+  printf 'RESULT_FILE=%s\n' "$result_q"
+  printf 'RUNNER_STATE_FILE=%s\n' "$runner_state_q"
+  printf 'SANDBOX_RUN_DIR=%s\n' "$sandbox_run_dir_q"
+  printf 'ADAPTER_ID=%s\n' "$adapter_id_q"
+  printf 'STARTED_AT=%s\n' "$started_at_q"
+  printf 'CLAUDE_BIN=%s\n' "$claude_bin_q"
+  printf 'CLAUDE_MODEL=%s\n' "$claude_model_q"
+  printf 'CLAUDE_PERMISSION_MODE=%s\n' "$claude_permission_mode_q"
+  printf 'CLAUDE_EFFORT=%s\n' "$claude_effort_q"
+  printf 'CLAUDE_TIMEOUT_SECONDS=%s\n' "$claude_timeout_q"
+  printf 'CLAUDE_MAX_ATTEMPTS=%s\n' "$claude_max_attempts_q"
+  printf 'CLAUDE_RETRY_BACKOFF_SECONDS=%s\n' "$claude_retry_backoff_q"
+  printf 'PYTHON_BIN=%s\n' "$python_bin_q"
+} >"$meta_file"
+
+context_exports=""
+if ((${#context_items[@]} > 0)); then
+  for item in "${context_items[@]}"; do
+    if [[ "$item" != *=* ]]; then
+      echo "--context must use KEY=VALUE syntax: $item" >&2
+      exit 1
+    fi
+    key="${item%%=*}"
+    value="${item#*=}"
+    if [[ ! "$key" =~ ^[A-Z0-9_]+$ ]]; then
+      echo "Invalid context key: $key" >&2
+      exit 1
+    fi
+    printf -v value_q '%q' "$value"
+    printf '%s=%s\n' "$key" "$value_q" >>"$meta_file"
+    if [[ -n "$env_prefix" ]]; then
+      context_exports+="export ${env_prefix}${key}=${value_q}"$'\n'
+    fi
+    context_exports+="export ACP_${key}=${value_q}"$'\n'
+    if [[ "$env_prefix" != "F_LOSNING_" ]]; then
+      context_exports+="export F_LOSNING_${key}=${value_q}"$'\n'
+    fi
+  done
+fi
+
+runtime_exports=$(
+  cat <<EOF
+export AGENT_PROJECT_SESSION=${session_q}
+export AGENT_PROJECT_RUN_DIR=${sandbox_run_dir_q}
+export AGENT_PROJECT_HOST_RUN_DIR=${artifact_dir_q}
+export AGENT_PROJECT_RESULT_FILE=${sandbox_run_dir_q}/result.env
+export AGENT_PROJECT_CLAUDE_BIN=${claude_bin_q}
+export ACP_SESSION=${session_q}
+export ACP_RUN_DIR=${sandbox_run_dir_q}
+export ACP_HOST_RUN_DIR=${artifact_dir_q}
+export ACP_RESULT_FILE=${sandbox_run_dir_q}/result.env
+export ACP_CLAUDE_BIN=${claude_bin_q}
+export ACP_CLAUDE_MODEL=${claude_model_q}
+export ACP_CLAUDE_PERMISSION_MODE=${claude_permission_mode_q}
+export ACP_CLAUDE_EFFORT=${claude_effort_q}
+export ACP_CLAUDE_TIMEOUT_SECONDS=${claude_timeout_q}
+export ACP_CLAUDE_MAX_ATTEMPTS=${claude_max_attempts_q}
+export ACP_CLAUDE_RETRY_BACKOFF_SECONDS=${claude_retry_backoff_q}
+export F_LOSNING_SESSION=${session_q}
+export F_LOSNING_RUN_DIR=${sandbox_run_dir_q}
+export F_LOSNING_HOST_RUN_DIR=${artifact_dir_q}
+export F_LOSNING_RESULT_FILE=${sandbox_run_dir_q}/result.env
+export F_LOSNING_CLAUDE_BIN=${claude_bin_q}
+export F_LOSNING_CLAUDE_MODEL=${claude_model_q}
+export F_LOSNING_CLAUDE_PERMISSION_MODE=${claude_permission_mode_q}
+export F_LOSNING_CLAUDE_EFFORT=${claude_effort_q}
+export F_LOSNING_CLAUDE_TIMEOUT_SECONDS=${claude_timeout_q}
+export F_LOSNING_CLAUDE_MAX_ATTEMPTS=${claude_max_attempts_q}
+export F_LOSNING_CLAUDE_RETRY_BACKOFF_SECONDS=${claude_retry_backoff_q}
+EOF
+)
+
+if [[ -n "$env_prefix" ]]; then
+  runtime_exports+=$'\n'
+  runtime_exports+=$(cat <<EOF
+export ${env_prefix}SESSION=${session_q}
+export ${env_prefix}RUN_DIR=${sandbox_run_dir_q}
+export ${env_prefix}HOST_RUN_DIR=${artifact_dir_q}
+export ${env_prefix}RESULT_FILE=${sandbox_run_dir_q}/result.env
+export ${env_prefix}CLAUDE_BIN=${claude_bin_q}
+export ${env_prefix}CLAUDE_MODEL=${claude_model_q}
+export ${env_prefix}CLAUDE_PERMISSION_MODE=${claude_permission_mode_q}
+export ${env_prefix}CLAUDE_EFFORT=${claude_effort_q}
+export ${env_prefix}CLAUDE_TIMEOUT_SECONDS=${claude_timeout_q}
+export ${env_prefix}CLAUDE_MAX_ATTEMPTS=${claude_max_attempts_q}
+export ${env_prefix}CLAUDE_RETRY_BACKOFF_SECONDS=${claude_retry_backoff_q}
+EOF
+)
+fi
+
+collect_copy_snippet=""
+if ((${#collect_files[@]} > 0)); then
+  for artifact_name in "${collect_files[@]}"; do
+    if [[ -z "$artifact_name" ]]; then
+      continue
+    fi
+    printf -v artifact_q '%q' "$artifact_name"
+    collect_copy_snippet+=$(
+      cat <<EOF
+if [[ -f ${sandbox_run_dir_q}/${artifact_q} ]]; then
+  cp ${sandbox_run_dir_q}/${artifact_q} ${artifact_dir_q}/${artifact_q}
+fi
+EOF
+    )
+    collect_copy_snippet+=$'\n'
+  done
+fi
+
+reconcile_snippet=""
+if [[ -n "$reconcile_command" ]]; then
+  printf -v delayed_reconcile_q '%q' "sleep 2; $reconcile_command"
+  reconcile_snippet="nohup bash -lc ${delayed_reconcile_q} >> ${output_q} 2>&1 </dev/null &"
+fi
+
+cat >"$inner_script" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+${runtime_exports}
+${context_exports}cd ${worktree_q}
+
+runner_state_file=${runner_state_q}
+output_file=${output_q}
+sandbox_run_dir=${sandbox_run_dir_q}
+artifact_dir=${artifact_dir_q}
+result_file_path=${sandbox_run_dir_q}/result.env
+host_result_file=${result_q}
+claude_bin=${claude_bin_q}
+claude_model=${claude_model_q}
+claude_permission_mode=${claude_permission_mode_q}
+claude_effort=${claude_effort_q}
+claude_timeout_seconds=${claude_timeout_q}
+claude_max_attempts=${claude_max_attempts_q}
+claude_retry_backoff_seconds=${claude_retry_backoff_q}
+python_bin=${python_bin_q}
+worktree_root=${worktree_q}
+sandbox_subdir=${sandbox_subdir_q}
+prompt_file=${prompt_q}
+
+write_state() {
+  local runner_state="\${1:?runner state required}"
+  local last_exit_code="\${2:-}"
+  local failure_reason="\${3:-}"
+  local attempt="\${4:-1}"
+  local resume_count="\${5:-0}"
+  local updated_at tmp_file
+
+  updated_at="\$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  tmp_file="\${runner_state_file}.tmp.\$\$"
+  {
+    printf 'RUNNER_STATE=%q\n' "\${runner_state}"
+    printf 'THREAD_ID=%q\n' ${claude_thread_id_q}
+    printf 'ATTEMPT=%q\n' "\${attempt}"
+    printf 'RESUME_COUNT=%q\n' "\${resume_count}"
+    printf 'LAST_EXIT_CODE=%q\n' "\${last_exit_code}"
+    printf 'LAST_FAILURE_REASON=%q\n' "\${failure_reason}"
+    printf 'LAST_TRIGGER_REASON=%q\n' ''
+    printf 'AUTH_WAIT_STARTED_AT=%q\n' ''
+    printf 'LAST_AUTH_FINGERPRINT=%q\n' ''
+    printf 'UPDATED_AT=%q\n' "\${updated_at}"
+  } >"\${tmp_file}"
+  mv "\${tmp_file}" "\${runner_state_file}"
+}
+
+run_with_timeout() {
+  local timeout_seconds="\${1:?timeout seconds required}"
+  shift
+
+  "\${python_bin}" - "\${timeout_seconds}" "\$@" <<'PY'
+import os
+import signal
+import subprocess
+import sys
+
+timeout_seconds = float(sys.argv[1])
+argv = sys.argv[2:]
+
+if not argv:
+    sys.exit(64)
+
+proc = subprocess.Popen(argv, start_new_session=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+try:
+    stdout, stderr = proc.communicate(timeout=timeout_seconds)
+except subprocess.TimeoutExpired:
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        stdout, stderr = proc.communicate(timeout=2)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        stdout, stderr = proc.communicate()
+    if stdout:
+        sys.stdout.buffer.write(stdout)
+    if stderr:
+        sys.stderr.buffer.write(stderr)
+    sys.exit(124)
+
+if stdout:
+    sys.stdout.buffer.write(stdout)
+if stderr:
+    sys.stderr.buffer.write(stderr)
+sys.exit(proc.returncode)
+PY
+}
+
+record_final_git_state() {
+  local final_head final_branch tmp_file
+
+  final_head="\$(git -C ${worktree_q} rev-parse HEAD 2>/dev/null || true)"
+  final_branch="\$(git -C ${worktree_q} branch --show-current 2>/dev/null || true)"
+  tmp_file=${meta_file_q}.tmp.final.\$\$
+  grep -vE '^(FINAL_HEAD|FINAL_BRANCH)=' ${meta_file_q} >"\${tmp_file}" 2>/dev/null || true
+  {
+    printf 'FINAL_HEAD=%q\n' "\${final_head}"
+    printf 'FINAL_BRANCH=%q\n' "\${final_branch}"
+  } >>"\${tmp_file}"
+  mv "\${tmp_file}" ${meta_file_q}
+}
+
+ensure_workspace_excludes() {
+  local exclude_file line sandbox_pattern
+  exclude_file="\$(git -C ${worktree_q} config --worktree --get core.excludesFile 2>/dev/null || true)"
+  if [[ -z "\${exclude_file}" ]]; then
+    exclude_file="\${sandbox_run_dir}/git-exclude"
+    git -C ${worktree_q} config extensions.worktreeConfig true >/dev/null 2>&1 || true
+    git -C ${worktree_q} config --worktree core.excludesFile "\${exclude_file}"
+  fi
+
+  mkdir -p "\$(dirname "\${exclude_file}")"
+  touch "\${exclude_file}"
+  sandbox_pattern="\${sandbox_subdir#./}"
+  sandbox_pattern="\${sandbox_pattern#/}"
+  while IFS= read -r line; do
+    [[ -n "\${line}" ]] || continue
+    if ! grep -Fqx "\${line}" "\${exclude_file}" 2>/dev/null; then
+      printf '%s\n' "\${line}" >>"\${exclude_file}"
+    fi
+  done <<PATTERNS
+\${sandbox_pattern}
+SOUL.md
+TOOLS.md
+IDENTITY.md
+USER.md
+HEARTBEAT.md
+BOOTSTRAP.md
+.agent-session.env
+PATTERNS
+}
+
+install_pre_commit_scope_hook() {
+  local hooks_dir="\$(git -C ${worktree_q} rev-parse --git-path hooks 2>/dev/null || true)"
+  if [[ -z "\${hooks_dir}" ]]; then
+    hooks_dir="\$(git -C ${worktree_q} config --get core.hooksPath 2>/dev/null || true)"
+  fi
+  if [[ -z "\${hooks_dir}" ]]; then
+    hooks_dir="${worktree_q}/.git-hooks"
+  fi
+  if [[ "\${hooks_dir}" != /* ]]; then
+    hooks_dir="${worktree_q}/\${hooks_dir}"
+  fi
+  mkdir -p "\${hooks_dir}"
+  cat >"\${hooks_dir}/pre-commit" <<'HOOK_EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+  changed_files="\$(
+  git diff --cached --name-only --diff-filter=ACMR 2>/dev/null || true
+)"
+
+  if [[ -z "\${changed_files}" ]]; then
+  exit 0
+  fi
+
+api_count=0
+web_count=0
+mobile_count=0
+package_count=0
+doc_count=0
+other_count=0
+
+while IFS= read -r file; do
+  [[ -n "\${file}" ]] || continue
+  case "\${file}" in
+    apps/api/*) api_count=\$((api_count + 1)) ;;
+    apps/web/*) web_count=\$((web_count + 1)) ;;
+    apps/mobile/*) mobile_count=\$((mobile_count + 1)) ;;
+    packages/*) package_count=\$((package_count + 1)) ;;
+    openspec/*|docs/*|*.md) doc_count=\$((doc_count + 1)) ;;
+    *) other_count=\$((other_count + 1)) ;;
+  esac
+done <<< "\${changed_files}"
+
+surfaces=0
+[[ \$api_count -gt 0 ]] && surfaces=\$((surfaces + 1))
+[[ \$web_count -gt 0 ]] && surfaces=\$((surfaces + 1))
+[[ \$mobile_count -gt 0 ]] && surfaces=\$((surfaces + 1))
+
+if [[ \$surfaces -ge 3 ]]; then
+  echo "[pre-commit scope warning] This commit touches \$surfaces product surfaces (api=\$api_count web=\$web_count mobile=\$mobile_count). Consider splitting into focused commits." >&2
+fi
+
+total_product=\$((api_count + web_count + mobile_count + package_count + other_count))
+if [[ \$total_product -gt 20 ]]; then
+  echo "[pre-commit scope BLOCK] This commit touches \$total_product product files across \$surfaces surfaces. Split into smaller focused commits." >&2
+  exit 1
+fi
+
+if [[ \$mobile_count -gt 8 ]]; then
+  echo "[pre-commit scope BLOCK] This commit touches \$mobile_count mobile product files. Keep mobile changes to one focused route family (max 8 files)." >&2
+  exit 1
+fi
+
+exit 0
+HOOK_EOF
+  chmod +x "\${hooks_dir}/pre-commit"
+}
+
+classify_failure_reason() {
+  local log_file="\${1:-\${output_file}}"
+
+  if grep -Eiq 'authentication|unauthorized|login required|invalid api key|api key' "\${log_file}" 2>/dev/null; then
+    printf 'auth-failure\n'
+    return 0
+  fi
+  if grep -Eiq 'rate limit|quota exceeded|insufficient credits|payment required|429' "\${log_file}" 2>/dev/null; then
+    printf 'provider-quota-limit\n'
+    return 0
+  fi
+  if grep -Eiq 'model .* not available|unsupported model|invalid model|model not found' "\${log_file}" 2>/dev/null; then
+    printf 'model-unavailable\n'
+    return 0
+  fi
+  if grep -Eiq 'connection reset|connection error|network error|temporarily unavailable|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN' "\${log_file}" 2>/dev/null; then
+    printf 'network-connection\n'
+    return 0
+  fi
+  if grep -Eiq 'timeout|timed out|ETIMEDOUT' "\${log_file}" 2>/dev/null; then
+    printf 'timeout\n'
+    return 0
+  fi
+  printf 'claude-exit-failed\n'
+}
+
+is_retryable_failure_reason() {
+  case "\${1:-}" in
+    network-connection|timeout) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+write_result_fallback() {
+  local detail="\${1:-missing-result-contract}"
+  cat >"\${host_result_file}" <<RESULT
+OUTCOME=blocked
+ACTION=host-comment-blocker
+DETAIL=\${detail}
+RESULT
+  cp "\${host_result_file}" "\${result_file_path}" 2>/dev/null || true
+}
+
+reset_sandbox_run_dir() {
+  mkdir -p "\${sandbox_run_dir}"
+  find "\${sandbox_run_dir}" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+}
+
+mkdir -p "\${sandbox_run_dir}" "\${artifact_dir}"
+reset_sandbox_run_dir
+ensure_workspace_excludes
+install_pre_commit_scope_hook
+
+prompt_payload="\$(cat "\${prompt_file}")"
+claude_args=(
+  -p
+  --output-format text
+  --no-session-persistence
+  --permission-mode "\${claude_permission_mode}"
+  --model "\${claude_model}"
+  --effort "\${claude_effort}"
+  --add-dir ${worktree_q}
+)
+if [[ "\${claude_permission_mode}" == "bypassPermissions" ]]; then
+  claude_args+=(--allow-dangerously-skip-permissions)
+fi
+
+status=1
+attempt=1
+failure_reason=""
+set +e
+while (( attempt <= claude_max_attempts )); do
+  attempt_log_file="\${artifact_dir}/claude-attempt-\${attempt}.log"
+  write_state running '' '' "\${attempt}" "\$((attempt - 1))"
+  printf '\n[claude-attempt] %s/%s\n' "\${attempt}" "\${claude_max_attempts}" | tee -a "\${output_file}" >/dev/null
+  run_with_timeout "\${claude_timeout_seconds}" "\${claude_bin}" "\${claude_args[@]}" "\${prompt_payload}" >"\${attempt_log_file}" 2>&1
+  status=\$?
+  cat "\${attempt_log_file}" >>"\${output_file}"
+  if [[ "\${status}" -eq 0 ]]; then
+    failure_reason=""
+    break
+  fi
+  if [[ "\${status}" -eq 124 ]]; then
+    failure_reason="timeout"
+  else
+    failure_reason="\$(classify_failure_reason "\${attempt_log_file}")"
+  fi
+  if (( attempt >= claude_max_attempts )) || ! is_retryable_failure_reason "\${failure_reason}"; then
+    break
+  fi
+  printf '[claude-retry] reason=%s backoff=%ss\n' "\${failure_reason}" "\${claude_retry_backoff_seconds}" | tee -a "\${output_file}" >/dev/null
+  sleep "\${claude_retry_backoff_seconds}"
+  attempt=\$((attempt + 1))
+done
+set -e
+
+record_final_git_state
+if [[ -f "\${result_file_path}" ]]; then
+  cp "\${result_file_path}" "\${host_result_file}"
+else
+  if [[ "\${status}" -eq 0 ]]; then
+    write_result_fallback "missing-result-contract"
+  else
+    write_result_fallback "worker-exit-\${status}"
+  fi
+fi
+
+${collect_copy_snippet}
+if [[ "\${status}" -eq 0 ]]; then
+  write_state completed "\${status}" '' "\${attempt}" "\$((attempt - 1))"
+else
+  write_state failed "\${status}" "\${failure_reason}" "\${attempt}" "\$((attempt - 1))"
+fi
+${reconcile_snippet}
+printf '\n__CLAUDE_EXIT__:%s\n' "\${status}" | tee -a "\${output_file}"
+exit "\${status}"
+EOF
+
+chmod +x "$inner_script"
+tmux new-session -d -s "$session" "$inner_script"
+
+printf 'SESSION=%s\n' "$session"
+printf 'TASK_KIND=%s\n' "$task_kind"
+printf 'TASK_ID=%s\n' "$task_id"
+printf 'WORKTREE=%s\n' "$worktree"
+printf 'OUTPUT=%s\n' "$output_file"
+printf 'SCRIPT=%s\n' "$inner_script"
+printf 'META=%s\n' "$meta_file"
