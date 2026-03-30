@@ -7,6 +7,13 @@ layout for public releases.
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-03-30
+
+### Fixed
+
+- restored the packaged `references/` docs needed by `smoke`, so `npx agent-control-plane@latest smoke` works from the public npm tarball
+- added package-level regression coverage that runs the published smoke command against the built tarball
+
 ## [0.1.6] - 2026-03-30
 
 ### Fixed

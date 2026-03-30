@@ -1,6 +1,6 @@
 {
   "name": "agent-control-plane",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Help a repo keep GitHub-driven coding agents running reliably without constant human babysitting",
   "homepage": "https://github.com/ducminhnguyen0319/agent-control-plane",
   "bugs": {
@@ -24,6 +24,7 @@
     "bin",
     "hooks",
     "npm/bin",
+    "references",
     "tools/bin",
     "tools/dashboard/app.js",
     "tools/dashboard/dashboard_snapshot.py",
@@ -39,7 +40,7 @@
   "scripts": {
     "doctor": "node ./npm/bin/agent-control-plane.js doctor",
     "smoke": "node ./npm/bin/agent-control-plane.js smoke",
-    "test": "bash tools/tests/test-agent-control-plane-npm-cli.sh && bash tools/tests/test-profile-adopt-skip-anchor-sync-creates-agent-repo-root.sh && bash tools/tests/test-vendored-codex-quota-claude-oauth-only.sh"
+    "test": "bash tools/tests/test-agent-control-plane-npm-cli.sh && bash tools/tests/test-profile-adopt-skip-anchor-sync-creates-agent-repo-root.sh && bash tools/tests/test-vendored-codex-quota-claude-oauth-only.sh && bash tools/tests/test-package-smoke-command.sh"
   },
   "keywords": [
     "agents",

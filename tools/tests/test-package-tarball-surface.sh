@@ -44,6 +44,10 @@ for (const forbiddenPath of [
 for (const requiredPath of [
   "bin/agent-control-plane",
   "npm/bin/agent-control-plane.js",
+  "references/commands.md",
+  "references/control-plane-map.md",
+  "references/docs-map.md",
+  "references/repo-map.md",
   "tools/bin/test-smoke.sh",
   "tools/dashboard/app.js",
   "tools/vendor/codex-quota/codex-quota.js",
