@@ -15,6 +15,13 @@ layout for public releases.
 - reproducible dashboard demo media generation with screenshot and animated GIF
 - public CI workflow for package and docs validation
 
+## [0.1.3] - 2026-03-30
+
+### Fixed
+
+- removed `tools/tests` from the public npm tarball so maintainer-only regression fixtures are no longer shipped to end users
+- reduced the public package surface without changing the runtime setup or worker behavior exposed by the CLI
+
 ## [0.1.2] - 2026-03-30
 
 ### Fixed

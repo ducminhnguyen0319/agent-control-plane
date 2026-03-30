@@ -34,6 +34,9 @@ if (!Array.isArray(pkg.files) || !pkg.files.includes("assets/workflow-catalog.js
 if (pkg.files.includes("assets")) {
   process.exit(5);
 }
+if (pkg.files.includes("tools/tests")) {
+  process.exit(13);
+}
 if (!pkg.directories || pkg.directories.bin !== "npm/public-bin") {
   process.exit(6);
 }
