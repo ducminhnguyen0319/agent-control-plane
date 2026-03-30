@@ -7,13 +7,11 @@ layout for public releases.
 
 ## [Unreleased]
 
-### Added
+## [0.1.6] - 2026-03-30
 
-- release history tracking for public package and repository changes
-- reusable release notes template for GitHub releases and publish announcements
-- README badges for CI, npm, Node, license, and GitHub Sponsors
-- reproducible dashboard demo media generation with screenshot and animated GIF
-- public CI workflow for package and docs validation
+### Fixed
+
+- ensure `setup` materializes the configured `agent_repo_root` even when anchor sync is skipped, so custom path installs do not leave the anchor repo path missing
 
 ## [0.1.5] - 2026-03-30
 

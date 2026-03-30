@@ -205,6 +205,36 @@ grep -q '^DOCTOR_STATUS=ok$' <<<"${setup_output}"
 grep -q '^RUNTIME_START_STATUS=skipped$' <<<"${setup_output}"
 grep -q '^RUNTIME_START_REASON=not-requested$' <<<"${setup_output}"
 test -f "${platform_home}/control-plane/profiles/setup-demo/control-plane.yaml"
+test -d "${platform_home}/projects/setup-demo/repo"
+
+custom_agent_root="${tmpdir}/custom-agent-root"
+custom_agent_repo_root="${tmpdir}/custom-anchor-repo"
+custom_worktree_root="${tmpdir}/custom-worktrees"
+
+setup_custom_output="$(
+  HOME="${home_dir}" \
+  AGENT_PLATFORM_HOME="${platform_home}" \
+  PATH="${fake_bin}:${PATH}" \
+  node "${CLI_SCRIPT}" setup \
+    --non-interactive \
+    --repo-root "${setup_repo}" \
+    --profile-id setup-custom \
+    --agent-root "${custom_agent_root}" \
+    --agent-repo-root "${custom_agent_repo_root}" \
+    --worktree-root "${custom_worktree_root}" \
+    --no-start-runtime \
+    --skip-anchor-sync \
+    --skip-workspace-sync
+)"
+
+grep -q '^SETUP_STATUS=ok$' <<<"${setup_custom_output}"
+grep -q '^PROFILE_ID=setup-custom$' <<<"${setup_custom_output}"
+grep -q "^AGENT_REPO_ROOT=${custom_agent_repo_root}$" <<<"${setup_custom_output}"
+grep -q '^ANCHOR_SYNC_STATUS=skipped$' <<<"${setup_custom_output}"
+test -f "${platform_home}/control-plane/profiles/setup-custom/control-plane.yaml"
+test -d "${custom_agent_root}"
+test -d "${custom_agent_repo_root}"
+test -d "${custom_worktree_root}"
 
 setup_deferred_output="$(
   HOME="${home_dir}" \

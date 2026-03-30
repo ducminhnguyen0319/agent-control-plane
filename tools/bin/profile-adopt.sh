@@ -181,6 +181,12 @@ else
   rm -f "$WORKSPACE_LINK"
 fi
 
+# Keep the configured anchor root materialized even when anchor sync is skipped
+# so later setup/runtime steps can rely on the path existing.
+if [[ "$anchor_sync_status" != "ok" && ! -e "$AGENT_REPO_ROOT" ]]; then
+  mkdir -p "$AGENT_REPO_ROOT"
+fi
+
 agent_repo_status_after="$(path_status "$AGENT_REPO_ROOT")"
 workspace_file_status="$(path_status "$VSCODE_WORKSPACE_FILE")"
 adopt_status="ok"
