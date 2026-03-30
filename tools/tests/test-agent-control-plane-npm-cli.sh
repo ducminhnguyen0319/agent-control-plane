@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FLOW_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 CLI_SCRIPT="${FLOW_ROOT}/npm/bin/agent-control-plane.js"
+PACKAGE_VERSION="$(node -p "require('${FLOW_ROOT}/package.json').version")"
 
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "${tmpdir}"' EXIT
@@ -74,7 +75,7 @@ version_output="$(
   node "${CLI_SCRIPT}" version
 )"
 
-grep -q '^0\.1\.0$' <<<"${version_output}"
+grep -q "^${PACKAGE_VERSION}$" <<<"${version_output}"
 
 HOME="${home_dir}" \
 AGENT_PLATFORM_HOME="${platform_home}" \

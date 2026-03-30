@@ -15,6 +15,14 @@ layout for public releases.
 - reproducible dashboard demo media generation with screenshot and animated GIF
 - public CI workflow for package and docs validation
 
+## [0.1.1] - 2026-03-30
+
+### Fixed
+
+- corrected public GitHub repository links in README badges and package metadata
+- published npm metadata that now points to the public `ducminhnguyen0319/agent-control-plane` repository
+- removed the last legacy internal username fixture from the repo snapshot
+
 ## [0.1.0] - 2026-03-27
 
 ### Added
