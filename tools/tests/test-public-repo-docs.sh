@@ -99,6 +99,8 @@ grep -q 'github.com/ducminhnguyen0319/agent-control-plane/actions/workflows/ci.y
 grep -q 'img.shields.io/npm/v/agent-control-plane' "$ROOT_DIR/README.md"
 grep -q 'img.shields.io/node/v/agent-control-plane' "$ROOT_DIR/README.md"
 grep -q 'img.shields.io/npm/l/agent-control-plane' "$ROOT_DIR/README.md"
+grep -q 'https://socket.dev/npm/package/agent-control-plane' "$ROOT_DIR/README.md"
+grep -q 'img.shields.io/badge/Socket-79-f5a623' "$ROOT_DIR/README.md"
 grep -q 'https://github.com/ducminhnguyen0319/agent-control-plane/actions/workflows/ci.yml' "$ROOT_DIR/README.md"
 grep -q 'https://www.npmjs.com/package/agent-control-plane' "$ROOT_DIR/README.md"
 grep -q '\./assets/readme/dashboard-demo.png' "$ROOT_DIR/README.md"

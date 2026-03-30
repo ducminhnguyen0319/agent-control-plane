@@ -6,8 +6,8 @@
   <a href="https://www.npmjs.com/package/agent-control-plane"><img alt="node version" src="https://img.shields.io/node/v/agent-control-plane?style=flat-square"></a>
   <a href="./LICENSE"><img alt="license" src="https://img.shields.io/npm/l/agent-control-plane?style=flat-square"></a>
   <a href="https://github.com/sponsors/ducminhnguyen0319"><img alt="GitHub Sponsors" src="https://img.shields.io/badge/sponsor-GitHub%20Sponsors-ea4aaa?style=flat-square&logo=githubsponsors&logoColor=white"></a>
+  <a href="https://socket.dev/npm/package/agent-control-plane"><img alt="Socket" src="https://img.shields.io/badge/Socket-79-f5a623?style=flat-square"></a>
 </p>
-
 `agent-control-plane` helps a repo keep coding agents running reliably without
 constant human babysitting.
 
