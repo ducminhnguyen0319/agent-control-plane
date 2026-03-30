@@ -4,6 +4,13 @@ set -euo pipefail
 TOOL_BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_ROOT="$(cd "${TOOL_BIN_DIR}/../.." && pwd)"
 ROOT_SOURCE_DIR="$(cd "${SKILL_ROOT}/../../.." && pwd)"
+if [[ ! -f "${ROOT_SOURCE_DIR}/tools/bin/agent-project-reconcile-pr-session" ]]; then
+  ROOT_SOURCE_DIR="${SKILL_ROOT}"
+fi
+HAS_DISTINCT_ROOT_SOURCE=0
+if [[ "${ROOT_SOURCE_DIR}" != "${SKILL_ROOT}" ]]; then
+  HAS_DISTINCT_ROOT_SOURCE=1
+fi
 ROOT_RUNTIME_DIR="${AGENT_PLATFORM_HOME:-${HOME}/.agent-runtime}/runtime-home"
 RUNTIME_SKILL_ROOT="${ROOT_RUNTIME_DIR}/skills/openclaw/agent-control-plane"
 # shellcheck source=/dev/null
@@ -177,10 +184,12 @@ check_contains "$start_pr_fix_worker" "flow_resolve_web_playwright_command" "sta
 check_contains "$start_pr_review_worker" "flow_resolve_template_file" "start pr review worker template resolver"
 check_contains "$start_issue_worker" "Blocked retries so far:" "start issue worker blocked retry context"
 check_absent "$pr_reconcile" "legacy-empty-result-contract" "pr reconcile removed empty-result compatibility"
-check_contains "$root_pr_reconcile" "host-advance-double-check-2" "root pr reconcile stage-1 contract"
-check_contains "$root_issue_reconcile" "host-comment-blocker" "root issue reconcile blocked contract"
-check_contains "$root_issue_reconcile" "implemented:host-publish-issue-pr" "root issue reconcile success contract"
-check_absent "$root_pr_reconcile" "legacy-empty-result-contract" "root pr reconcile removed empty-result compatibility"
+if (( HAS_DISTINCT_ROOT_SOURCE )); then
+  check_contains "$root_pr_reconcile" "host-advance-double-check-2" "root pr reconcile stage-1 contract"
+  check_contains "$root_issue_reconcile" "host-comment-blocker" "root issue reconcile blocked contract"
+  check_contains "$root_issue_reconcile" "implemented:host-publish-issue-pr" "root issue reconcile success contract"
+  check_absent "$root_pr_reconcile" "legacy-empty-result-contract" "root pr reconcile removed empty-result compatibility"
+fi
 check_contains "$run_codex_task" "--collect-file \"verification.jsonl\"" "run task collects verification journal"
 check_contains "$run_codex_task" "FLOW_TOOLS_DIR" "run task exports flow tools dir"
 check_contains "$issue_template" '`{REPO_SLUG}`' "issue template repo slug placeholder"
@@ -261,7 +270,9 @@ check_absent "${SKILL_ROOT}/references/docs-map.md" "Bundled seed/fallback profi
 
 if [[ -n "${compat_skill_alias}" ]]; then
   check_absent "$pr_reconcile" "skills/openclaw/${compat_skill_alias}" "skill pr reconcile removed old package fallback"
-  check_absent "$root_pr_reconcile" "skills/openclaw/${compat_skill_alias}" "root pr reconcile removed old package fallback"
+  if (( HAS_DISTINCT_ROOT_SOURCE )); then
+    check_absent "$root_pr_reconcile" "skills/openclaw/${compat_skill_alias}" "root pr reconcile removed old package fallback"
+  fi
 fi
 
 check_sync_if_present "$issue_template" "${RUNTIME_SKILL_ROOT}/tools/templates/issue-prompt-template.md" "core issue template source/runtime sync"
@@ -300,8 +311,10 @@ check_sync_if_present "$dashboard_launchd_install" "${RUNTIME_SKILL_ROOT}/tools/
 check_sync_if_present "$workflow_catalog" "${RUNTIME_SKILL_ROOT}/assets/workflow-catalog.json" "workflow catalog source/runtime sync"
 check_sync_if_present "$workflow_catalog_script" "${RUNTIME_SKILL_ROOT}/tools/bin/workflow-catalog.sh" "workflow catalog script source/runtime sync"
 check_sync_if_present "$flow_runtime_doctor" "${RUNTIME_SKILL_ROOT}/tools/bin/flow-runtime-doctor.sh" "runtime doctor source/runtime sync"
-check_sync_if_present "$root_pr_reconcile" "${ROOT_RUNTIME_DIR}/tools/bin/agent-project-reconcile-pr-session" "root pr reconcile source/runtime sync"
-check_sync_if_present "$root_issue_reconcile" "${ROOT_RUNTIME_DIR}/tools/bin/agent-project-reconcile-issue-session" "root issue reconcile source/runtime sync"
+if (( HAS_DISTINCT_ROOT_SOURCE )); then
+  check_sync_if_present "$root_pr_reconcile" "${ROOT_RUNTIME_DIR}/tools/bin/agent-project-reconcile-pr-session" "root pr reconcile source/runtime sync"
+  check_sync_if_present "$root_issue_reconcile" "${ROOT_RUNTIME_DIR}/tools/bin/agent-project-reconcile-issue-session" "root issue reconcile source/runtime sync"
+fi
 
 if (( failures > 0 )); then
   printf 'CHECK_STATUS=failed\n'
