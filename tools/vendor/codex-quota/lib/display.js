@@ -553,7 +553,7 @@ Usage:
 
 Commands:
   quota [label]     Check Claude usage (default command)
-  add [label]       Add a Claude credential (via OAuth or manual entry)
+  add [label]       Add a Claude credential via OAuth
   reauth <label>    Re-authenticate an existing Claude account via OAuth
   switch <label>    Switch Claude Code, OpenCode, and pi credentials
   sync              Sync activeLabel to Claude Code, OpenCode, and pi
@@ -564,14 +564,13 @@ Options:
   --json            Output result in JSON format
   --dry-run         Preview sync without writing files
   --oauth           Use OAuth browser authentication (recommended)
-  --manual          Use manual token entry
   --no-browser      Print OAuth URL instead of opening browser
   --help, -h        Show this help
 
 Examples:
   ${PRIMARY_CMD} claude                   Check Claude usage
   ${PRIMARY_CMD} claude quota work        Check Claude usage for "work"
-  ${PRIMARY_CMD} claude add               Add Claude credential (prompts for method)
+  ${PRIMARY_CMD} claude add               Add Claude credential via OAuth
   ${PRIMARY_CMD} claude add work --oauth  Add via OAuth browser flow
   ${PRIMARY_CMD} claude reauth work       Re-authenticate "work" account
   ${PRIMARY_CMD} claude switch work       Switch Claude Code/OpenCode/pi to "work"
@@ -582,7 +581,7 @@ Examples:
 
 Notes:
   - switch and sync update activeLabel in ~/.claude-accounts.json when available
-  - session-key-only accounts cannot be synced (OAuth required)
+  - Claude accounts are OAuth-only in the bundled public package
 `);
 }
 
@@ -598,8 +597,6 @@ Arguments:
 Options:
   --oauth           Use OAuth browser authentication (recommended)
                     Opens browser for secure authentication
-  --manual          Use manual token entry
-                    Paste sessionKey or OAuth token directly
   --no-browser      Print OAuth URL instead of opening browser
                     Use this in headless/SSH environments
   --json            Output result in JSON format
@@ -608,18 +605,14 @@ Options:
 Description:
   Adds a Claude credential to ~/.claude-accounts.json.
   
-  OAuth flow (recommended):
+  OAuth flow:
     1. Opens browser for authentication at claude.ai
     2. User copies code#state from browser
     3. Tool exchanges code for tokens automatically
-  
-  Manual flow:
-    Prompts for sessionKey or OAuth token (one is required).
 
 Examples:
-  ${PRIMARY_CMD} claude add                       Interactive (prompts for method)
+  ${PRIMARY_CMD} claude add                       Interactive OAuth flow
   ${PRIMARY_CMD} claude add work --oauth          OAuth browser flow
-  ${PRIMARY_CMD} claude add work --manual         Manual token entry
 	  ${PRIMARY_CMD} claude add work --oauth --no-browser  OAuth without opening browser
 	  ${PRIMARY_CMD} claude add work --json           JSON output for scripting
 `);
@@ -787,8 +780,7 @@ Options:
 
 Description:
   Displays usage statistics for Claude accounts. Tokens are refreshed when
-  available. Uses OAuth credentials when possible and falls back to legacy
-  session credentials.
+  available. Uses OAuth credentials only.
   OAuth-based accounts are checked for divergence in Claude CLI stores.
   Use --local to suppress harness checks and only use stored account files.
 

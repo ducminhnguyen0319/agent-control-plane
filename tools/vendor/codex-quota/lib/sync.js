@@ -29,7 +29,6 @@ import {
 	getClaudeLabels,
 	readClaudeActiveStoreContainer,
 	getClaudeActiveLabelInfo,
-	findClaudeSessionKey,
 	loadClaudeAccountsFromFile,
 } from "./claude-accounts.js";
 import {
@@ -652,16 +651,14 @@ export async function maybeImportClaudeOauthStores(options = {}) {
 				console.error(colorize(`Skipping: label "${label}" already exists.`, YELLOW));
 				continue;
 			}
-			const newAccount = {
-				label,
-				sessionKey: null,
-				oauthToken: store.tokens.access,
-				oauthRefreshToken: store.tokens.refresh ?? null,
-				oauthExpiresAt: store.tokens.expires ?? null,
-				oauthScopes: store.tokens.scopes ?? null,
-				cfClearance: null,
-				orgId: null,
-			};
+				const newAccount = {
+					label,
+					oauthToken: store.tokens.access,
+					oauthRefreshToken: store.tokens.refresh ?? null,
+					oauthExpiresAt: store.tokens.expires ?? null,
+					oauthScopes: store.tokens.scopes ?? null,
+					orgId: null,
+				};
 			container.accounts.push(newAccount);
 			managedAccounts.push(normalizeClaudeAccount(newAccount, targetPath));
 			existingLabels.add(label);
@@ -1430,9 +1427,7 @@ export async function handleClaudeSync(args, flags) {
 
 /**
  * Handle Claude add subcommand - add a Claude credential interactively
- * Supports two authentication methods:
- *   - OAuth browser flow (--oauth): Opens browser for authentication
- *   - Manual entry (--manual): Paste sessionKey/token directly
+ * Uses OAuth browser flow for authentication.
  * @param {string[]} args - Non-flag arguments (optional label)
  * @param {{ json: boolean, noBrowser: boolean, oauth: boolean, manual: boolean }} flags - Parsed flags
  */

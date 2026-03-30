@@ -15,6 +15,14 @@ layout for public releases.
 - reproducible dashboard demo media generation with screenshot and animated GIF
 - public CI workflow for package and docs validation
 
+## [0.1.2] - 2026-03-30
+
+### Fixed
+
+- removed browser-cookie and session-key fallback logic from the bundled Claude quota path
+- restricted bundled Claude quota support to OAuth-backed credentials only
+- added regression coverage to keep the public npm bundle free of Claude browser-cookie harvesting logic
+
 ## [0.1.1] - 2026-03-30
 
 ### Fixed

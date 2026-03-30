@@ -280,7 +280,7 @@ Root-level fields are preserved on write; unknown root fields are kept intact.
 
 Claude multi-account files (`~/.claude-accounts.json`) use the same root fields
 (`schemaVersion`, `activeLabel`) and store account entries that include a
-`sessionKey` or OAuth tokens.
+Claude OAuth token and refresh metadata.
 
 ## OAuth Flow
 
@@ -400,17 +400,13 @@ To add a Claude credential interactively:
 codex-quota claude add
 ```
 
-This uses your local Claude session to call:
-- `https://claude.ai/api/organizations`
-- `https://claude.ai/api/organizations/{orgId}/usage`
-- `https://claude.ai/api/organizations/{orgId}/overage_spend_limit`
-- `https://claude.ai/api/account`
+This uses OAuth credentials to call:
+- `https://api.anthropic.com/api/oauth/usage`
 
 Authentication sources (in order):
 1. `CLAUDE_ACCOUNTS` env var (JSON array or `{ accounts: [...] }`)
-2. `~/.claude-accounts.json` (multi-account format)
-3. Browser cookies (Chromium/Chrome) to read `sessionKey` and `lastActiveOrg`
-4. `~/.claude/.credentials.json` OAuth `accessToken`
+2. `~/.claude-accounts.json` (multi-account format with `oauthToken`)
+3. `~/.claude/.credentials.json` OAuth `accessToken`
 
 Multi-account format (Claude):
 ```json
@@ -418,8 +414,6 @@ Multi-account format (Claude):
   "accounts": [
     {
       "label": "personal",
-      "sessionKey": "sk-ant-oat...",
-      "cfClearance": "cf_clearance...",
       "oauthToken": "claude-ai-access-token",
       "orgId": "org_uuid_optional"
     }
@@ -428,13 +422,12 @@ Multi-account format (Claude):
 ```
 
 Notes:
-- Only `label` plus one of `sessionKey` or `oauthToken` is required.
-- `cfClearance`, `orgId`, and `cookies` are optional.
+- `label` plus `oauthToken` is required.
+- `orgId` is optional.
 
 Environment overrides:
 - `CLAUDE_ACCOUNTS` to supply multi-account JSON directly
 - `CLAUDE_CREDENTIALS_PATH` to point to a different credentials file
-- `CLAUDE_COOKIE_DB_PATH` to point to a specific Chromium/Chrome Cookies DB
 
 Codex overrides:
 - `CODEX_ACCOUNTS` to supply multi-account JSON directly (read-only)
@@ -443,8 +436,7 @@ Codex overrides:
 - `PI_AUTH_PATH` to point to a different pi auth file
 
 Notes:
-- On Linux, cookie access requires `sqlite3` and `secret-tool` (libsecret) to decrypt cookies.
-- For best results, keep `claude.ai` logged in within your Chromium/Chrome profile.
+- Claude usage in the bundled public package is OAuth-only.
 
 ## Releasing
 

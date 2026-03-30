@@ -1,5 +1,5 @@
 /**
- * Claude account loading, session/OAuth resolution.
+ * Claude account loading and OAuth resolution.
  * Depends on: lib/constants.js, lib/container.js, lib/paths.js
  */
 
@@ -8,52 +8,18 @@ import { CLAUDE_CREDENTIALS_PATH, CLAUDE_MULTI_ACCOUNT_PATHS } from "./constants
 import { readMultiAccountContainer, writeMultiAccountContainer } from "./container.js";
 import { getOpencodeAuthPath } from "./paths.js";
 
-export function isClaudeSessionKey(value) {
-	return typeof value === "string" && value.startsWith("sk-ant-");
-}
-
-export function findClaudeSessionKey(value) {
-	if (isClaudeSessionKey(value)) return value;
-	if (typeof value === "string") {
-		const match = value.match(/sk-ant-[a-z0-9_-]+/i);
-		if (match) return match[0];
-	}
-	if (!value || typeof value !== "object") return null;
-
-	const direct = value.sessionKey
-		?? value.session_key
-		?? value.token
-		?? value.sessionToken
-		?? value.accessToken
-		?? value.access_token
-		?? value.oauthAccessToken;
-	if (isClaudeSessionKey(direct)) return direct;
-
-	for (const child of Object.values(value)) {
-		const found = findClaudeSessionKey(child);
-		if (found) return found;
-	}
-	return null;
-}
-
 export function normalizeClaudeAccount(raw, source) {
 	if (!raw || typeof raw !== "object") return null;
 	const label = raw.label ?? null;
-	const sessionKey = raw.sessionKey ?? raw.session_key ?? null;
 	const oauthToken = raw.oauthToken ?? raw.oauth_token ?? raw.accessToken ?? raw.access_token ?? null;
-	const cfClearance = raw.cfClearance ?? raw.cf_clearance ?? null;
 	const orgId = raw.orgId ?? raw.org_id ?? null;
-	const cookies = raw.cookies && typeof raw.cookies === "object" ? raw.cookies : null;
 	const oauthRefreshToken = raw.oauthRefreshToken ?? raw.oauth_refresh_token ?? null;
 	const oauthExpiresAt = raw.oauthExpiresAt ?? raw.oauth_expires_at ?? null;
 	const oauthScopes = raw.oauthScopes ?? raw.oauth_scopes ?? null;
 	return {
 		label,
-		sessionKey,
 		oauthToken,
-		cfClearance,
 		orgId,
-		cookies,
 		oauthRefreshToken,
 		oauthExpiresAt,
 		oauthScopes,
@@ -63,9 +29,8 @@ export function normalizeClaudeAccount(raw, source) {
 
 export function isValidClaudeAccount(account) {
 	if (!account?.label) return false;
-	const sessionKey = account.sessionKey ?? findClaudeSessionKey(account.cookies);
 	const oauthToken = account.oauthToken ?? null;
-	return Boolean(sessionKey || oauthToken);
+	return Boolean(oauthToken);
 }
 
 export function loadClaudeAccountsFromEnv() {
@@ -145,37 +110,6 @@ export function saveClaudeAccounts(accounts) {
 	});
 	const result = writeMultiAccountContainer(targetPath, container, sanitized, {}, { mode: 0o600 });
 	return result.path;
-}
-
-export function loadClaudeSessionFromCredentials() {
-	const credentialsPath = process.env.CLAUDE_CREDENTIALS_PATH || CLAUDE_CREDENTIALS_PATH;
-	if (!existsSync(credentialsPath)) {
-		return {
-			sessionKey: null,
-			source: credentialsPath,
-			error: `Claude credentials not found at ${credentialsPath}`,
-		};
-	}
-
-	try {
-		const raw = readFileSync(credentialsPath, "utf-8");
-		const parsed = JSON.parse(raw);
-		const sessionKey = findClaudeSessionKey(parsed);
-		if (!sessionKey) {
-			return {
-				sessionKey: null,
-				source: credentialsPath,
-				error: "No Claude sessionKey found in credentials file",
-			};
-		}
-		return { sessionKey, source: credentialsPath };
-	} catch (err) {
-		return {
-			sessionKey: null,
-			source: credentialsPath,
-			error: `Failed to read Claude credentials: ${err?.message ?? String(err)}`,
-		};
-	}
 }
 
 export function loadClaudeOAuthToken() {

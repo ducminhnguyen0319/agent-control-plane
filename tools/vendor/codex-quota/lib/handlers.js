@@ -71,7 +71,6 @@ import {
 	getClaudeLabels,
 	getClaudeActiveLabelInfo,
 	readClaudeActiveStoreContainer,
-	findClaudeSessionKey,
 } from "./claude-accounts.js";
 import {
 	updateOpencodeAuth,
@@ -92,9 +91,7 @@ import {
 	loadClaudeOAuthFromOpenCode,
 	loadClaudeOAuthFromEnv,
 	loadAllClaudeOAuthAccounts,
-	fetchClaudeOAuthUsage,
 	fetchClaudeOAuthUsageForAccount,
-	fetchClaudeUsage,
 	deduplicateClaudeOAuthAccounts,
 	deduplicateClaudeResultsByUsage,
 } from "./claude-usage.js";
@@ -832,7 +829,7 @@ export async function handleClaudeList(flags) {
 			accounts: claudeAccounts.map(account => ({
 				label: account.label,
 				source: account.source,
-				hasSessionKey: Boolean(account.sessionKey ?? findClaudeSessionKey(account.cookies)),
+				authType: account.oauthToken ? "oauth" : "unsupported",
 				hasOauthToken: Boolean(account.oauthToken),
 				orgId: account.orgId ?? null,
 				isActive: activeLabel !== null && account.label === activeLabel,
@@ -873,14 +870,7 @@ export async function handleClaudeList(flags) {
 		const isActive = activeLabel !== null && account.label === activeLabel;
 		const marker = isActive ? "*" : " ";
 		const statusText = isActive ? " [active]" : "";
-		const authParts = [];
-		if (account.sessionKey ?? findClaudeSessionKey(account.cookies)) {
-			authParts.push("sessionKey");
-		}
-		if (account.oauthToken) {
-			authParts.push("oauthToken");
-		}
-		const authDisplay = authParts.length ? authParts.join("+") : "unknown";
+		const authDisplay = account.oauthToken ? "oauthToken" : "unsupported";
 		claudeLines.push(`${marker} ${account.label}${statusText}`);
 		claudeLines.push(`  Auth: ${authDisplay} | ${shortenPath(account.source)}`);
 		if (i < claudeAccounts.length - 1) {
@@ -1428,6 +1418,9 @@ export async function handleClaudeAdd(args, flags) {
 		if (flags.oauth && flags.manual) {
 			throw new Error("Cannot use both --oauth and --manual flags. Choose one authentication method.");
 		}
+		if (flags.manual) {
+			throw new Error("Manual Claude credential entry is no longer supported. Use OAuth authentication instead.");
+		}
 
 		const existingAccounts = loadClaudeAccounts();
 		const existingLabels = new Set(existingAccounts.map(a => a.label));
@@ -1446,74 +1439,18 @@ export async function handleClaudeAdd(args, flags) {
 			throw new Error(`Label "${label}" already exists. Choose a different label.`);
 		}
 
-		// Determine authentication method
-		let useOAuth = flags.oauth;
-		if (!flags.oauth && !flags.manual) {
-			// Prompt for choice
-			console.log("\nChoose authentication method:");
-			console.log("  [1] OAuth (recommended) - Authenticate via browser");
-			console.log("  [2] Manual - Paste sessionKey/token directly\n");
-			const choice = (await promptInput("Enter choice (1 or 2): ")).trim();
-			useOAuth = choice === "1";
-		}
-
 		let newAccount;
 		let viaMethod;
-
-		if (useOAuth) {
-			// OAuth browser flow
-			const tokens = await handleClaudeOAuthFlow({ noBrowser: flags.noBrowser });
-			newAccount = {
-				label,
-				sessionKey: null,
-				oauthToken: tokens.accessToken,
-				oauthRefreshToken: tokens.refreshToken,
-				oauthExpiresAt: tokens.expiresAt,
-				oauthScopes: tokens.scopes,
-				cfClearance: null,
-				orgId: null,
-			};
-			viaMethod = "via OAuth";
-		} else {
-			// Manual entry flow
-			console.log("\nPaste your Claude sessionKey or OAuth token.");
-			const sessionKeyInput = await promptInput("sessionKey (sk-ant-...): ", { allowEmpty: true });
-			const oauthTokenInput = await promptInput("oauthToken (optional): ", { allowEmpty: true });
-			const cfClearanceInput = await promptInput("cfClearance (optional): ", { allowEmpty: true });
-			const orgIdInput = await promptInput("orgId (optional): ", { allowEmpty: true });
-
-			let parsedInput = null;
-			if (sessionKeyInput && sessionKeyInput.trim().startsWith("{")) {
-				try {
-					parsedInput = JSON.parse(sessionKeyInput);
-				} catch {
-					parsedInput = null;
-				}
-			}
-
-			const sessionKey = findClaudeSessionKey(parsedInput ?? sessionKeyInput) ?? null;
-			const oauthToken = oauthTokenInput?.trim()
-				|| parsedInput?.claudeAiOauth?.accessToken
-				|| parsedInput?.claude_ai_oauth?.accessToken
-				|| parsedInput?.accessToken
-				|| parsedInput?.access_token
-				|| null;
-			const cfClearance = cfClearanceInput?.trim() || null;
-			const orgId = orgIdInput?.trim() || null;
-
-			if (!sessionKey && !oauthToken) {
-				throw new Error("Provide at least a sessionKey or an OAuth token.");
-			}
-
-			newAccount = {
-				label,
-				sessionKey,
-				oauthToken,
-				cfClearance,
-				orgId,
-			};
-			viaMethod = "";
-		}
+		const tokens = await handleClaudeOAuthFlow({ noBrowser: flags.noBrowser });
+		newAccount = {
+			label,
+			oauthToken: tokens.accessToken,
+			oauthRefreshToken: tokens.refreshToken,
+			oauthExpiresAt: tokens.expiresAt,
+			oauthScopes: tokens.scopes,
+			orgId: null,
+		};
+		viaMethod = "via OAuth";
 
 		const { path: targetPath, container } = readClaudeActiveStoreContainer();
 		const accounts = [...container.accounts, newAccount];
@@ -1521,11 +1458,11 @@ export async function handleClaudeAdd(args, flags) {
 
 		if (flags.json) {
 			console.log(JSON.stringify({
-				success: true,
-				label,
-				method: useOAuth ? "oauth" : "manual",
-				source: targetPath,
-			}, null, 2));
+					success: true,
+					label,
+					method: "oauth",
+					source: targetPath,
+				}, null, 2));
 			return;
 		}
 
@@ -1887,42 +1824,21 @@ export async function handleQuota(args, flags, scope = "all") {
 				filteredOauthAccounts.map(account => fetchClaudeOAuthUsageForAccount(account))
 			);
 			claudeResults = deduplicateClaudeResultsByUsage(rawResults);
-		} else {
-			const claudeAccounts = loadClaudeAccounts();
-			const filteredClaudeAccounts = wantsClaudeLabel
-				? claudeAccounts.filter(account => account.label === labelFilter)
-				: claudeAccounts;
-
-			if (filteredClaudeAccounts.length) {
-				const rawResults = await Promise.all(
-					filteredClaudeAccounts.map(account => fetchClaudeUsageForCredentials(account))
-				);
-				claudeResults = deduplicateClaudeResultsByUsage(rawResults);
-			} else if (wantsClaudeLabel) {
-				const availableLabels = new Set([
-					...oauthAccounts.map(account => account.label),
-					...claudeAccounts.map(account => account.label),
-				]);
-				const labelList = Array.from(availableLabels);
-				if (flags.json) {
-					console.log(JSON.stringify({
-						success: false,
-						error: `Claude account "${labelFilter}" not found`,
-						availableLabels: labelList,
-					}, null, 2));
-				} else {
-					console.error(colorize(`Claude account "${labelFilter}" not found.`, RED));
-					if (labelList.length) {
-						console.error(`Available: ${labelList.join(", ")}`);
-					}
-				}
-				process.exit(1);
+		} else if (wantsClaudeLabel) {
+			const labelList = Array.from(new Set(oauthAccounts.map(account => account.label)));
+			if (flags.json) {
+				console.log(JSON.stringify({
+					success: false,
+					error: `Claude account "${labelFilter}" not found`,
+					availableLabels: labelList,
+				}, null, 2));
 			} else {
-				const legacyResult = await fetchClaudeUsage();
-				if (legacyResult.success || legacyResult.usage) {
-					claudeResults = [legacyResult];
+				console.error(colorize(`Claude account "${labelFilter}" not found.`, RED));
+				if (labelList.length) {
+					console.error(`Available: ${labelList.join(", ")}`);
 				}
 			}
+			process.exit(1);
 		}
 	}
 
@@ -2057,4 +1973,3 @@ export async function handleQuota(args, flags, scope = "all") {
 		}
 	}
 }
-
