@@ -3,10 +3,20 @@ set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 TMP_JSON=$(mktemp)
-trap 'rm -f "$TMP_JSON"' EXIT
+TMP_PACK_DIR=$(mktemp -d)
+TMP_PACKAGE_JSON=""
+cleanup() {
+  rm -f "$TMP_JSON"
+  if [[ -n "$TMP_PACKAGE_JSON" ]]; then
+    rm -f "$TMP_PACKAGE_JSON"
+  fi
+  rm -rf "$TMP_PACK_DIR"
+}
+trap cleanup EXIT
 
 cd "$ROOT_DIR"
 npm pack --json --dry-run >"$TMP_JSON"
+npm pack --pack-destination "$TMP_PACK_DIR" >/dev/null
 
 node - "$TMP_JSON" <<'NODE'
 const fs = require("fs");
@@ -32,7 +42,7 @@ for (const forbiddenPath of [
 }
 
 for (const requiredPath of [
-  "npm/public-bin/agent-control-plane",
+  "bin/agent-control-plane",
   "npm/bin/agent-control-plane.js",
   "tools/bin/test-smoke.sh",
   "tools/dashboard/app.js",
@@ -51,6 +61,19 @@ const result = {
 };
 
 console.log(JSON.stringify(result));
+NODE
+
+TMP_PACKAGE_JSON=$(mktemp)
+tar -xOf "$TMP_PACK_DIR"/agent-control-plane-*.tgz package/package.json >"$TMP_PACKAGE_JSON"
+
+node - "$TMP_PACKAGE_JSON" <<'NODE'
+const fs = require("fs");
+const pkg = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+
+if (!pkg.bin || pkg.bin["agent-control-plane"] !== "./bin/agent-control-plane") {
+  console.error("tarball package.json missing executable bin entry");
+  process.exit(1);
+}
 NODE
 
 echo "package tarball surface test passed"

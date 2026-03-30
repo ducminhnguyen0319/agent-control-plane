@@ -37,13 +37,10 @@ if (pkg.files.includes("assets")) {
 if (pkg.files.includes("tools/tests")) {
   process.exit(13);
 }
-if (!pkg.directories || pkg.directories.bin !== "npm/public-bin") {
-  process.exit(6);
-}
-if (!Array.isArray(pkg.files) || !pkg.files.includes("npm/public-bin")) {
+if (!Array.isArray(pkg.files) || !pkg.files.includes("bin")) {
   process.exit(7);
 }
-if (pkg.bin) {
+if (!pkg.bin || pkg.bin["agent-control-plane"] !== "./bin/agent-control-plane") {
   process.exit(8);
 }
 for (const bundledPath of [
@@ -59,7 +56,7 @@ for (const bundledPath of [
 
 test -f "$ROOT_DIR/LICENSE"
 grep -q '^MIT License$' "$ROOT_DIR/LICENSE"
-test -f "$ROOT_DIR/npm/public-bin/agent-control-plane"
-test -x "$ROOT_DIR/npm/public-bin/agent-control-plane"
+test -f "$ROOT_DIR/bin/agent-control-plane"
+test -x "$ROOT_DIR/bin/agent-control-plane"
 
 echo "package public metadata test passed"

@@ -15,6 +15,13 @@ layout for public releases.
 - reproducible dashboard demo media generation with screenshot and animated GIF
 - public CI workflow for package and docs validation
 
+## [0.1.5] - 2026-03-30
+
+### Fixed
+
+- restored an explicit published `bin` entry so `npx agent-control-plane@latest ...` works directly from the npm registry
+- moved the public executable wrapper to `bin/agent-control-plane` and added tarball-level regression coverage for the packaged executable metadata
+
 ## [0.1.4] - 2026-03-30
 
 ### Fixed
