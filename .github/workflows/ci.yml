@@ -35,6 +35,9 @@ jobs:
       - name: Verify public package metadata
         run: bash tools/tests/test-package-public-metadata.sh
 
+      - name: Verify package tarball surface
+        run: bash tools/tests/test-package-tarball-surface.sh
+
       - name: Verify funding metadata
         run: bash tools/tests/test-package-funding-metadata.sh
 

@@ -15,6 +15,14 @@ layout for public releases.
 - reproducible dashboard demo media generation with screenshot and animated GIF
 - public CI workflow for package and docs validation
 
+## [0.1.4] - 2026-03-30
+
+### Fixed
+
+- removed maintainer-only render scripts from the public npm tarball
+- removed the vendored `codex-quota` README from the public npm tarball to keep shipped package contents focused on runtime code
+- added a tarball-surface regression so CI now checks the published package contents directly
+
 ## [0.1.3] - 2026-03-30
 
 ### Fixed

@@ -6,6 +6,9 @@
 *.bak
 *.bak2
 *.bak3
+tools/bin/render-dashboard-demo-media.sh
+tools/bin/render-architecture-infographics.sh
+tools/vendor/codex-quota/README.md
 tools/dashboard/__pycache__/
 tools/tests/__pycache__/
 *.pyc
