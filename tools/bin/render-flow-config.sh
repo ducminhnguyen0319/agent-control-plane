@@ -8,7 +8,22 @@ source "${SCRIPT_DIR}/flow-config-lib.sh"
 FLOW_SKILL_DIR="$(resolve_flow_skill_dir "${BASH_SOURCE[0]}")"
 PROFILE_REGISTRY_ROOT="$(resolve_flow_profile_registry_root)"
 CONFIG_YAML="$(resolve_flow_config_yaml "${BASH_SOURCE[0]}")"
-flow_export_execution_env "${CONFIG_YAML}"
+# Do NOT export execution env for the current profile here — render-flow-config
+# is meant to render the SELECTED profile's config (via CONFIG_YAML), and exporting
+# the ambient profile's vars into the shell causes config_or_env to silently override
+# per-profile YAML with defaults from the current resident worker's own config.
+# Also, ambient env vars from the shell are cleared below so they don't leak into
+# profile-smoke or other callers.
+for _clean in ACP_CODING_WORKER ACP_OPENCLAW_MODEL ACP_CLAUDE_MODEL \
+  ACP_CLAUDE_TIMEOUT_SECONDS ACP_CLAUDE_MAX_ATTEMPTS ACP_CLAUDE_RETRY_BACKOFF_SECONDS \
+  ACP_OPENCLAW_THINKING ACP_OPENCLAW_TIMEOUT_SECONDS \
+  F_LOSNING_CODING_WORKER F_LOSNING_OPENCLAW_MODEL F_LOSNING_CLAUDE_MODEL \
+  F_LOSNING_CLAUDE_TIMEOUT_SECONDS F_LOSNING_CLAUDE_MAX_ATTEMPTS F_LOSNING_CLAUDE_RETRY_BACKOFF_SECONDS \
+  F_LOSNING_OPENCLAW_THINKING F_LOSNING_OPENCLAW_TIMEOUT_SECONDS \
+  CODING_WORKER; do
+  unset "${_clean}" 2>/dev/null || true
+done
+unset _clean
 AVAILABLE_PROFILES="$(flow_list_profile_ids "${FLOW_SKILL_DIR}" | paste -sd, -)"
 INSTALLED_PROFILES="$(flow_list_installed_profile_ids | paste -sd, -)"
 PROFILE_ID="$(flow_resolve_adapter_id "${CONFIG_YAML}")"
