@@ -7,6 +7,7 @@ source "${HOOK_SCRIPT_DIR}/../tools/bin/flow-config-lib.sh"
 
 FLOW_SKILL_DIR="$(cd "${HOOK_SCRIPT_DIR}/.." && pwd)"
 CONFIG_YAML="$(resolve_flow_config_yaml "${BASH_SOURCE[0]}")"
+PROFILE_ID="$(flow_resolve_adapter_id "${CONFIG_YAML}")"
 ADAPTER_BIN_DIR="${FLOW_SKILL_DIR}/bin"
 FLOW_TOOLS_DIR="${FLOW_SKILL_DIR}/tools/bin"
 REPO_SLUG="$(flow_resolve_repo_slug "${CONFIG_YAML}")"
@@ -14,6 +15,12 @@ AGENT_ROOT="$(flow_resolve_agent_root "${CONFIG_YAML}")"
 STATE_ROOT="$(flow_resolve_state_root "${CONFIG_YAML}")"
 RUNS_ROOT="$(flow_resolve_runs_root "${CONFIG_YAML}")"
 BLOCKED_RECOVERY_STATE_DIR="${STATE_ROOT}/blocked-recovery-issues"
+
+issue_kick_scheduler() {
+  ACP_PROJECT_ID="${PROFILE_ID}" \
+  AGENT_PROJECT_ID="${PROFILE_ID}" \
+    "${FLOW_TOOLS_DIR}/kick-scheduler.sh" "${1:-2}" >/dev/null || true
+}
 
 issue_clear_blocked_recovery_state() {
   rm -f "${BLOCKED_RECOVERY_STATE_DIR}/${ISSUE_ID}.env" 2>/dev/null || true
@@ -194,7 +201,7 @@ issue_after_pr_created() {
   if [[ "$(jq -r '.eligibleForAutoMerge' <<<"$risk_json")" == "true" ]]; then
     bash "${FLOW_TOOLS_DIR}/agent-github-update-labels" --repo-slug "${REPO_SLUG}" --number "$pr_number" --add agent-automerge >/dev/null || true
   fi
-  "${FLOW_TOOLS_DIR}/kick-scheduler.sh" 5 >/dev/null || true
+  issue_kick_scheduler 5
 }
 
 issue_after_reconciled() {
@@ -213,5 +220,5 @@ issue_after_reconciled() {
     esac
   fi
 
-  "${FLOW_TOOLS_DIR}/kick-scheduler.sh" 2 >/dev/null || true
+  issue_kick_scheduler 2
 }

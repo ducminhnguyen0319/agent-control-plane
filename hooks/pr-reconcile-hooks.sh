@@ -7,6 +7,7 @@ source "${HOOK_SCRIPT_DIR}/../tools/bin/flow-config-lib.sh"
 
 FLOW_SKILL_DIR="$(cd "${HOOK_SCRIPT_DIR}/.." && pwd)"
 CONFIG_YAML="$(resolve_flow_config_yaml "${BASH_SOURCE[0]}")"
+PROFILE_ID="$(flow_resolve_adapter_id "${CONFIG_YAML}")"
 ADAPTER_BIN_DIR="${FLOW_SKILL_DIR}/bin"
 FLOW_TOOLS_DIR="${FLOW_SKILL_DIR}/tools/bin"
 RUNS_ROOT="$(flow_resolve_runs_root "${CONFIG_YAML}")"
@@ -18,6 +19,12 @@ AGENT_REPO_ROOT="$(flow_resolve_agent_repo_root "${CONFIG_YAML}")"
 ISSUE_SESSION_PREFIX="$(flow_resolve_issue_session_prefix "${CONFIG_YAML}")"
 PR_WORKTREE_BRANCH_PREFIX="$(flow_resolve_pr_worktree_branch_prefix "${CONFIG_YAML}")"
 PR_LANE_OVERRIDE_DIR="${STATE_ROOT}/pr-lane-overrides"
+
+pr_kick_scheduler() {
+  ACP_PROJECT_ID="${PROFILE_ID}" \
+  AGENT_PROJECT_ID="${PROFILE_ID}" \
+    "${FLOW_TOOLS_DIR}/kick-scheduler.sh" "${1:-2}" >/dev/null || true
+}
 
 pr_best_effort_update_labels() {
   bash "${FLOW_TOOLS_DIR}/agent-github-update-labels" "$@" >/dev/null 2>&1 || true
@@ -131,14 +138,14 @@ pr_after_merged() {
   pr_clear_lane_override "$pr_number"
   pr_best_effort_update_labels --repo-slug "${REPO_SLUG}" --number "$pr_number" --remove agent-running --remove agent-automerge --remove agent-repair-queued --remove agent-fix-needed --remove agent-manual-fix-override --remove agent-ci-refresh --remove agent-ci-bypassed --remove agent-double-check-1/2 --remove agent-double-check-2/2 --remove agent-human-review --remove agent-human-approved --remove agent-blocked --remove agent-handoff --remove agent-exclusive
   pr_refresh_linked_issue_checklist "$pr_number"
-  "${FLOW_TOOLS_DIR}/kick-scheduler.sh" 5 >/dev/null || true
+  pr_kick_scheduler 5
 }
 
 pr_after_closed() {
   local pr_number="${1:?pr number required}"
   pr_clear_lane_override "$pr_number"
   pr_best_effort_update_labels --repo-slug "${REPO_SLUG}" --number "$pr_number" --remove agent-running --remove agent-automerge --remove agent-repair-queued --remove agent-fix-needed --remove agent-manual-fix-override --remove agent-ci-refresh --remove agent-ci-bypassed --remove agent-double-check-1/2 --remove agent-double-check-2/2 --remove agent-human-review --remove agent-human-approved --remove agent-blocked --remove agent-handoff --remove agent-exclusive
-  "${FLOW_TOOLS_DIR}/kick-scheduler.sh" 5 >/dev/null || true
+  pr_kick_scheduler 5
 }
 
 pr_automerge_allowed() {
@@ -189,7 +196,7 @@ pr_after_double_check_advanced() {
   pr_set_lane_override "$pr_number" "double-check-${next_stage}"
   pr_best_effort_update_labels --repo-slug "${REPO_SLUG}" --number "$pr_number" --remove agent-running --remove agent-automerge --remove agent-repair-queued --remove agent-fix-needed --remove agent-manual-fix-override --remove agent-ci-refresh --remove agent-human-review --remove agent-human-approved --remove agent-double-check-1/2 --remove agent-double-check-2/2 --add "$next_label"
   pr_best_effort_sync_pr_labels "$pr_number"
-  "${FLOW_TOOLS_DIR}/kick-scheduler.sh" 5 >/dev/null || true
+  pr_kick_scheduler 5
 }
 
 pr_after_updated_branch() {
@@ -221,5 +228,5 @@ pr_after_failed() {
 }
 
 pr_after_reconciled() {
-  "${FLOW_TOOLS_DIR}/kick-scheduler.sh" 2 >/dev/null || true
+  pr_kick_scheduler 2
 }

@@ -30,7 +30,9 @@ fi
 attempt="$((attempt + 1))"
 printf '%s' "$attempt" >"$attempt_file"
 
-printf '429 rate limit exceeded\n' >&2
+cat >"${ACP_HOST_RUN_DIR:?}/claude-debug.log" <<'DEBUG'
+[ERROR] API error (attempt 1/11): 429 {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account's rate limit. Please try again later."}}
+DEBUG
 exit 1
 EOF
 
@@ -72,7 +74,9 @@ fi
 grep -q '^RUNNER_STATE=failed$' "$run_dir/runner.env"
 grep -q '^ATTEMPT=1$' "$run_dir/runner.env"
 grep -q '^RESUME_COUNT=0$' "$run_dir/runner.env"
+grep -q '^LAST_FAILURE_REASON=provider-quota-limit$' "$run_dir/runner.env"
 grep -q '^1$' "$run_dir/attempt-count"
+grep -q '^DETAIL=provider-quota-limit$' "$run_dir/result.env"
 if grep -q '\[claude-retry\]' "$run_dir/$session.log"; then
   echo "provider quota failure unexpectedly retried" >&2
   exit 1

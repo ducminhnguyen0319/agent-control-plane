@@ -40,7 +40,7 @@
   "scripts": {
     "doctor": "node ./npm/bin/agent-control-plane.js doctor",
     "smoke": "node ./npm/bin/agent-control-plane.js smoke",
-    "test": "bash tools/tests/test-agent-control-plane-npm-cli.sh && bash tools/tests/test-agent-project-detached-launch-stable-cwd.sh && bash tools/tests/test-agent-project-claude-session-wrapper-reaps-child-on-term.sh && bash tools/tests/test-profile-adopt-skip-anchor-sync-creates-agent-repo-root.sh && bash tools/tests/test-vendored-codex-quota-claude-oauth-only.sh && bash tools/tests/test-package-smoke-command.sh"
+    "test": "bash tools/tests/test-agent-control-plane-npm-cli.sh && bash tools/tests/test-agent-project-detached-launch-stable-cwd.sh && bash tools/tests/test-agent-project-claude-session-wrapper-reaps-child-on-term.sh && bash tools/tests/test-agent-project-claude-session-wrapper-does-not-retry-provider-quota.sh && bash tools/tests/test-agent-project-reconcile-issue-provider-quota-schedules-provider-cooldown.sh && bash tools/tests/test-pr-reconcile-hooks-refreshes-recurring-issue-checklist.sh && bash tools/tests/test-issue-reconcile-hooks-kick-scheduler-uses-profile.sh && bash tools/tests/test-profile-adopt-skip-anchor-sync-creates-agent-repo-root.sh && bash tools/tests/test-vendored-codex-quota-claude-oauth-only.sh && bash tools/tests/test-package-smoke-command.sh"
   },
   "keywords": [
     "agents",

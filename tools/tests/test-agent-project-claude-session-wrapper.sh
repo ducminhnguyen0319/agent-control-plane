@@ -24,6 +24,7 @@ cat >"$bin_dir/claude" <<'EOF'
 set -euo pipefail
 
 printf '%s\n' "$@" >"${ACP_HOST_RUN_DIR:?}/claude-args.log"
+cat >"${ACP_HOST_RUN_DIR:?}/claude-stdin.log"
 cat >"${ACP_RESULT_FILE:?}" <<'RESULT'
 OUTCOME=blocked
 ACTION=host-comment-blocker
@@ -69,7 +70,7 @@ if tmux has-session -t "$session" 2>/dev/null; then
   exit 1
 fi
 
-for _ in $(seq 1 25); do
+for _ in $(seq 1 100); do
   [[ -f "$reconcile_log" ]] && break
   sleep 0.2
 done
@@ -85,11 +86,31 @@ grep -q '^-p$' "$run_dir/claude-args.log"
 grep -q '^--model$' "$run_dir/claude-args.log"
 grep -q '^sonnet$' "$run_dir/claude-args.log"
 grep -q '^--permission-mode$' "$run_dir/claude-args.log"
-grep -q '^dontAsk$' "$run_dir/claude-args.log"
+grep -q '^acceptEdits$' "$run_dir/claude-args.log"
 grep -q '^--effort$' "$run_dir/claude-args.log"
 grep -q '^high$' "$run_dir/claude-args.log"
 grep -q '^--verbose$' "$run_dir/claude-args.log"
+grep -q '^--allowed-tools$' "$run_dir/claude-args.log"
+grep -Fqx 'Bash(*),Read,Grep,Glob,LS,Edit,Write,MultiEdit' "$run_dir/claude-args.log"
+grep -q '^--disable-slash-commands$' "$run_dir/claude-args.log"
+grep -q '^--strict-mcp-config$' "$run_dir/claude-args.log"
+grep -q '^--mcp-config$' "$run_dir/claude-args.log"
+grep -q '^--settings$' "$run_dir/claude-args.log"
+grep -q '^--debug-file$' "$run_dir/claude-args.log"
 grep -q '^--add-dir$' "$run_dir/claude-args.log"
+if grep -Fxq 'Prompt body' "$run_dir/claude-args.log"; then
+  echo "prompt body should be sent via stdin, not argv" >&2
+  exit 1
+fi
+grep -Fxq 'Prompt body' "$run_dir/claude-stdin.log"
+grep -Fqx 'CLAUDE_PERMISSION_MODE=dontAsk' "$run_dir/run.env"
+grep -Fqx 'CLAUDE_EFFECTIVE_PERMISSION_MODE=acceptEdits' "$run_dir/run.env"
+settings_file="$(awk 'prev == "--settings" { print; exit } { prev = $0 }' "$run_dir/claude-args.log")"
+mcp_config_file="$(awk 'prev == "--mcp-config" { print; exit } { prev = $0 }' "$run_dir/claude-args.log")"
+test -f "$settings_file"
+test -f "$mcp_config_file"
+grep -q '"disableAllHooks": true' "$settings_file"
+grep -q '"mcpServers": {}' "$mcp_config_file"
 exclude_file="$(git -C "$worktree" config --worktree --get core.excludesFile)"
 test -f "$exclude_file"
 grep -qx '.openclaw-artifacts' "$exclude_file"

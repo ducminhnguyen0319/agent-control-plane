@@ -24,6 +24,10 @@ layout for public releases.
 - forced detached worker launches to start from a stable working directory, so resident issue loops no longer inherit a deleted worktree cwd and break `pnpm`/Node bootstrap with `uv_cwd`
 - added regression coverage for detached launches started from a stale parent cwd
 - made Claude session runners stream turn output in real time and reap the Claude child process when the parent session is terminated, so resident Claude workers no longer leave orphaned long-running processes behind as easily
+- switched headless Claude prompting to stdin-backed transport with isolated hooks/MCP settings, so resident Claude workers no longer hang before doing real work
+- classify Claude provider quota failures from debug logs and preserve the worker's blocked result contract instead of collapsing them into generic exit failures
+- ensure issue and PR reconcile hooks pass the resolved profile id into `kick-scheduler.sh`, so post-reconcile scheduling still works when multiple profiles are installed
+- surface provider quota blocker comments on GitHub issues during failed reconcile paths, so recurring Claude lanes fail visibly instead of going silent
 
 ## [0.1.7] - 2026-03-30
 

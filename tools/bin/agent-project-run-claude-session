@@ -11,12 +11,13 @@ persist the standard run artifacts.
 
 Options:
   --claude-model <name>             Claude model alias or full name
-  --claude-permission-mode <mode>   Claude permission mode (e.g. dontAsk, bypassPermissions)
+  --claude-permission-mode <mode>   Claude permission mode (e.g. acceptEdits, bypassPermissions)
   --claude-effort <level>           Claude effort level (low, medium, high, max)
   --claude-timeout-seconds <secs>   Claude command timeout (default: 900)
   --claude-max-attempts <count>     Retry transient failures this many times (default: 3)
   --claude-retry-backoff-seconds <s>
                                    Sleep between transient retries (default: 30)
+  --claude-allowed-tools <spec>     Allowed Claude tools for headless runs
   --env-prefix <prefix>             Export prefixed runtime/context env vars inside the worker
   --context <KEY=VALUE>             Extra metadata written to run.env and exported to the worker
   --collect-file <name>             Copy sandbox artifact file into the host run dir after execution
@@ -35,11 +36,12 @@ adapter_id=""
 task_kind=""
 task_id=""
 claude_model="${ACP_CLAUDE_MODEL:-${F_LOSNING_CLAUDE_MODEL:-sonnet}}"
-claude_permission_mode="${ACP_CLAUDE_PERMISSION_MODE:-${F_LOSNING_CLAUDE_PERMISSION_MODE:-dontAsk}}"
+claude_permission_mode="${ACP_CLAUDE_PERMISSION_MODE:-${F_LOSNING_CLAUDE_PERMISSION_MODE:-acceptEdits}}"
 claude_effort="${ACP_CLAUDE_EFFORT:-${F_LOSNING_CLAUDE_EFFORT:-medium}}"
 claude_timeout_seconds="${ACP_CLAUDE_TIMEOUT_SECONDS:-${F_LOSNING_CLAUDE_TIMEOUT_SECONDS:-900}}"
 claude_max_attempts="${ACP_CLAUDE_MAX_ATTEMPTS:-${F_LOSNING_CLAUDE_MAX_ATTEMPTS:-3}}"
 claude_retry_backoff_seconds="${ACP_CLAUDE_RETRY_BACKOFF_SECONDS:-${F_LOSNING_CLAUDE_RETRY_BACKOFF_SECONDS:-30}}"
+claude_allowed_tools="${ACP_CLAUDE_ALLOWED_TOOLS:-${F_LOSNING_CLAUDE_ALLOWED_TOOLS:-Bash(*),Read,Grep,Glob,LS,Edit,Write,MultiEdit}}"
 env_prefix=""
 sandbox_subdir=".openclaw-artifacts"
 reconcile_command=""
@@ -94,6 +96,7 @@ while [[ $# -gt 0 ]]; do
     --claude-timeout-seconds) claude_timeout_seconds="${2:-}"; shift 2 ;;
     --claude-max-attempts) claude_max_attempts="${2:-}"; shift 2 ;;
     --claude-retry-backoff-seconds) claude_retry_backoff_seconds="${2:-}"; shift 2 ;;
+    --claude-allowed-tools) claude_allowed_tools="${2:-}"; shift 2 ;;
     --env-prefix) env_prefix="${2:-}"; shift 2 ;;
     --context) context_items+=("${2:-}"); shift 2 ;;
     --collect-file) collect_files+=("${2:-}"); shift 2 ;;
@@ -156,10 +159,30 @@ meta_file="${artifact_dir}/run.env"
 result_file="${artifact_dir}/result.env"
 runner_state_file="${artifact_dir}/runner.env"
 sandbox_run_dir="${worktree%/}/${sandbox_subdir}/${session}"
+claude_settings_file="${artifact_dir}/claude-headless-settings.json"
+claude_mcp_config_file="${artifact_dir}/claude-headless-mcp.json"
+claude_debug_file="${artifact_dir}/claude-debug.log"
 started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 mkdir -p "$artifact_dir"
 mkdir -p "$sandbox_run_dir"
+
+effective_claude_permission_mode="${claude_permission_mode}"
+if [[ "${effective_claude_permission_mode}" == "dontAsk" ]]; then
+  effective_claude_permission_mode="acceptEdits"
+fi
+
+cat >"$claude_settings_file" <<'EOF'
+{
+  "disableAllHooks": true
+}
+EOF
+
+cat >"$claude_mcp_config_file" <<'EOF'
+{
+  "mcpServers": {}
+}
+EOF
 
 if tmux has-session -t "$session" 2>/dev/null; then
   echo "tmux session already exists: $session" >&2
@@ -187,10 +210,15 @@ printf -v started_at_q '%q' "$started_at"
 printf -v claude_bin_q '%q' "$claude_bin"
 printf -v claude_model_q '%q' "$claude_model"
 printf -v claude_permission_mode_q '%q' "$claude_permission_mode"
+printf -v claude_effective_permission_mode_q '%q' "$effective_claude_permission_mode"
 printf -v claude_effort_q '%q' "$claude_effort"
 printf -v claude_timeout_q '%q' "$claude_timeout_seconds"
 printf -v claude_max_attempts_q '%q' "$claude_max_attempts"
 printf -v claude_retry_backoff_q '%q' "$claude_retry_backoff_seconds"
+printf -v claude_allowed_tools_q '%q' "$claude_allowed_tools"
+printf -v claude_settings_file_q '%q' "$claude_settings_file"
+printf -v claude_mcp_config_file_q '%q' "$claude_mcp_config_file"
+printf -v claude_debug_file_q '%q' "$claude_debug_file"
 printf -v python_bin_q '%q' "$python_bin"
 printf -v sandbox_subdir_q '%q' "$sandbox_subdir"
 printf -v claude_thread_id_q '%q' "claude-print-${session}"
@@ -213,10 +241,15 @@ printf -v claude_thread_id_q '%q' "claude-print-${session}"
   printf 'CLAUDE_BIN=%s\n' "$claude_bin_q"
   printf 'CLAUDE_MODEL=%s\n' "$claude_model_q"
   printf 'CLAUDE_PERMISSION_MODE=%s\n' "$claude_permission_mode_q"
+  printf 'CLAUDE_EFFECTIVE_PERMISSION_MODE=%s\n' "$claude_effective_permission_mode_q"
   printf 'CLAUDE_EFFORT=%s\n' "$claude_effort_q"
   printf 'CLAUDE_TIMEOUT_SECONDS=%s\n' "$claude_timeout_q"
   printf 'CLAUDE_MAX_ATTEMPTS=%s\n' "$claude_max_attempts_q"
   printf 'CLAUDE_RETRY_BACKOFF_SECONDS=%s\n' "$claude_retry_backoff_q"
+  printf 'CLAUDE_ALLOWED_TOOLS=%s\n' "$claude_allowed_tools_q"
+  printf 'CLAUDE_SETTINGS_FILE=%s\n' "$claude_settings_file_q"
+  printf 'CLAUDE_MCP_CONFIG_FILE=%s\n' "$claude_mcp_config_file_q"
+  printf 'CLAUDE_DEBUG_FILE=%s\n' "$claude_debug_file_q"
   printf 'PYTHON_BIN=%s\n' "$python_bin_q"
 } >"$meta_file"
 
@@ -334,14 +367,20 @@ host_result_file=${result_q}
 claude_bin=${claude_bin_q}
 claude_model=${claude_model_q}
 claude_permission_mode=${claude_permission_mode_q}
+claude_effective_permission_mode=${claude_effective_permission_mode_q}
 claude_effort=${claude_effort_q}
 claude_timeout_seconds=${claude_timeout_q}
 claude_max_attempts=${claude_max_attempts_q}
 claude_retry_backoff_seconds=${claude_retry_backoff_q}
+claude_allowed_tools=${claude_allowed_tools_q}
+claude_settings_file=${claude_settings_file_q}
+claude_mcp_config_file=${claude_mcp_config_file_q}
+claude_debug_file=${claude_debug_file_q}
 python_bin=${python_bin_q}
 worktree_root=${worktree_q}
 sandbox_subdir=${sandbox_subdir_q}
 prompt_file=${prompt_q}
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 
 write_state() {
   local runner_state="\${1:?runner state required}"
@@ -370,9 +409,11 @@ write_state() {
 
 run_with_timeout() {
   local timeout_seconds="\${1:?timeout seconds required}"
+  local stdin_file="\${2:?stdin file required}"
+  shift
   shift
 
-  "\${python_bin}" - "\${timeout_seconds}" "\$@" <<'PY'
+  "\${python_bin}" - "\${timeout_seconds}" "\${stdin_file}" "\$@" <<'PY'
 import errno
 import fcntl
 import os
@@ -383,12 +424,20 @@ import sys
 import time
 
 timeout_seconds = float(sys.argv[1])
-argv = sys.argv[2:]
+stdin_path = sys.argv[2]
+argv = sys.argv[3:]
 
 if not argv:
     sys.exit(64)
 
-proc = subprocess.Popen(argv, start_new_session=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+stdin_handle = open(stdin_path, "rb")
+proc = subprocess.Popen(
+    argv,
+    start_new_session=True,
+    stdin=stdin_handle,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+)
 
 for stream in (proc.stdout, proc.stderr):
     if stream is None:
@@ -589,28 +638,30 @@ HOOK_EOF
 }
 
 classify_failure_reason() {
-  local log_file="\${1:-\${output_file}}"
-
-  if grep -Eiq 'authentication|unauthorized|login required|invalid api key|api key' "\${log_file}" 2>/dev/null; then
-    printf 'auth-failure\n'
-    return 0
-  fi
-  if grep -Eiq 'rate limit|quota exceeded|insufficient credits|payment required|429' "\${log_file}" 2>/dev/null; then
-    printf 'provider-quota-limit\n'
-    return 0
-  fi
-  if grep -Eiq 'model .* not available|unsupported model|invalid model|model not found' "\${log_file}" 2>/dev/null; then
-    printf 'model-unavailable\n'
-    return 0
-  fi
-  if grep -Eiq 'connection reset|connection error|network error|temporarily unavailable|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN' "\${log_file}" 2>/dev/null; then
-    printf 'network-connection\n'
-    return 0
-  fi
-  if grep -Eiq 'timeout|timed out|ETIMEDOUT' "\${log_file}" 2>/dev/null; then
-    printf 'timeout\n'
-    return 0
-  fi
+  local log_file=""
+  for log_file in "\$@"; do
+    [[ -n "\${log_file}" && -f "\${log_file}" ]] || continue
+    if grep -Eiq 'authentication|unauthorized|login required|invalid api key|api key' "\${log_file}" 2>/dev/null; then
+      printf 'auth-failure\n'
+      return 0
+    fi
+    if grep -Eiq 'rate limit|quota exceeded|insufficient credits|payment required|429' "\${log_file}" 2>/dev/null; then
+      printf 'provider-quota-limit\n'
+      return 0
+    fi
+    if grep -Eiq 'model .* not available|unsupported model|invalid model|model not found' "\${log_file}" 2>/dev/null; then
+      printf 'model-unavailable\n'
+      return 0
+    fi
+    if grep -Eiq 'connection reset|connection error|network error|temporarily unavailable|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN' "\${log_file}" 2>/dev/null; then
+      printf 'network-connection\n'
+      return 0
+    fi
+    if grep -Eiq 'timeout|timed out|ETIMEDOUT' "\${log_file}" 2>/dev/null; then
+      printf 'timeout\n'
+      return 0
+    fi
+  done
   printf 'claude-exit-failed\n'
 }
 
@@ -641,18 +692,23 @@ reset_sandbox_run_dir
 ensure_workspace_excludes
 install_pre_commit_scope_hook
 
-prompt_payload="\$(cat "\${prompt_file}")"
 claude_args=(
   -p
   --output-format text
   --verbose
+  --debug-file "\${claude_debug_file}"
   --no-session-persistence
-  --permission-mode "\${claude_permission_mode}"
+  --permission-mode "\${claude_effective_permission_mode}"
+  --allowed-tools "\${claude_allowed_tools}"
+  --disable-slash-commands
+  --strict-mcp-config
+  --mcp-config "\${claude_mcp_config_file}"
+  --settings "\${claude_settings_file}"
   --model "\${claude_model}"
   --effort "\${claude_effort}"
   --add-dir ${worktree_q}
 )
-if [[ "\${claude_permission_mode}" == "bypassPermissions" ]]; then
+if [[ "\${claude_effective_permission_mode}" == "bypassPermissions" ]]; then
   claude_args+=(--allow-dangerously-skip-permissions)
 fi
 
@@ -664,7 +720,7 @@ while (( attempt <= claude_max_attempts )); do
   attempt_log_file="\${artifact_dir}/claude-attempt-\${attempt}.log"
   write_state running '' '' "\${attempt}" "\$((attempt - 1))"
   printf '\n[claude-attempt] %s/%s\n' "\${attempt}" "\${claude_max_attempts}" | tee -a "\${output_file}" >/dev/null
-  run_with_timeout "\${claude_timeout_seconds}" "\${claude_bin}" "\${claude_args[@]}" "\${prompt_payload}" >"\${attempt_log_file}" 2>&1
+  run_with_timeout "\${claude_timeout_seconds}" "\${prompt_file}" "\${claude_bin}" "\${claude_args[@]}" >"\${attempt_log_file}" 2>&1
   status=\$?
   cat "\${attempt_log_file}" >>"\${output_file}"
   if [[ "\${status}" -eq 0 ]]; then
@@ -674,7 +730,7 @@ while (( attempt <= claude_max_attempts )); do
   if [[ "\${status}" -eq 124 ]]; then
     failure_reason="timeout"
   else
-    failure_reason="\$(classify_failure_reason "\${attempt_log_file}")"
+    failure_reason="\$(classify_failure_reason "\${attempt_log_file}" "\${claude_debug_file}")"
   fi
   if (( attempt >= claude_max_attempts )) || ! is_retryable_failure_reason "\${failure_reason}"; then
     break
@@ -691,6 +747,8 @@ if [[ -f "\${result_file_path}" ]]; then
 else
   if [[ "\${status}" -eq 0 ]]; then
     write_result_fallback "missing-result-contract"
+  elif [[ "\${status}" -ne 124 && -n "\${failure_reason}" && "\${failure_reason}" != "claude-exit-failed" ]]; then
+    write_result_fallback "\${failure_reason}"
   else
     write_result_fallback "worker-exit-\${status}"
   fi

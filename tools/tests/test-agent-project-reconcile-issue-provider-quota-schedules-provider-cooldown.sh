@@ -17,6 +17,7 @@ hook_file="$tmpdir/hooks.sh"
 provider_log="$tmpdir/provider.log"
 retry_reason_file="$tmpdir/retry-reason.txt"
 ready_flag="$tmpdir/ready.flag"
+posted_comment_file="$tmpdir/posted-comment.md"
 
 mkdir -p "$shared_bin" "$runs_root/fl-issue-77" "$history_root" "$repo_root" "$bin_dir"
 git -C "$repo_root" init -b main >/dev/null 2>&1
@@ -27,6 +28,12 @@ SESSION=fl-issue-77
 CODING_WORKER=openclaw
 OPENCLAW_MODEL=openrouter/stepfun/step-3.5-flash:free
 WORKTREE=/tmp/mock-worktree
+EOF
+
+cat >"$runs_root/fl-issue-77/result.env" <<'EOF'
+OUTCOME=blocked
+ACTION=host-comment-blocker
+DETAIL=provider-quota-limit
 EOF
 
 cat >"$shared_bin/agent-project-worker-status" <<EOF
@@ -70,6 +77,24 @@ EOF
 cat >"$bin_dir/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${1:-}" == "api" && "${2:-}" == "repos/example/repo/issues/77/comments" ]]; then
+  shift 2
+  body=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -f)
+        if [[ "${2:-}" == body=* ]]; then
+          body="${2#body=}"
+          shift 2
+          continue
+        fi
+        ;;
+    esac
+    shift
+  done
+  printf '%s\n' "${body}" >"${TEST_POSTED_COMMENT_FILE:?}"
+  exit 0
+fi
 exit 0
 EOF
 
@@ -83,6 +108,7 @@ chmod +x \
 output="$(
   PATH="$bin_dir:$PATH" \
   SHARED_AGENT_HOME="$shared_home" \
+  TEST_POSTED_COMMENT_FILE="$posted_comment_file" \
   bash "$SCRIPT" \
     --session fl-issue-77 \
     --repo-slug example/repo \
@@ -96,6 +122,13 @@ grep -q '^schedule provider-quota-limit$' "$provider_log"
 test "$(cat "$retry_reason_file")" = "provider-quota-limit"
 test -f "$ready_flag"
 grep -q '^STATUS=FAILED$' <<<"$output"
+grep -q '^OUTCOME=blocked$' <<<"$output"
+grep -q '^ACTION=host-comment-blocker$' <<<"$output"
 grep -q '^FAILURE_REASON=provider-quota-limit$' <<<"$output"
+test -f "$runs_root/fl-issue-77/issue-comment.md"
+grep -q '^# Blocker: Provider quota is currently exhausted$' "$runs_root/fl-issue-77/issue-comment.md"
+grep -q 'configured openclaw account hit a provider-side rate limit' "$runs_root/fl-issue-77/issue-comment.md"
+test -f "$posted_comment_file"
+grep -q '^# Blocker: Provider quota is currently exhausted$' "$posted_comment_file"
 
 echo "issue reconcile provider cooldown scheduling test passed"

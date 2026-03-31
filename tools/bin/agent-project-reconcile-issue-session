@@ -794,6 +794,41 @@ ${publish_out}
 EOF
 }
 
+build_issue_runtime_blocker_comment() {
+  local runtime_reason="${1:-worker-exit-failed}"
+  local worker_name="${CODING_WORKER:-worker}"
+
+  case "${runtime_reason}" in
+    provider-quota-limit)
+      cat <<EOF
+# Blocker: Provider quota is currently exhausted
+
+This recurring run stopped before implementation because the configured ${worker_name} account hit a provider-side rate limit.
+
+Why it was blocked:
+- the worker reached Anthropic's current request limit for this account
+- ACP recorded the quota hit and will retry after the configured cooldown instead of looping indefinitely
+
+Next step:
+- wait for the current quota window to reset, or switch this profile to another available provider/account
+EOF
+      return 0
+      ;;
+  esac
+
+  cat <<EOF
+# Blocker: Worker session failed before publish
+
+The worker exited before ACP could publish or reconcile a result for this cycle.
+
+Failure reason:
+- \`${runtime_reason}\`
+
+Next step:
+- inspect the run logs for this session and re-queue once the underlying worker issue is resolved
+EOF
+}
+
 extract_recovery_worktree_from_publish_output() {
   local publish_out="${1:-}"
   awk -F= '/^RECOVERY_WORKTREE=/{print $2}' <<<"$publish_out" | tail -n 1
@@ -1106,9 +1141,17 @@ case "$status" in
     failure_reason="${failure_reason:-worker-exit-failed}"
     schedule_provider_quota_cooldown "${failure_reason}"
     normalize_issue_runner_state "failed" "${LAST_EXIT_CODE:-}" "${failure_reason}"
+    if [[ "${result_outcome:-}" == "blocked" && "${result_action:-}" == "host-comment-blocker" ]]; then
+      if [[ ! -s "${run_dir}/issue-comment.md" ]]; then
+        write_issue_comment_artifact "$(build_issue_runtime_blocker_comment "${failure_reason}")" || true
+      fi
+      post_issue_comment_if_present
+      issue_set_reconcile_summary "$status" "$result_outcome" "$result_action" "$failure_reason"
+    else
+      issue_set_reconcile_summary "$status" "" "" "$failure_reason"
+    fi
     require_transition "issue_schedule_retry" issue_schedule_retry "${failure_reason}"
     require_transition "issue_mark_ready" issue_mark_ready
-    issue_set_reconcile_summary "$status" "" "" "$failure_reason"
     cleanup_issue_session
     notify_issue_reconciled
     ;;
@@ -1120,6 +1163,12 @@ mark_reconciled
 printf 'STATUS=%s\n' "$status"
 printf 'ISSUE_ID=%s\n' "$issue_id"
 printf 'PR_NUMBER=%s\n' "$pr_number"
+if [[ -n "${issue_summary_outcome:-}" ]]; then
+  printf 'OUTCOME=%s\n' "${issue_summary_outcome}"
+fi
+if [[ -n "${issue_summary_action:-}" ]]; then
+  printf 'ACTION=%s\n' "${issue_summary_action}"
+fi
 if [[ -n "$failure_reason" ]]; then
   printf 'FAILURE_REASON=%s\n' "$failure_reason"
 fi

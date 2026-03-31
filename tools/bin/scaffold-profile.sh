@@ -25,7 +25,7 @@ Options:
   --coding-worker <codex|openclaw|claude>
                                      Default coding backend (default: openclaw)
   --claude-model <model>             Claude model alias or full name
-  --claude-permission-mode <mode>    Claude permission mode (default: dontAsk)
+  --claude-permission-mode <mode>    Claude permission mode (default: acceptEdits)
   --claude-effort <level>            Claude effort level (default: medium)
   --claude-timeout-seconds <secs>    Claude timeout (default: 900)
   --claude-max-attempts <count>      Claude retry attempts (default: 3)
@@ -49,7 +49,7 @@ retained_repo_root=""
 vscode_workspace_file=""
 coding_worker="openclaw"
 claude_model="sonnet"
-claude_permission_mode="dontAsk"
+claude_permission_mode="acceptEdits"
 claude_effort="medium"
 claude_timeout_seconds="900"
 claude_max_attempts="3"
