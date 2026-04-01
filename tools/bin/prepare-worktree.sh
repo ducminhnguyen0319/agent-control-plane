@@ -119,7 +119,9 @@ mkdir -p "$WORKTREE/.openclaw-artifacts"
 configure_worktree_excludes "$WORKTREE"
 
 if [[ -x "$SYNC_DEPENDENCY_BASELINE_SCRIPT" && "$DEPENDENCY_REAL" == "$CANONICAL_REAL" ]]; then
-  "$SYNC_DEPENDENCY_BASELINE_SCRIPT" >/dev/null
+  # Sync dependency baseline is non-fatal — worker can function without it
+  # (especially for repos with zero dependencies or external volume issues)
+  "$SYNC_DEPENDENCY_BASELINE_SCRIPT" >/dev/null 2>&1 || true
 fi
 
 if [[ "$LOCAL_WORKSPACE_INSTALL" == "true" ]]; then

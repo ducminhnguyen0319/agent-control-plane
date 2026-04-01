@@ -34,8 +34,8 @@ env_prefix=""
 sandbox_subdir=".openclaw-artifacts"
 reconcile_command=""
 keep_agent="false"
-openclaw_model="${ACP_OPENCLAW_MODEL:-${F_LOSNING_OPENCLAW_MODEL:-openrouter/stepfun/step-3.5-flash:free}}"
-openclaw_thinking="${ACP_OPENCLAW_THINKING:-${F_LOSNING_OPENCLAW_THINKING:-adaptive}}"
+openclaw_model="${ACP_OPENCLAW_MODEL:-${F_LOSNING_OPENCLAW_MODEL:-openrouter/qwen/qwen3.6-plus-preview:free}}"
+openclaw_thinking="${ACP_OPENCLAW_THINKING:-${F_LOSNING_OPENCLAW_THINKING:-low}}"
 openclaw_timeout_seconds="${ACP_OPENCLAW_TIMEOUT_SECONDS:-${F_LOSNING_OPENCLAW_TIMEOUT_SECONDS:-900}}"
 provided_openclaw_agent_id=""
 provided_openclaw_session_id=""
@@ -281,6 +281,7 @@ sandbox_artifact_dir=${sandbox_artifact_dir_q}
 sandbox_run_dir=${sandbox_run_dir_q}
 artifact_dir=${artifact_dir_q}
 run_dir=${artifact_dir_q}
+task_kind=${task_kind_q}
 worktree=${worktree_q}
 prompt_file_path=${prompt_q}
 openclaw_state_dir=${openclaw_state_dir_q}
@@ -334,6 +335,9 @@ record_final_git_state() {
 
 ensure_openclaw_workspace_excludes() {
   local exclude_file line
+  if ! git -C ${worktree_q} rev-parse --git-dir >/dev/null 2>&1; then
+    return 0
+  fi
   exclude_file="\$(git -C ${worktree_q} config --worktree --get core.excludesFile 2>/dev/null || true)"
   if [[ -z "\${exclude_file}" ]]; then
     exclude_file="\${sandbox_artifact_dir}/git-exclude"
@@ -638,6 +642,79 @@ infer_result_from_output() {
 
   # Default fallback: block (safe default)
   write_result 'OUTCOME=blocked\nACTION=host-comment-blocker\n'
+}
+
+synthesize_comment_artifact_from_output() {
+  local target_file=""
+  local result_file_path="\${sandbox_run_dir}/result.env"
+
+  if [[ ! -f "\${result_file_path}" ]] || ! grep -Eq '^ACTION=host-comment-' "\${result_file_path}" 2>/dev/null; then
+    return 0
+  fi
+
+  case "\${task_kind}" in
+    issue|task)
+      target_file="\${sandbox_run_dir}/issue-comment.md"
+      ;;
+    pr)
+      target_file="\${sandbox_run_dir}/pr-comment.md"
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+
+  [[ -n "\${target_file}" ]] || return 0
+  [[ ! -f "\${target_file}" ]] || return 0
+
+  python3 - "\${output_file}" "\${target_file}" <<'PY2'
+import json
+import os
+import sys
+
+log_path, target_path = sys.argv[1:3]
+
+try:
+    raw = open(log_path, 'r', encoding='utf-8', errors='replace').read()
+except Exception:
+    raise SystemExit(0)
+
+decoder = json.JSONDecoder()
+message = ''
+idx = 0
+while idx < len(raw):
+    start = raw.find('{', idx)
+    if start == -1:
+        break
+    try:
+        payload, end = decoder.raw_decode(raw, start)
+    except Exception:
+        idx = start + 1
+        continue
+    idx = end
+    if not isinstance(payload, dict):
+        continue
+    payloads = payload.get('payloads')
+    if not isinstance(payloads, list):
+        continue
+    parts = []
+    for item in payloads:
+        if not isinstance(item, dict):
+            continue
+        value = item.get('text')
+        if isinstance(value, str) and value.strip():
+            parts.append(value.rstrip())
+    if parts:
+        message = '\n\n'.join(parts).strip()
+
+if not message:
+    raise SystemExit(0)
+
+os.makedirs(os.path.dirname(target_path), exist_ok=True)
+with open(target_path, 'w', encoding='utf-8') as handle:
+    handle.write(message)
+    handle.write('\n')
+PY2
 }
 
 cleanup_agent() {
@@ -953,6 +1030,7 @@ recover_literal_runtime_artifacts
 if [[ "\${status}" -eq 0 ]]; then
   # Infer result.env from output if agent didn't create one
   infer_result_from_output
+  synthesize_comment_artifact_from_output
   write_state succeeded "0" ""
 else
   if [[ -z "\${failure_reason}" ]]; then

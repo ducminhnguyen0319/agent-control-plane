@@ -929,6 +929,9 @@ running_recurring_issue_workers() {
       count=$((count + 1))
     fi
   done <<<"$running_issue_workers_cache"
+  # Also count pending recurring launches that are still in progress
+  # (prevents infinite respawning when workers die before creating tmux sessions)
+  count=$((count + $(pending_recurring_issue_launch_count)))
   printf '%s\n' "$count"
 }
 
