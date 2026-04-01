@@ -339,6 +339,11 @@ normalize_pr_result_contract() {
         host-comment-pr-blocker)
           return 0
           ;;
+        host-comment-blocker)
+          result_action="host-comment-pr-blocker"
+          pr_result_contract_note="normalized-legacy-blocked-action"
+          return 0
+          ;;
         requested-changes-or-blocked)
           result_action="host-comment-pr-blocker"
           pr_result_contract_note="normalized-legacy-blocked-action"
