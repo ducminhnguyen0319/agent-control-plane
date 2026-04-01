@@ -251,16 +251,39 @@ const riskReason =
         ? `paths-within-critical-app-allowlist:${criticalAppFiles.join(',')}`
         : `paths-outside-low-risk-allowlist:${disallowed.join(',')}`;
 
+const normalizeRollupCheck = (check) => {
+  const typename = String(check?.__typename || '');
+  if (typename === 'StatusContext') {
+    const name = String(check?.context || 'status-context');
+    const state = String(check?.state || '').toUpperCase();
+    return {
+      name,
+      status: state === 'SUCCESS' || state === 'FAILURE' || state === 'ERROR' ? 'COMPLETED' : state,
+      conclusion: state === 'SUCCESS' ? 'SUCCESS' : state === 'FAILURE' || state === 'ERROR' ? 'FAILURE' : '',
+      reasonField: 'state',
+      rawStatus: String(check?.state || '').toLowerCase() || 'unknown',
+    };
+  }
+
+  return {
+    name: String(check?.name || check?.workflowName || 'check-run'),
+    status: String(check?.status || '').toUpperCase(),
+    conclusion: String(check?.conclusion || '').toUpperCase(),
+    reasonField: 'status',
+    rawStatus: String(check?.status || '').toLowerCase() || 'unknown',
+  };
+};
+
 const pendingChecks = [];
 const checkFailures = [];
-for (const check of checks) {
+for (const rawCheck of checks) {
+  const check = normalizeRollupCheck(rawCheck);
   if (check.status !== 'COMPLETED') {
-    pendingChecks.push(`${check.name}:status-${String(check.status || '').toLowerCase()}`);
+    pendingChecks.push(`${check.name}:${check.reasonField}-${check.rawStatus}`);
     continue;
   }
-  const conclusion = String(check.conclusion || '').toUpperCase();
-  if (conclusion !== 'SUCCESS' && conclusion !== 'SKIPPED') {
-    checkFailures.push(`${check.name}:conclusion-${String(check.conclusion || '').toLowerCase()}`);
+  if (check.conclusion !== 'SUCCESS' && check.conclusion !== 'SKIPPED') {
+    checkFailures.push(`${check.name}:conclusion-${String(check.conclusion || '').toLowerCase() || 'unknown'}`);
   }
 }
 
