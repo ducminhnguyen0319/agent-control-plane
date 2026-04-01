@@ -61,6 +61,24 @@ resolve_claude_bin() {
     return 0
   fi
 
+  # Well-known install locations for Claude Code CLI.
+  # Detached supervisors and LaunchAgents run with a minimal PATH that
+  # does not include user-local directories, so command -v alone is not
+  # enough.  Try the common locations explicitly.
+  local -a fallback_paths=(
+    "${HOME}/.local/bin/claude"
+    "${HOME}/.claude/local/bin/claude"
+    "/usr/local/bin/claude"
+    "/opt/homebrew/bin/claude"
+  )
+  local p
+  for p in "${fallback_paths[@]}"; do
+    if [[ -x "${p}" ]]; then
+      printf '%s\n' "${p}"
+      return 0
+    fi
+  done
+
   return 1
 }
 

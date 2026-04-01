@@ -1123,9 +1123,11 @@ build_ordered_ready_issue_ids_cache() {
 
   last_recurring_issue="$(last_launched_recurring_issue_id || true)"
   if [[ -n "$last_recurring_issue" ]]; then
+    local emitted_after_last=0
     for issue_id in "${recurring_ids[@]}"; do
       if [[ "$seen_last" == "yes" ]]; then
         printf '%s\n' "$issue_id"
+        emitted_after_last=$((emitted_after_last + 1))
       fi
       if [[ "$issue_id" == "$last_recurring_issue" ]]; then
         seen_last="yes"
@@ -1134,7 +1136,12 @@ build_ordered_ready_issue_ids_cache() {
   fi
 
   for issue_id in "${recurring_ids[@]}"; do
-    if [[ -n "$last_recurring_issue" && "$seen_last" == "yes" && "$issue_id" == "$last_recurring_issue" ]]; then
+    # Stop the wrap-around once we reach the last-launched issue, but only
+    # when the first loop already emitted at least one issue after it.
+    # When there is exactly one recurring issue (or the last-launched issue
+    # is the final element), emitted_after_last is 0, so we must still
+    # include it here to avoid producing an empty list.
+    if [[ -n "$last_recurring_issue" && "$seen_last" == "yes" && "$issue_id" == "$last_recurring_issue" && "$emitted_after_last" -gt 0 ]]; then
       break
     fi
     printf '%s\n' "$issue_id"
