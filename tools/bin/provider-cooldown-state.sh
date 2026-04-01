@@ -12,7 +12,7 @@ Usage:
 
 Examples:
   provider-cooldown-state.sh get
-  provider-cooldown-state.sh openclaw openrouter/stepfun/step-3.5-flash:free schedule provider-quota-limit
+  provider-cooldown-state.sh openclaw openrouter/qwen/qwen3.6-plus-preview:free schedule provider-quota-limit
 EOF
 }
 

@@ -30,7 +30,7 @@ grep -q '^PROFILE_NOTES_EXISTS=yes$' <<<"$output"
 grep -Eq '^AVAILABLE_PROFILES=(demo,alpha|alpha,demo)$' <<<"$output"
 grep -q '^EFFECTIVE_CODING_WORKER=openclaw$' <<<"$output"
 grep -q '^EFFECTIVE_PROVIDER_QUOTA_COOLDOWNS=300,900,1800,3600$' <<<"$output"
-grep -q '^EFFECTIVE_OPENCLAW_MODEL=openrouter/stepfun/step-3.5-flash:free$' <<<"$output"
+grep -q '^EFFECTIVE_OPENCLAW_MODEL=openrouter/qwen/qwen3.6-plus-preview:free$' <<<"$output"
 grep -q '^EFFECTIVE_AGENT_REPO_ROOT=/tmp/agent-control-plane-demo/repo$' <<<"$output"
 
 echo "render flow config demo profile test passed"

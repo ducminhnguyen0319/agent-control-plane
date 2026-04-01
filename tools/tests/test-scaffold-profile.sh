@@ -62,7 +62,8 @@ grep -q '^  pr_worktree_branch_prefix: "agent/alpha-demo/pr"$' "$profile_yaml"
 grep -q '^  coding_worker: "openclaw"$' "$profile_yaml"
 grep -q '^  provider_quota:$' "$profile_yaml"
 grep -q '^    cooldowns: "300,900,1800,3600"$' "$profile_yaml"
-grep -q '^    model: "openrouter/stepfun/step-3.5-flash:free"$' "$profile_yaml"
+grep -q '^    model: "openrouter/qwen/qwen3.6-plus-preview:free"$' "$profile_yaml"
+grep -q '^    thinking: "low"$' "$profile_yaml"
 grep -q '^# alpha-demo Profile Notes$' "$profile_readme"
 grep -q '^## Startup Checklist$' "$profile_readme"
 
@@ -78,7 +79,7 @@ grep -Eq '^AVAILABLE_PROFILES=alpha-demo$' <<<"$render_output"
 grep -q '^EFFECTIVE_REPO_ROOT=/tmp/agent-control-plane-alpha-demo/repo$' <<<"$render_output"
 grep -q '^EFFECTIVE_CODING_WORKER=openclaw$' <<<"$render_output"
 grep -q '^EFFECTIVE_PROVIDER_QUOTA_COOLDOWNS=300,900,1800,3600$' <<<"$render_output"
-grep -q '^EFFECTIVE_OPENCLAW_MODEL=openrouter/stepfun/step-3.5-flash:free$' <<<"$render_output"
+grep -q '^EFFECTIVE_OPENCLAW_MODEL=openrouter/qwen/qwen3.6-plus-preview:free$' <<<"$render_output"
 
 claude_output="$(
   ACP_PROFILE_REGISTRY_ROOT="$profile_home" \
