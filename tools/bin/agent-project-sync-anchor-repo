@@ -16,6 +16,8 @@ canonical_root=""
 anchor_root=""
 remote_name="origin"
 default_branch="main"
+dirty_state_stashed="no"
+dirty_stash_message=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -103,8 +105,13 @@ git -C "$anchor_root" fetch "$remote_name" --prune >/dev/null
 git -C "$anchor_root" worktree prune >/dev/null 2>&1 || true
 
 if [[ -n "$(git -C "$anchor_root" status --porcelain --untracked-files=no)" ]]; then
-  echo "[agent-sync-anchor] anchor repo is dirty; refuse to reset: $anchor_root" >&2
-  exit 1
+  dirty_stash_message="acp-anchor-sync-$(date -u +%Y%m%dT%H%M%SZ)"
+  git -C "$anchor_root" stash push --message "$dirty_stash_message" >/dev/null
+  if [[ -n "$(git -C "$anchor_root" status --porcelain --untracked-files=no)" ]]; then
+    echo "[agent-sync-anchor] anchor repo is dirty; refuse to reset: $anchor_root" >&2
+    exit 1
+  fi
+  dirty_state_stashed="yes"
 fi
 
 default_ref="${remote_name}/${default_branch}"
@@ -126,3 +133,7 @@ printf 'ANCHOR_ROOT=%s\n' "$anchor_root"
 printf 'REMOTE=%s\n' "$remote_name"
 printf 'DEFAULT_BRANCH=%s\n' "$default_branch"
 printf 'ORIGIN_URL=%s\n' "$origin_url"
+printf 'DIRTY_STATE_STASHED=%s\n' "$dirty_state_stashed"
+if [[ "$dirty_state_stashed" == "yes" ]]; then
+  printf 'DIRTY_STASH_MESSAGE=%s\n' "$dirty_stash_message"
+fi
