@@ -1153,6 +1153,21 @@ completed_workers() {
   printf '%s\n' "$completed_workers_cache"
 }
 
+reconciled_marker_matches_run() {
+  local run_dir="${1:?run dir required}"
+  local marker_file="${run_dir}/reconciled.ok"
+  local run_env="${run_dir}/run.env"
+  local marker_started_at=""
+  local run_started_at=""
+
+  [[ -f "${marker_file}" && -f "${run_env}" ]] || return 1
+
+  marker_started_at="$(awk -F= '/^STARTED_AT=/{print $2}' "${marker_file}" 2>/dev/null | tr -d '"' | tail -n 1 || true)"
+  run_started_at="$(awk -F= '/^STARTED_AT=/{print $2}' "${run_env}" 2>/dev/null | tr -d '"' | tail -n 1 || true)"
+
+  [[ -n "${marker_started_at}" && -n "${run_started_at}" && "${marker_started_at}" == "${run_started_at}" ]]
+}
+
 ensure_completed_workers_cache() {
   local dir session issue_id status_line status
   if [[ "$completed_workers_cache_loaded" == "yes" ]]; then
@@ -1163,7 +1178,9 @@ ensure_completed_workers_cache() {
     [[ -d "$dir" ]] || continue
     session="${dir##*/}"
     session_matches_prefix "$session" || continue
-    [[ -f "$dir/reconciled.ok" ]] && continue
+    if reconciled_marker_matches_run "$dir"; then
+      continue
+    fi
     if [[ "$session" == "${issue_prefix}"* ]]; then
       issue_id="$(issue_id_from_session "$session" || true)"
       if [[ -n "${issue_id}" ]] && pending_issue_launch_active "${issue_id}"; then

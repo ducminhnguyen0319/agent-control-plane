@@ -202,6 +202,8 @@ set +a
 
 result_outcome=""
 result_action=""
+run_started_at="${STARTED_AT:-}"
+expected_run_started_at="${ACP_EXPECTED_RUN_STARTED_AT:-${F_LOSNING_EXPECTED_RUN_STARTED_AT:-}}"
 result_file_candidate="${run_dir}/result.env"
 if [[ ! -f "$result_file_candidate" && -n "${RESULT_FILE:-}" && -f "${RESULT_FILE:-}" ]]; then
   result_file_candidate="${RESULT_FILE}"
@@ -213,6 +215,14 @@ if [[ -f "$result_file_candidate" ]]; then
   set +a
   result_outcome="${OUTCOME:-}"
   result_action="${ACTION:-}"
+fi
+
+if [[ -n "${expected_run_started_at}" && "${expected_run_started_at}" != "${run_started_at}" ]]; then
+  printf 'STATUS=STALE-RUN-SKIPPED\n'
+  printf 'SESSION=%s\n' "$session"
+  printf 'EXPECTED_STARTED_AT=%s\n' "${expected_run_started_at}"
+  printf 'ACTUAL_STARTED_AT=%s\n' "${run_started_at}"
+  exit 0
 fi
 
 issue_summary_outcome=""
@@ -844,8 +854,15 @@ require_transition() {
 }
 
 mark_reconciled() {
+  local reconciled_at tmp_file
   if [[ -d "$run_dir" ]]; then
-    touch "${run_dir}/reconciled.ok"
+    reconciled_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    tmp_file="${run_dir}/reconciled.ok.tmp.$$"
+    {
+      printf 'STARTED_AT=%s\n' "${run_started_at}"
+      printf 'RECONCILED_AT=%s\n' "${reconciled_at}"
+    } >"${tmp_file}"
+    mv "${tmp_file}" "${run_dir}/reconciled.ok"
   fi
 }
 

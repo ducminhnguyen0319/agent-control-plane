@@ -256,7 +256,7 @@ fi
 
 reconcile_snippet=""
 if [[ -n "$reconcile_command" ]]; then
-  printf -v delayed_reconcile_q '%q' "sleep 2; $reconcile_command"
+  printf -v delayed_reconcile_q '%q' "export ACP_EXPECTED_RUN_STARTED_AT=${started_at_q}; export F_LOSNING_EXPECTED_RUN_STARTED_AT=${started_at_q}; sleep 2; $reconcile_command"
   reconcile_snippet="nohup bash -lc ${delayed_reconcile_q} >> ${output_q} 2>&1 </dev/null &"
 fi
 
