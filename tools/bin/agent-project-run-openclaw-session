@@ -1027,10 +1027,9 @@ while true; do
   break
 done
 recover_literal_runtime_artifacts
+infer_result_from_output
+synthesize_comment_artifact_from_output
 if [[ "\${status}" -eq 0 ]]; then
-  # Infer result.env from output if agent didn't create one
-  infer_result_from_output
-  synthesize_comment_artifact_from_output
   write_state succeeded "0" ""
 else
   if [[ -z "\${failure_reason}" ]]; then

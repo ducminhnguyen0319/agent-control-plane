@@ -8,14 +8,7 @@ REAL_SHELL_LIB="${FLOW_ROOT}/tools/bin/flow-shell-lib.sh"
 REAL_RESIDENT_LIB="${FLOW_ROOT}/tools/bin/flow-resident-worker-lib.sh"
 
 tmpdir="$(mktemp -d)"
-cleanup() {
-  if [[ -n "${controller_pid:-}" ]]; then
-    kill "${controller_pid}" >/dev/null 2>&1 || true
-    wait "${controller_pid}" >/dev/null 2>&1 || true
-  fi
-  rm -rf "$tmpdir"
-}
-trap cleanup EXIT
+trap 'rm -rf "$tmpdir"' EXIT
 
 skill_root="$tmpdir/skill"
 hooks_dir="$skill_root/hooks"
@@ -25,10 +18,9 @@ profile_registry_root="$tmpdir/profile-registry"
 profile_dir="$profile_registry_root/demo"
 shim_dir="$tmpdir/shim"
 capture_file="$tmpdir/capture.log"
-state_root="$tmpdir/agent/state"
-lane_key="issue-lane-recurring-general-openclaw-safe"
+labels_log="$tmpdir/labels.log"
 
-mkdir -p "$hooks_dir" "$bin_dir" "$assets_dir" "$profile_dir" "$shim_dir" "$state_root/resident-workers/issues/440"
+mkdir -p "$hooks_dir" "$bin_dir" "$assets_dir" "$profile_dir" "$shim_dir"
 cp "$REAL_HOOKS" "$hooks_dir/heartbeat-hooks.sh"
 cp "$REAL_CONFIG_LIB" "$bin_dir/flow-config-lib.sh"
 cp "$REAL_SHELL_LIB" "$bin_dir/flow-shell-lib.sh"
@@ -47,7 +39,7 @@ runtime:
   worktree_root: "$tmpdir/worktrees"
   agent_repo_root: "$tmpdir/repo"
   runs_root: "$tmpdir/agent/runs"
-  state_root: "$state_root"
+  state_root: "$tmpdir/agent/state"
   retained_repo_root: "$tmpdir/repo"
   vscode_workspace_file: "$tmpdir/demo.code-workspace"
 execution:
@@ -88,37 +80,31 @@ set -euo pipefail
 printf '%s\n' "$*" >"${TEST_CAPTURE_FILE:?}"
 printf 'LAUNCH_MODE=detached\n'
 EOF
-chmod +x "$bin_dir/agent-project-detached-launch"
 
-cat >"$bin_dir/start-resident-issue-loop.sh" <<'EOF'
+cat >"$bin_dir/agent-github-update-labels" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-sleep 30
+printf '%s\n' "$*" >>"${TEST_LABELS_LOG:?}"
 EOF
-chmod +x "$bin_dir/start-resident-issue-loop.sh"
 
-"$bin_dir/start-resident-issue-loop.sh" &
-controller_pid="$!"
-cat >"$state_root/resident-workers/issues/440/controller.env" <<EOF
-ISSUE_ID=440
-CONTROLLER_PID=${controller_pid}
-CONTROLLER_STATE=waiting-worker
-ACTIVE_RESIDENT_WORKER_KEY=${lane_key}
-EOF
+chmod +x "$bin_dir/agent-project-detached-launch" "$bin_dir/agent-github-update-labels"
 
 PATH="$shim_dir:$PATH" \
 ACP_PROJECT_ID="demo" \
 ACP_PROFILE_REGISTRY_ROOT="$profile_registry_root" \
 TEST_CAPTURE_FILE="$capture_file" \
+TEST_LABELS_LOG="$labels_log" \
 bash -c '
   set -euo pipefail
   source "'"$hooks_dir"'/heartbeat-hooks.sh"
-  heartbeat_start_issue_worker 441 >/dev/null
+  heartbeat_start_issue_worker 440 >/dev/null
 '
 
-test ! -f "$capture_file"
-queue_file="$state_root/resident-workers/issue-queue/pending/issue-441.env"
-test -f "$queue_file"
-grep -q '^ISSUE_ID=441$' "$queue_file"
+grep -q 'start-resident-issue-loop.sh 440' "$capture_file"
+if [[ -s "$labels_log" ]]; then
+  echo "recurring launch should not update labels during heartbeat dispatch" >&2
+  cat "$labels_log" >&2
+  exit 1
+fi
 
-echo "heartbeat hooks enqueue resident issue for live lane controller test passed"
+echo "heartbeat hooks recurring launch avoids premature running label test passed"

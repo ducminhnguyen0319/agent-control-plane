@@ -144,6 +144,7 @@ flow_print_dir() {
 resolve_flow_skill_dir() {
   local script_path="${1:-}"
   local candidate=""
+  local search_dir=""
   local skill_name=""
 
   for candidate in \
@@ -158,13 +159,18 @@ resolve_flow_skill_dir() {
   done
 
   if [[ -n "${script_path}" ]]; then
-    candidate="$(
-      cd "$(dirname "${script_path}")/../.." 2>/dev/null && pwd -P
-    )" || candidate=""
-    if flow_is_skill_root "${candidate}"; then
-      printf '%s\n' "${candidate}"
-      return 0
-    fi
+    search_dir="$(
+      cd "$(dirname "${script_path}")" 2>/dev/null && pwd -P
+    )" || search_dir=""
+    while [[ -n "${search_dir}" && "${search_dir}" != "/" ]]; do
+      if flow_is_skill_root "${search_dir}"; then
+        printf '%s\n' "${search_dir}"
+        return 0
+      fi
+      candidate="$(dirname "${search_dir}")"
+      [[ "${candidate}" != "${search_dir}" ]] || break
+      search_dir="${candidate}"
+    done
   fi
 
   if [[ -n "${SHARED_AGENT_HOME:-}" ]]; then

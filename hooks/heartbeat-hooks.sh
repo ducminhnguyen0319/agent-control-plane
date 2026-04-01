@@ -497,15 +497,6 @@ heartbeat_start_issue_worker() {
   else
     "${DETACHED_LAUNCH_BIN}" --pending-key "issue-${issue_id}" "issue-${issue_id}" "${FLOW_TOOLS_DIR}/start-issue-worker.sh" "$issue_id"
   fi
-  # Mark recurring/keep-open issues as running to prevent infinite re-dispatch
-  if [[ "$(heartbeat_issue_is_recurring "${issue_id}")" == "yes" ]]; then
-    bash "${FLOW_TOOLS_DIR}/agent-github-update-labels" --repo-slug "$REPO_SLUG" --number "$issue_id" --add agent-running >/dev/null 2>&1 || true
-  fi
-}
-
-heartbeat_mark_issue_not_running() {
-  local issue_id="${1:?issue id required}"
-  bash "${FLOW_TOOLS_DIR}/agent-github-update-labels" --repo-slug "$REPO_SLUG" --number "$issue_id" --remove agent-running >/dev/null 2>&1 || true
 }
 
 heartbeat_mark_pr_running() {
