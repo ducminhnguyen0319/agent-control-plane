@@ -37,6 +37,7 @@ keep_agent="false"
 openclaw_model="${ACP_OPENCLAW_MODEL:-${F_LOSNING_OPENCLAW_MODEL:-openrouter/qwen/qwen3.6-plus-preview:free}}"
 openclaw_thinking="${ACP_OPENCLAW_THINKING:-${F_LOSNING_OPENCLAW_THINKING:-low}}"
 openclaw_timeout_seconds="${ACP_OPENCLAW_TIMEOUT_SECONDS:-${F_LOSNING_OPENCLAW_TIMEOUT_SECONDS:-900}}"
+openclaw_progress_heartbeat_seconds="${ACP_OPENCLAW_PROGRESS_HEARTBEAT_SECONDS:-${F_LOSNING_OPENCLAW_PROGRESS_HEARTBEAT_SECONDS:-30}}"
 provided_openclaw_agent_id=""
 provided_openclaw_session_id=""
 provided_openclaw_agent_dir=""
@@ -89,6 +90,10 @@ esac
 
 case "$openclaw_timeout_seconds" in
   ''|*[!0-9]*) echo "--openclaw-timeout-seconds must be numeric" >&2; exit 1 ;;
+esac
+case "$openclaw_progress_heartbeat_seconds" in
+  ''|*[!0-9]*) echo "OpenClaw progress heartbeat seconds must be numeric" >&2; exit 1 ;;
+  0) echo "OpenClaw progress heartbeat seconds must be greater than zero" >&2; exit 1 ;;
 esac
 
 if ! command -v openclaw >/dev/null 2>&1; then
@@ -154,6 +159,7 @@ printf -v openclaw_session_id_q '%q' "$openclaw_session_id"
 printf -v openclaw_model_q '%q' "$openclaw_model"
 printf -v openclaw_thinking_q '%q' "$openclaw_thinking"
 printf -v openclaw_timeout_q '%q' "$openclaw_timeout_seconds"
+printf -v openclaw_progress_heartbeat_q '%q' "$openclaw_progress_heartbeat_seconds"
 printf -v keep_agent_q '%q' "$keep_agent"
 
 {
@@ -180,6 +186,7 @@ printf -v keep_agent_q '%q' "$keep_agent"
   printf 'OPENCLAW_MODEL=%s\n' "$openclaw_model_q"
   printf 'OPENCLAW_THINKING=%s\n' "$openclaw_thinking_q"
   printf 'OPENCLAW_TIMEOUT_SECONDS=%s\n' "$openclaw_timeout_q"
+  printf 'OPENCLAW_PROGRESS_HEARTBEAT_SECONDS=%s\n' "$openclaw_progress_heartbeat_q"
   printf 'OPENCLAW_KEEP_AGENT=%s\n' "$keep_agent_q"
 } >"$meta_file"
 
@@ -292,6 +299,7 @@ openclaw_session_id=${openclaw_session_id_q}
 openclaw_model=${openclaw_model_q}
 openclaw_bin=${openclaw_bin_q}
 openclaw_timeout=${openclaw_timeout_q}
+openclaw_progress_heartbeat_seconds=${openclaw_progress_heartbeat_q}
 openclaw_thinking=${openclaw_thinking_q}
 keep_agent=${keep_agent_q}
 openclaw_add_log="\${sandbox_run_dir}/openclaw-agents-add.log"
@@ -361,6 +369,7 @@ IDENTITY.md
 USER.md
 HEARTBEAT.md
 BOOTSTRAP.md
+AGENTS.md
 .agent-session.env
 \$ACP_RUN_DIR
 \$AGENT_PROJECT_RUN_DIR
@@ -811,7 +820,7 @@ PY
 }
 
 run_openclaw_agent_command() {
-  python3 - "\${output_file}" "\${openclaw_timeout}" "\${openclaw_bin}" "\${openclaw_agent_id}" "\${openclaw_session_id}" "\${openclaw_thinking}" "\${prompt_file_path}" <<'PY'
+  python3 - "\${output_file}" "\${runner_state_file}" "\${openclaw_timeout}" "\${openclaw_progress_heartbeat_seconds}" "\${openclaw_bin}" "\${openclaw_agent_id}" "\${openclaw_session_id}" "\${openclaw_thinking}" "\${prompt_file_path}" <<'PY'
 import os
 import re
 import selectors
@@ -820,7 +829,7 @@ import subprocess
 import sys
 import time
 
-output_path, timeout_seconds_raw, openclaw_bin, agent_id, session_id, thinking, prompt_path = sys.argv[1:8]
+output_path, runner_state_path, timeout_seconds_raw, heartbeat_seconds_raw, openclaw_bin, agent_id, session_id, thinking, prompt_path = sys.argv[1:10]
 
 with open(prompt_path, "r", encoding="utf-8") as handle:
     prompt = handle.read()
@@ -843,7 +852,10 @@ cmd = [
 ]
 
 timeout_seconds = float(timeout_seconds_raw)
+heartbeat_seconds = max(float(heartbeat_seconds_raw), 1.0)
 hard_deadline = time.monotonic() + timeout_seconds + 15.0
+started_at = time.monotonic()
+next_heartbeat = time.monotonic() + heartbeat_seconds
 terminal_patterns = [
     re.compile(r"Config was last written by a newer OpenClaw", re.I),
     re.compile(r"invalid api key|authentication failed|unauthorized|provider api key|login required|please authenticate|api_key_invalid", re.I),
@@ -856,6 +868,25 @@ proc = None
 sel = selectors.DefaultSelector()
 matched_terminal_error = False
 tail = ""
+
+def write_running_heartbeat() -> None:
+    updated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    tmp_path = f"{runner_state_path}.tmp.{os.getpid()}"
+    with open(tmp_path, "w", encoding="utf-8") as handle:
+        handle.write("RUNNER_STATE=running\n")
+        handle.write(f"THREAD_ID={sh_quote(session_id)}\n")
+        handle.write("ATTEMPT=1\n")
+        handle.write("RESUME_COUNT=0\n")
+        handle.write("LAST_EXIT_CODE=''\n")
+        handle.write("LAST_FAILURE_REASON=''\n")
+        handle.write("LAST_TRIGGER_REASON=''\n")
+        handle.write("AUTH_WAIT_STARTED_AT=''\n")
+        handle.write("LAST_AUTH_FINGERPRINT=''\n")
+        handle.write(f"UPDATED_AT={sh_quote(updated_at)}\n")
+    os.replace(tmp_path, runner_state_path)
+
+def sh_quote(value: str) -> str:
+    return "'" + value.replace("'", "'\"'\"'") + "'"
 
 def terminate_process_group(process: subprocess.Popen) -> None:
     try:
@@ -896,6 +927,11 @@ with open(output_path, "ab", buffering=0) as log_handle:
 
         events = sel.select(timeout=0.2)
         if not events:
+            if proc.poll() is None and time.monotonic() >= next_heartbeat:
+                elapsed = int(time.monotonic() - started_at)
+                write_running_heartbeat()
+                log_handle.write(f"[openclaw] heartbeat waiting-for-agent-output elapsed={elapsed}s\n".encode("utf-8"))
+                next_heartbeat = time.monotonic() + heartbeat_seconds
             if proc.poll() is not None:
                 break
             continue
@@ -908,6 +944,7 @@ with open(output_path, "ab", buffering=0) as log_handle:
             log_handle.write(chunk)
             text = chunk.decode("utf-8", errors="replace")
             tail = (tail + text)[-8192:]
+            next_heartbeat = time.monotonic() + heartbeat_seconds
 
             if not matched_terminal_error and any(pattern.search(tail) for pattern in terminal_patterns):
                 matched_terminal_error = True
