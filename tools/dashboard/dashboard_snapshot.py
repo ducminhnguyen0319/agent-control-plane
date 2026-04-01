@@ -225,6 +225,20 @@ def collect_runs(runs_root: Path) -> list[dict[str, Any]]:
     return runs
 
 
+def controller_is_stale(env: dict[str, str], controller_path: Path) -> bool:
+    """A controller is stale if it claims to be running but its PID is dead or its
+    UPDATED_AT file mtime is older than 10 minutes."""
+    if env.get("CONTROLLER_STATE", "") in {"stopped", ""}:
+        return False
+    if not pid_alive(env.get("CONTROLLER_PID", "")):
+        return True
+    try:
+        file_age = datetime.now(timezone.utc).timestamp() - controller_path.stat().st_mtime
+        return file_age > 600
+    except Exception:
+        return False
+
+
 def collect_resident_controllers(state_root: Path) -> list[dict[str, Any]]:
     controllers_root = state_root / "resident-workers" / "issues"
     if not controllers_root.is_dir():
@@ -240,6 +254,7 @@ def collect_resident_controllers(state_root: Path) -> list[dict[str, Any]]:
                 "session": env.get("SESSION", ""),
                 "controller_pid": controller_pid,
                 "controller_live": pid_alive(controller_pid),
+                "controller_stale": controller_is_stale(env, path),
                 "mode": env.get("CONTROLLER_MODE", ""),
                 "loop_count": safe_int(env.get("CONTROLLER_LOOP_COUNT")),
                 "state": env.get("CONTROLLER_STATE", ""),
@@ -346,6 +361,32 @@ def collect_scheduled_issues(state_root: Path) -> list[dict[str, Any]]:
     return items
 
 
+def collect_issue_retries(state_root: Path) -> list[dict[str, Any]]:
+    """Collect retry/backoff state for issues tracked by agent-project-retry-state."""
+    retries_root = state_root / "retries" / "issues"
+    if not retries_root.is_dir():
+        return []
+
+    now_epoch = int(datetime.now(timezone.utc).timestamp())
+    items: list[dict[str, Any]] = []
+    for path in sorted(retries_root.glob("*.env"), key=lambda item: item.stat().st_mtime, reverse=True):
+        env = read_env_file(path)
+        next_attempt_epoch = safe_int(env.get("NEXT_ATTEMPT_EPOCH"))
+        items.append(
+            {
+                "issue_id": path.stem,
+                "attempts": safe_int(env.get("ATTEMPTS")) or 0,
+                "next_attempt_epoch": next_attempt_epoch,
+                "next_attempt_at": env.get("NEXT_ATTEMPT_AT", ""),
+                "last_reason": env.get("LAST_REASON", ""),
+                "updated_at": env.get("UPDATED_AT", "") or file_mtime_iso(path),
+                "ready": not bool(next_attempt_epoch and next_attempt_epoch > now_epoch),
+                "state_file": str(path),
+            }
+        )
+    return items
+
+
 def collect_issue_queue(state_root: Path) -> dict[str, list[dict[str, Any]]]:
     queue_root = state_root / "resident-workers" / "issue-queue"
     pending_root = queue_root / "pending"
@@ -387,6 +428,7 @@ def build_profile_snapshot(profile_id: str, registry_root: Path) -> dict[str, An
     resident_workers = collect_resident_workers(state_root)
     cooldowns = collect_provider_cooldowns(state_root)
     scheduled = collect_scheduled_issues(state_root)
+    retries = collect_issue_retries(state_root)
     queue = collect_issue_queue(state_root)
 
     return {
@@ -422,10 +464,12 @@ def build_profile_snapshot(profile_id: str, registry_root: Path) -> dict[str, An
             ),
             "resident_controllers": len(controllers),
             "live_resident_controllers": sum(1 for item in controllers if item["state"] != "stopped" and item["controller_live"]),
+            "stale_resident_controllers": sum(1 for item in controllers if item.get("controller_stale", False)),
             "resident_workers": len(resident_workers),
             "queued_issues": len(queue["pending"]),
             "claimed_issues": len(queue["claims"]),
             "provider_cooldowns": sum(1 for item in cooldowns if item["active"]),
+            "active_retries": sum(1 for item in retries if not item.get("ready", True)),
             "scheduled_issues": len(scheduled),
         },
         "runs": runs,
@@ -433,6 +477,7 @@ def build_profile_snapshot(profile_id: str, registry_root: Path) -> dict[str, An
         "resident_workers": resident_workers,
         "provider_cooldowns": cooldowns,
         "scheduled_issues": scheduled,
+        "issue_retries": retries,
         "issue_queue": queue,
     }
 

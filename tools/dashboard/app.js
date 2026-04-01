@@ -45,7 +45,7 @@ function renderResult(row) {
 
 function renderControllerState(row) {
   const state = row.state || "n/a";
-  const stale = state !== "stopped" && row.controller_live === false;
+  const stale = row.controller_stale === true || (state !== "stopped" && row.controller_live === false);
   const label = stale ? `${state} (stale)` : state;
   return `<span class="status-pill ${statusClass(stale ? "stale" : state)}">${label}</span>`;
 }
@@ -123,7 +123,9 @@ function renderProfile(profile) {
     ["Reported", profile.counts.reported_runs],
     ["Blocked", profile.counts.blocked_runs],
     ["Live controllers", profile.counts.live_resident_controllers],
+    ["Stale controllers", profile.counts.stale_resident_controllers],
     ["Provider cooldowns", profile.counts.provider_cooldowns],
+    ["Issue retries", profile.counts.active_retries],
     ["Queued issues", profile.counts.queued_issues],
     ["Scheduled", profile.counts.scheduled_issues],
   ]
@@ -163,6 +165,18 @@ function renderProfile(profile) {
     ],
     profile.resident_controllers,
     "No resident controllers recorded for this profile.",
+  );
+
+  const retryTable = renderTable(
+    [
+      { label: "Issue", key: "issue_id" },
+      { label: "Status", render: (row) => `<span class="status-pill ${row.ready ? "" : "waiting-provider"}">${row.ready ? "ready" : "retrying"}</span>` },
+      { label: "Reason", render: (row) => row.last_reason || "n/a" },
+      { label: "Attempts", key: "attempts" },
+      { label: "Next attempt", render: (row) => row.next_attempt_at ? `${relativeTime(row.next_attempt_at)}<div class="muted">${row.next_attempt_at}</div>` : "n/a" },
+    ],
+    profile.issue_retries || [],
+    "No issue retries recorded.",
   );
 
   const workerTable = renderTable(
@@ -233,8 +247,12 @@ function renderProfile(profile) {
         </section>
         <section class="panel">
           <h3>Resident Controllers</h3>
-          <p class="panel-subtitle">Includes provider wait and failover telemetry.</p>
+          <p class="panel-subtitle">Includes provider wait and failover telemetry. Stale controllers show a warning.</p>
           ${controllerTable}
+        </section>
+        <section class="panel half">
+          <h3>Issue Retries</h3>
+          ${retryTable}
         </section>
         <section class="panel">
           <h3>Resident Worker Metadata</h3>
