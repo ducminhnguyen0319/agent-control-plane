@@ -87,6 +87,25 @@ if [[ "$status" == "UNKNOWN" && -f "$output_file" ]]; then
   fi
 fi
 
+if [[ "$status" == "UNKNOWN" && -n "$runner_state" ]]; then
+  case "$runner_state" in
+    running|waiting-auth-refresh|switching-account)
+      # Tmux session is gone and runner never reached a terminal state.
+      # This detects crashes where the worker process died before updating
+      # runner.env or writing an exit marker.
+      # Check BEFORE stale result.env to avoid false SUCCEEDED when a prior
+      # cycle's result.env happens to exist.
+      status="FAILED"
+      if [[ -z "$failure_reason" ]]; then
+        failure_reason="runner-aborted-before-completion"
+      fi
+      if [[ -z "$exit_code" && -n "$last_exit_code" ]]; then
+        exit_code="$last_exit_code"
+      fi
+      ;;
+  esac
+fi
+
 if [[ "$status" == "UNKNOWN" && -f "$result_file" ]]; then
   # A worker that managed to persist result.env already completed its contract,
   # even if the tmux session disappeared before the exit marker was flushed.
@@ -99,20 +118,6 @@ if [[ "$status" == "UNKNOWN" && -f "$output_file" ]]; then
     status="FAILED"
     failure_reason="usage-limit"
   fi
-fi
-
-if [[ "$status" == "UNKNOWN" && -n "$runner_state" ]]; then
-  case "$runner_state" in
-    running|waiting-auth-refresh|switching-account)
-      status="FAILED"
-      if [[ -z "$failure_reason" ]]; then
-        failure_reason="runner-aborted-before-completion"
-      fi
-      if [[ -z "$exit_code" && -n "$last_exit_code" ]]; then
-        exit_code="$last_exit_code"
-      fi
-      ;;
-  esac
 fi
 
 printf 'SESSION=%s\n' "$session"
