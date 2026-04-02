@@ -75,6 +75,13 @@ OUTCOME=implemented
 ACTION=host-publish-issue-pr
 EOF
 
+cat >"$run_dir/issue-comment.md" <<'EOF'
+# Host rate limit blocker
+
+Issue #1 work is ready locally, but GitHub core API currently hit rate limit 0/5000 and resets at 2026-04-02 09:20:43 CEST.
+I cannot continue comment issue, open PR, merge PR, or delete remote branch until then.
+EOF
+
 cat >"$state_root/resident-workers/issues/1/controller.env" <<'EOF'
 ISSUE_ID=1
 SESSION=demo-issue-1
@@ -145,5 +152,9 @@ grep -q '"live_resident_controllers": 0' <<<"$snapshot"
 grep -q '"controller_live": false' <<<"$snapshot"
 grep -q '"result_kind": "implemented"' <<<"$snapshot"
 grep -q '"result_label": "Implemented"' <<<"$snapshot"
+grep -q '"alert_count": 1' <<<"$snapshot"
+grep -q '"kind": "github-core-rate-limit"' <<<"$snapshot"
+grep -q '"title": "GitHub core API rate limit blocks host actions"' <<<"$snapshot"
+grep -q '"reset_at": "2026-04-02 09:20:43 CEST"' <<<"$snapshot"
 
 echo "render dashboard snapshot test passed"

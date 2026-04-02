@@ -230,6 +230,49 @@ button:hover {
   font-size: 14px;
 }
 
+.alert-list {
+  display: grid;
+  gap: 12px;
+}
+
+.alert-card {
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--panel-strong);
+}
+
+.alert-card.warn {
+  border-color: #e7c76d;
+  background: #fff6dd;
+}
+
+.alert-card h4 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.alert-card p {
+  margin: 10px 0 0;
+  line-height: 1.5;
+}
+
+.alert-header {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.alert-meta {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .table-wrap {
   overflow-x: auto;
 }

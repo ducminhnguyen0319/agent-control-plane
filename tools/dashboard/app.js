@@ -2,6 +2,8 @@ const refreshButton = document.querySelector("#refresh-button");
 const generatedAtNode = document.querySelector("#generated-at");
 const overviewNode = document.querySelector("#overview");
 const profilesNode = document.querySelector("#profiles");
+const seenAlertIds = new Set();
+let notificationPermissionRequested = false;
 
 function relativeTime(input) {
   if (!input) return "n/a";
@@ -61,9 +63,10 @@ function renderOverview(snapshot) {
       acc.controllers += profile.counts.live_resident_controllers;
       acc.cooldowns += profile.counts.provider_cooldowns;
       acc.queue += profile.counts.queued_issues;
+      acc.alerts += profile.counts.alerts || 0;
       return acc;
     },
-    { activeRuns: 0, runningRuns: 0, implementedRuns: 0, reportedRuns: 0, blockedRuns: 0, controllers: 0, cooldowns: 0, queue: 0 },
+    { activeRuns: 0, runningRuns: 0, implementedRuns: 0, reportedRuns: 0, blockedRuns: 0, controllers: 0, cooldowns: 0, queue: 0, alerts: 0 },
   );
 
   overviewNode.innerHTML = [
@@ -75,6 +78,7 @@ function renderOverview(snapshot) {
     ["Blocked", totals.blockedRuns],
     ["Live Controllers", totals.controllers],
     ["Provider Cooldowns", totals.cooldowns],
+    ["Alerts", totals.alerts],
     ["Queued Issues", totals.queue],
   ]
     .map(
@@ -104,6 +108,36 @@ function renderTable(columns, rows, emptyMessage = "No data right now.") {
   return `<div class="table-wrap"><table><thead><tr>${headers}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
+function renderAlerts(alerts) {
+  if (!alerts.length) {
+    return `<div class="empty-state">No active alerts for this profile.</div>`;
+  }
+  return `
+    <div class="alert-list">
+      ${alerts
+        .map(
+          (alert) => `
+            <article class="alert-card ${statusClass(alert.severity || "warn")}">
+              <div class="alert-header">
+                <div>
+                  <h4>${alert.title}</h4>
+                  <div class="muted mono">${alert.session || "n/a"} · ${alert.task_kind || "task"} ${alert.task_id || ""}</div>
+                </div>
+                <span class="badge warn">${alert.kind}</span>
+              </div>
+              <p>${alert.message}</p>
+              <div class="alert-meta">
+                <span>${alert.reset_at ? `Reset: ${alert.reset_at}` : "Reset: n/a"}</span>
+                <span>${alert.updated_at ? `${relativeTime(alert.updated_at)} · ${alert.updated_at}` : "updated n/a"}</span>
+              </div>
+            </article>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
 function renderProfile(profile) {
   const providerBadges = [
     profile.coding_worker ? `<span class="badge good">${profile.coding_worker}</span>` : "",
@@ -125,6 +159,7 @@ function renderProfile(profile) {
     ["Live controllers", profile.counts.live_resident_controllers],
     ["Stale controllers", profile.counts.stale_resident_controllers],
     ["Provider cooldowns", profile.counts.provider_cooldowns],
+    ["Alerts", profile.counts.alerts || 0],
     ["Issue retries", profile.counts.active_retries],
     ["Queued issues", profile.counts.queued_issues],
     ["Scheduled", profile.counts.scheduled_issues],
@@ -241,6 +276,11 @@ function renderProfile(profile) {
       <section class="overview">${summaryCards}</section>
       <section class="profile-grid">
         <section class="panel">
+          <h3>Host Alerts</h3>
+          <p class="panel-subtitle">High-signal operational blockers surfaced from active run logs and comment artifacts.</p>
+          ${renderAlerts(profile.alerts || [])}
+        </section>
+        <section class="panel">
           <h3>Active Runs</h3>
           <p class="panel-subtitle">Lifecycle shows technical session completion. Result shows what the run achieved: implemented, reported, or blocked.</p>
           ${runsTable}
@@ -275,6 +315,35 @@ function renderProfile(profile) {
   `;
 }
 
+async function maybeNotifyAlerts(snapshot) {
+  const alerts = (snapshot.alerts || []).filter((alert) => alert && alert.id);
+  if (!alerts.length || typeof window.Notification === "undefined") return;
+
+  if (window.Notification.permission === "default" && !notificationPermissionRequested) {
+    notificationPermissionRequested = true;
+    try {
+      await window.Notification.requestPermission();
+    } catch (_error) {
+      return;
+    }
+  }
+
+  if (window.Notification.permission !== "granted") return;
+
+  for (const alert of alerts) {
+    if (seenAlertIds.has(alert.id)) continue;
+    seenAlertIds.add(alert.id);
+    const bodyParts = [];
+    if (alert.session) bodyParts.push(alert.session);
+    if (alert.reset_at) bodyParts.push(`reset ${alert.reset_at}`);
+    if (alert.message) bodyParts.push(alert.message);
+    new window.Notification(alert.title || "ACP alert", {
+      body: bodyParts.join(" · ").slice(0, 240),
+      tag: alert.id,
+    });
+  }
+}
+
 async function loadSnapshot() {
   refreshButton.disabled = true;
   try {
@@ -286,6 +355,7 @@ async function loadSnapshot() {
     generatedAtNode.textContent = `Snapshot: ${snapshot.generated_at}`;
     renderOverview(snapshot);
     profilesNode.innerHTML = snapshot.profiles.map(renderProfile).join("");
+    await maybeNotifyAlerts(snapshot);
   } catch (error) {
     generatedAtNode.textContent = `Snapshot load failed: ${error.message}`;
     profilesNode.innerHTML = `<article class="profile"><div class="empty-state">${error.message}</div></article>`;

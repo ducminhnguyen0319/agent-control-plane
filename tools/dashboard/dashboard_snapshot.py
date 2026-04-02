@@ -143,6 +143,19 @@ def file_mtime_iso(path: Path) -> str:
     return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def read_tail_text(path: Path, max_bytes: int = 65536) -> str:
+    if not path.is_file():
+        return ""
+    try:
+        with path.open("rb") as handle:
+            size = path.stat().st_size
+            if size > max_bytes:
+                handle.seek(size - max_bytes)
+            return handle.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
 def classify_run_result(status: str, outcome: str, failure_reason: str) -> tuple[str, str]:
     normalized_status = (status or "").strip().upper()
     normalized_outcome = (outcome or "").strip()
@@ -165,6 +178,59 @@ def classify_run_result(status: str, outcome: str, failure_reason: str) -> tuple
             return ("completed", normalized_outcome)
         return ("completed", "Completed")
     return ("unknown", normalized_status or "Unknown")
+
+
+GITHUB_RATE_LIMIT_PATTERNS = [
+    re.compile(
+        r"GitHub core API[^\n]*?rate limit[^\n]*(?:reset(?:s| into)?(?: at)?\s+(?P<reset>[^.\n]+))?",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"gh:\s*API rate limit exceeded[^\n]*(?:reset(?:s| into)?(?: at)?\s+(?P<reset>[^.\n]+))?",
+        re.IGNORECASE,
+    ),
+]
+
+
+def summarize_whitespace(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def extract_github_rate_limit_alert(run_dir: Path, run: dict[str, Any]) -> dict[str, Any] | None:
+    candidate_files = [
+        run_dir / "issue-comment.md",
+        run_dir / "pr-comment.md",
+        run_dir / f"{run['session']}.log",
+    ]
+    for path in candidate_files:
+        text = read_tail_text(path)
+        if not text:
+            continue
+        for pattern in GITHUB_RATE_LIMIT_PATTERNS:
+            match = pattern.search(text)
+            if not match:
+                continue
+            summary = summarize_whitespace(match.group(0))
+            reset_match = re.search(r"reset(?:s| into)?(?: at)?\s+([^.\n]+)", summary, re.IGNORECASE)
+            reset_at = summarize_whitespace((reset_match.group(1) if reset_match else "") or match.groupdict().get("reset") or "")
+            if not summary:
+                summary = "GitHub core API rate limit is blocking host-side actions."
+            if reset_at and reset_at not in summary:
+                summary = f"{summary} Reset: {reset_at}."
+            return {
+                "id": f"github-core-rate-limit:{run['session']}:{reset_at or path.name}",
+                "kind": "github-core-rate-limit",
+                "severity": "warn",
+                "title": "GitHub core API rate limit blocks host actions",
+                "message": summary,
+                "session": run.get("session", ""),
+                "task_kind": run.get("task_kind", ""),
+                "task_id": run.get("task_id", ""),
+                "reset_at": reset_at,
+                "updated_at": run.get("updated_at", "") or file_mtime_iso(path),
+                "source_file": str(path),
+            }
+    return None
 
 
 def collect_runs(runs_root: Path) -> list[dict[str, Any]]:
@@ -221,6 +287,8 @@ def collect_runs(runs_root: Path) -> list[dict[str, Any]]:
             "provider_pool_name": run_env.get("ACTIVE_PROVIDER_POOL_NAME", ""),
             "run_dir": str(run_dir),
         }
+        alert = extract_github_rate_limit_alert(run_dir, item)
+        item["alerts"] = [alert] if alert else []
         runs.append(item)
     return runs
 
@@ -430,6 +498,7 @@ def build_profile_snapshot(profile_id: str, registry_root: Path) -> dict[str, An
     scheduled = collect_scheduled_issues(state_root)
     retries = collect_issue_retries(state_root)
     queue = collect_issue_queue(state_root)
+    alerts = [alert for run in runs for alert in run.get("alerts", [])]
 
     return {
         "id": profile_id,
@@ -471,8 +540,10 @@ def build_profile_snapshot(profile_id: str, registry_root: Path) -> dict[str, An
             "provider_cooldowns": sum(1 for item in cooldowns if item["active"]),
             "active_retries": sum(1 for item in retries if not item.get("ready", True)),
             "scheduled_issues": len(scheduled),
+            "alerts": len(alerts),
         },
         "runs": runs,
+        "alerts": alerts,
         "resident_controllers": controllers,
         "resident_workers": resident_workers,
         "provider_cooldowns": cooldowns,
@@ -485,11 +556,14 @@ def build_profile_snapshot(profile_id: str, registry_root: Path) -> dict[str, An
 def build_snapshot() -> dict[str, Any]:
     registry_root = profile_registry_root()
     profiles = [build_profile_snapshot(profile_id, registry_root) for profile_id in list_profile_ids(registry_root)]
+    alerts = [alert for profile in profiles for alert in profile.get("alerts", [])]
     return {
         "generated_at": utc_now_iso(),
         "flow_skill_dir": str(ROOT_DIR),
         "profile_registry_root": str(registry_root),
         "profile_count": len(profiles),
+        "alert_count": len(alerts),
+        "alerts": alerts,
         "profiles": profiles,
     }
 
