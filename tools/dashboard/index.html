@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
     <title>ACP Worker Dashboard</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
@@ -20,7 +21,10 @@
           </p>
         </div>
         <div class="hero-actions">
-          <button id="refresh-button" type="button">Refresh now</button>
+          <div class="hero-controls">
+            <button id="theme-toggle" type="button" aria-label="Toggle dark mode">Dark mode</button>
+            <button id="refresh-button" type="button">Refresh now</button>
+          </div>
           <div class="meta">
             <div>Auto refresh: <strong>5s</strong></div>
             <div id="generated-at">Loading snapshot...</div>

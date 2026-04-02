@@ -12,6 +12,56 @@
   --danger: #b42318;
   --danger-soft: #fdd8d2;
   --shadow: 0 18px 50px rgba(25, 33, 38, 0.08);
+  --button-bg: var(--ink);
+  --button-ink: #ffffff;
+  --button-hover: #0f1720;
+  --hero-bg: rgba(255, 253, 247, 0.92);
+  --profile-bg: rgba(255, 253, 247, 0.94);
+  --body-gradient-top: rgba(15, 118, 110, 0.08);
+  --body-gradient-bottom: #faf7ef;
+  --theme-toggle-bg: var(--panel);
+  --theme-toggle-ink: var(--ink);
+  --theme-toggle-line: var(--line);
+  --theme-toggle-hover: var(--panel-strong);
+  --reported-soft: #dbeafe;
+  --reported-ink: #1d4ed8;
+  --implemented-soft: #dcfce7;
+  --implemented-ink: #166534;
+  --blocked-soft: #fef3c7;
+  --blocked-ink: #92400e;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0d1418;
+  --panel: #142026;
+  --panel-strong: #1a2a31;
+  --ink: #ebf1f3;
+  --muted: #9ab0bb;
+  --line: #2a3c44;
+  --accent: #5ad4c7;
+  --accent-soft: #183d3a;
+  --warn: #f4c35f;
+  --warn-soft: #4d3a12;
+  --danger: #ff8a80;
+  --danger-soft: #4a2220;
+  --shadow: 0 24px 60px rgba(0, 0, 0, 0.32);
+  --button-bg: #ebf1f3;
+  --button-ink: #0d1418;
+  --button-hover: #d7e2e6;
+  --hero-bg: rgba(20, 32, 38, 0.92);
+  --profile-bg: rgba(20, 32, 38, 0.94);
+  --body-gradient-top: rgba(90, 212, 199, 0.12);
+  --body-gradient-bottom: #10181d;
+  --theme-toggle-bg: #1d2d35;
+  --theme-toggle-ink: #ebf1f3;
+  --theme-toggle-line: #35505b;
+  --theme-toggle-hover: #23363f;
+  --reported-soft: #1b3552;
+  --reported-ink: #9fc8ff;
+  --implemented-soft: #173a2b;
+  --implemented-ink: #85ddb1;
+  --blocked-soft: #4a3711;
+  --blocked-ink: #f4c35f;
 }
 
 * {
@@ -22,8 +72,8 @@ body {
   margin: 0;
   font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
   background:
-    radial-gradient(circle at top right, rgba(15, 118, 110, 0.08), transparent 34%),
-    linear-gradient(180deg, #faf7ef 0%, var(--bg) 100%);
+    radial-gradient(circle at top right, var(--body-gradient-top), transparent 34%),
+    linear-gradient(180deg, var(--body-gradient-bottom) 0%, var(--bg) 100%);
   color: var(--ink);
 }
 
@@ -41,7 +91,7 @@ body {
   padding: 24px;
   border: 1px solid var(--line);
   border-radius: 28px;
-  background: rgba(255, 253, 247, 0.92);
+  background: var(--hero-bg);
   box-shadow: var(--shadow);
 }
 
@@ -75,19 +125,42 @@ body {
   align-items: flex-end;
 }
 
+.hero-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 button {
   appearance: none;
   border: 0;
   border-radius: 999px;
   padding: 12px 18px;
   font: inherit;
-  background: var(--ink);
-  color: white;
+  background: var(--button-bg);
+  color: var(--button-ink);
   cursor: pointer;
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease, transform 140ms ease;
 }
 
 button:hover {
-  background: #0f1720;
+  background: var(--button-hover);
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+#theme-toggle {
+  background: var(--theme-toggle-bg);
+  color: var(--theme-toggle-ink);
+  border: 1px solid var(--theme-toggle-line);
+}
+
+#theme-toggle:hover {
+  background: var(--theme-toggle-hover);
 }
 
 .meta {
@@ -135,7 +208,7 @@ button:hover {
   padding: 22px;
   border-radius: 28px;
   border: 1px solid var(--line);
-  background: rgba(255, 253, 247, 0.94);
+  background: var(--profile-bg);
   box-shadow: var(--shadow);
 }
 
@@ -183,12 +256,12 @@ button:hover {
 
 .badge.good {
   background: var(--accent-soft);
-  color: #0d5a54;
+  color: var(--accent);
 }
 
 .badge.warn {
   background: var(--warn-soft);
-  color: #855500;
+  color: var(--warn);
 }
 
 .badge.danger {
@@ -243,8 +316,8 @@ button:hover {
 }
 
 .alert-card.warn {
-  border-color: #e7c76d;
-  background: #fff6dd;
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+  background: color-mix(in srgb, var(--warn-soft) 82%, var(--panel) 18%);
 }
 
 .alert-card h4 {
@@ -323,7 +396,7 @@ th {
 .status-pill.launching,
 .status-pill.reconciling {
   background: var(--accent-soft);
-  color: #0d5a54;
+  color: var(--accent);
 }
 
 .status-pill.waiting-provider,
@@ -332,7 +405,7 @@ th {
 .status-pill.idle,
 .status-pill.sleeping {
   background: var(--warn-soft);
-  color: #855500;
+  color: var(--warn);
 }
 
 .status-pill.FAILED,
@@ -343,19 +416,19 @@ th {
 }
 
 .status-pill.implemented {
-  background: #dcfce7;
-  color: #166534;
+  background: var(--implemented-soft);
+  color: var(--implemented-ink);
 }
 
 .status-pill.reported,
 .status-pill.completed {
-  background: #dbeafe;
-  color: #1d4ed8;
+  background: var(--reported-soft);
+  color: var(--reported-ink);
 }
 
 .status-pill.blocked {
-  background: #fef3c7;
-  color: #92400e;
+  background: var(--blocked-soft);
+  color: var(--blocked-ink);
 }
 
 .status-pill.failed,
@@ -366,7 +439,7 @@ th {
 
 .status-pill.running {
   background: var(--accent-soft);
-  color: #0d5a54;
+  color: var(--accent);
 }
 
 .empty-state {
@@ -385,6 +458,10 @@ th {
     align-items: flex-start;
     justify-content: flex-start;
     text-align: left;
+  }
+
+  .hero-controls {
+    justify-content: flex-start;
   }
 
   .panel.half,

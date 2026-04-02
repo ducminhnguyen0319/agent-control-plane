@@ -29,7 +29,8 @@ print(os.path.dirname(os.path.realpath(sys.argv[1])))
 PY
 )"
 
-tmpdir="$(mktemp -d)"
+tmpdir="/tmp/acp-dashboard-demo"
+rm -rf "${tmpdir}"
 server_pid=""
 controller_pid=""
 port="$(

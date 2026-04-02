@@ -1,9 +1,56 @@
 const refreshButton = document.querySelector("#refresh-button");
+const themeToggleButton = document.querySelector("#theme-toggle");
 const generatedAtNode = document.querySelector("#generated-at");
 const overviewNode = document.querySelector("#overview");
 const profilesNode = document.querySelector("#profiles");
 const seenAlertIds = new Set();
 let notificationPermissionRequested = false;
+const THEME_STORAGE_KEY = "acp-dashboard-theme";
+
+function systemPrefersDark() {
+  return typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+function currentThemePreference() {
+  try {
+    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+    if (stored === "light" || stored === "dark") return stored;
+  } catch (_error) {
+    // Ignore storage access issues and fall back to system preference.
+  }
+  return systemPrefersDark() ? "dark" : "light";
+}
+
+function updateThemeToggleLabel(theme) {
+  if (!themeToggleButton) return;
+  const nextTheme = theme === "dark" ? "light" : "dark";
+  const label = nextTheme === "dark" ? "Dark mode" : "Light mode";
+  themeToggleButton.textContent = label;
+  themeToggleButton.setAttribute("aria-label", `Switch to ${label.toLowerCase()}`);
+}
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  updateThemeToggleLabel(theme);
+}
+
+function persistTheme(theme) {
+  try {
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+  } catch (_error) {
+    // Ignore storage access issues.
+  }
+}
+
+function initializeTheme() {
+  applyTheme(currentThemePreference());
+  if (!themeToggleButton) return;
+  themeToggleButton.addEventListener("click", () => {
+    const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    applyTheme(nextTheme);
+    persistTheme(nextTheme);
+  });
+}
 
 function relativeTime(input) {
   if (!input) return "n/a";
@@ -456,6 +503,7 @@ refreshButton.addEventListener("click", () => {
   void loadSnapshot();
 });
 
+initializeTheme();
 void loadSnapshot();
 window.setInterval(() => {
   void loadSnapshot();
