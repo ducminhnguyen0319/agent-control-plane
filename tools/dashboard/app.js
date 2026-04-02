@@ -314,6 +314,16 @@ function renderProfile(profile) {
     "No pending leased issues.",
   );
 
+  const claimsTable = renderTable(
+    [
+      { label: "Issue", key: "issue_id" },
+      { label: "Session", render: (row) => row.session ? `<div class="mono">${row.session}</div>` : "n/a" },
+      { label: "Updated", render: (row) => row.updated_at ? `${relativeTime(row.updated_at)}<div class="muted">${row.updated_at}</div>` : "n/a" },
+    ],
+    profile.issue_queue.claims || [],
+    "No claimed issues.",
+  );
+
   const codexRotationPanel =
     profile.coding_worker === "codex"
       ? `
@@ -383,6 +393,10 @@ function renderProfile(profile) {
         <section class="panel half">
           <h3>Pending Issue Queue</h3>
           ${queueTable}
+        </section>
+        <section class="panel half">
+          <h3>Claimed Issues</h3>
+          ${claimsTable}
         </section>
       </section>
     </article>
