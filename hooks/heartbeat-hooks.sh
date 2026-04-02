@@ -20,10 +20,33 @@ AGENT_PR_ISSUE_CAPTURE_REGEX="$(flow_managed_issue_branch_regex "${CONFIG_YAML}"
 AGENT_PR_HANDOFF_LABEL="${AGENT_PR_HANDOFF_LABEL:-agent-handoff}"
 AGENT_EXCLUSIVE_LABEL="${AGENT_EXCLUSIVE_LABEL:-agent-exclusive}"
 CODING_WORKER="${ACP_CODING_WORKER:-${F_LOSNING_CODING_WORKER:-codex}}"
+HEARTBEAT_ISSUE_JSON_CACHE_DIR="${TMPDIR:-/tmp}/heartbeat-issue-json.$$"
+
+heartbeat_issue_json_cached() {
+  local issue_id="${1:?issue id required}"
+  local cache_file=""
+  local issue_json=""
+
+  if [[ ! -d "${HEARTBEAT_ISSUE_JSON_CACHE_DIR}" ]]; then
+    mkdir -p "${HEARTBEAT_ISSUE_JSON_CACHE_DIR}"
+  fi
+
+  cache_file="${HEARTBEAT_ISSUE_JSON_CACHE_DIR}/${issue_id}.json"
+  if [[ -f "${cache_file}" ]]; then
+    cat "${cache_file}"
+    return 0
+  fi
+
+  issue_json="$(flow_github_issue_view_json "$REPO_SLUG" "$issue_id" 2>/dev/null || true)"
+  printf '%s' "${issue_json}" >"${cache_file}"
+  printf '%s\n' "${issue_json}"
+}
 
 heartbeat_open_agent_pr_issue_ids() {
-  flow_github_pr_list_json "$REPO_SLUG" open 100 \
-    | jq --argjson agentPrPrefixes "${AGENT_PR_PREFIXES_JSON}" --arg handoffLabel "${AGENT_PR_HANDOFF_LABEL}" --arg branchIssueRegex "${AGENT_PR_ISSUE_CAPTURE_REGEX}" '
+  local pr_issue_ids_json=""
+  pr_issue_ids_json="$(
+    flow_github_pr_list_json "$REPO_SLUG" open 100 \
+      | jq --argjson agentPrPrefixes "${AGENT_PR_PREFIXES_JSON}" --arg handoffLabel "${AGENT_PR_HANDOFF_LABEL}" --arg branchIssueRegex "${AGENT_PR_ISSUE_CAPTURE_REGEX}" '
         map(
           . as $pr
           | select(
@@ -48,6 +71,13 @@ heartbeat_open_agent_pr_issue_ids() {
         )
         | unique
       '
+  )"
+
+  if [[ -z "${pr_issue_ids_json:-}" ]]; then
+    printf '[]\n'
+  else
+    printf '%s\n' "${pr_issue_ids_json}"
+  fi
 }
 
 heartbeat_list_ready_issue_ids() {
@@ -124,7 +154,7 @@ heartbeat_issue_blocked_recovery_reason() {
     return 0
   fi
 
-  issue_json="$(flow_github_issue_view_json "$REPO_SLUG" "$issue_id" 2>/dev/null || true)"
+  issue_json="$(heartbeat_issue_json_cached "$issue_id")"
   if [[ -z "${issue_json:-}" ]]; then
     return 0
   fi
@@ -248,7 +278,7 @@ heartbeat_issue_is_heavy() {
 heartbeat_issue_is_recurring() {
   local issue_id="${1:?issue id required}"
   local issue_json
-  issue_json="$(flow_github_issue_view_json "$REPO_SLUG" "$issue_id" 2>/dev/null || true)"
+  issue_json="$(heartbeat_issue_json_cached "$issue_id")"
   if [[ -n "$issue_json" ]] && jq -e 'any(.labels[]?; .name == "agent-keep-open")' >/dev/null <<<"$issue_json"; then
     printf 'yes\n'
   else
@@ -259,7 +289,7 @@ heartbeat_issue_is_recurring() {
 heartbeat_issue_schedule_interval_seconds() {
   local issue_id="${1:?issue id required}"
   local issue_json issue_body
-  issue_json="$(flow_github_issue_view_json "$REPO_SLUG" "$issue_id" 2>/dev/null || true)"
+  issue_json="$(heartbeat_issue_json_cached "$issue_id")"
   if [[ -z "$issue_json" ]]; then
     issue_json='{}'
   fi
@@ -282,7 +312,7 @@ EOF
 heartbeat_issue_schedule_token() {
   local issue_id="${1:?issue id required}"
   local issue_json issue_body
-  issue_json="$(flow_github_issue_view_json "$REPO_SLUG" "$issue_id" 2>/dev/null || true)"
+  issue_json="$(heartbeat_issue_json_cached "$issue_id")"
   if [[ -z "$issue_json" ]]; then
     issue_json='{}'
   fi
@@ -321,7 +351,7 @@ heartbeat_issue_is_scheduled() {
 heartbeat_issue_is_exclusive() {
   local issue_id="${1:?issue id required}"
   local issue_json
-  issue_json="$(flow_github_issue_view_json "$REPO_SLUG" "$issue_id" 2>/dev/null || true)"
+  issue_json="$(heartbeat_issue_json_cached "$issue_id")"
   if [[ -n "$issue_json" ]] && jq -e --arg exclusiveLabel "${AGENT_EXCLUSIVE_LABEL}" 'any(.labels[]?; .name == $exclusiveLabel)' >/dev/null <<<"$issue_json"; then
     printf 'yes\n'
   else
@@ -379,7 +409,7 @@ heartbeat_sync_issue_labels() {
   local -a add_args=()
   local -a update_args=()
 
-  issue_json="$(flow_github_issue_view_json "$REPO_SLUG" "$issue_id" 2>/dev/null || true)"
+  issue_json="$(heartbeat_issue_json_cached "$issue_id")"
   if [[ -z "$issue_json" ]]; then
     return 0
   fi

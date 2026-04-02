@@ -57,6 +57,7 @@ CODEX_QUOTA_BIN="$(flow_resolve_codex_quota_bin "${FLOW_SKILL_DIR}")"
 CODEX_QUOTA_MANAGER_SCRIPT="$(flow_resolve_codex_quota_manager_script "${FLOW_SKILL_DIR}")"
 CODEX_QUOTA_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/codex-quota-manager"
 CODEX_QUOTA_FULL_CACHE_FILE="${CODEX_QUOTA_MANAGER_FULL_CACHE_FILE:-${CODEX_QUOTA_CACHE_DIR}/codex-full-quota.json}"
+CODEX_QUOTA_CACHE_MAX_AGE_SECONDS="${CODEX_QUOTA_CACHE_MAX_AGE_SECONDS:-${ACP_CODEX_QUOTA_CACHE_MAX_AGE_SECONDS:-${F_LOSNING_CODEX_QUOTA_CACHE_MAX_AGE_SECONDS:-900}}}"
 DYNAMIC_CONCURRENCY_ENABLED="${ACP_DYNAMIC_CONCURRENCY_ENABLED:-${F_LOSNING_DYNAMIC_CONCURRENCY_ENABLED:-1}}"
 ALLOW_INFRA_CI_BYPASS="${ACP_ALLOW_INFRA_CI_BYPASS:-${F_LOSNING_ALLOW_INFRA_CI_BYPASS:-1}}"
 RETAINED_WORKTREE_AUDIT_ENABLED="${ACP_RETAINED_WORKTREE_AUDIT_ENABLED:-${F_LOSNING_RETAINED_WORKTREE_AUDIT_ENABLED:-1}}"
@@ -299,8 +300,39 @@ EFFECTIVE_QUOTA_POOLS=""
 
   printf 'CODEX_QUOTA_ROTATION_STRATEGY=%s\n' "${CODEX_QUOTA_ROTATION_STRATEGY}"
 
+  local quota_cache_age_seconds=""
+  quota_cache_age_seconds="$(
+    /opt/homebrew/bin/python3 - "${CODEX_QUOTA_FULL_CACHE_FILE}" <<'PY' 2>/dev/null || true
+import os
+import sys
+import time
+
+path = sys.argv[1]
+try:
+    stat = os.stat(path)
+except OSError:
+    sys.exit(1)
+
+age = max(0, int(time.time() - stat.st_mtime))
+print(age)
+PY
+  )"
+
   if [[ ! -f "${CODEX_QUOTA_FULL_CACHE_FILE}" || ! -s "${CODEX_QUOTA_FULL_CACHE_FILE}" ]] || ! command -v jq >/dev/null 2>&1; then
     printf 'DYNAMIC_CONCURRENCY_QUOTA_MODE=failure-driven-static\n'
+    printf 'EFFECTIVE_MAX_CONCURRENT_WORKERS=%s\n' "${EFFECTIVE_MAX_CONCURRENT_WORKERS}"
+    printf 'EFFECTIVE_MAX_CONCURRENT_PR_WORKERS=%s\n' "${EFFECTIVE_MAX_CONCURRENT_PR_WORKERS}"
+    printf 'EFFECTIVE_MAX_RECURRING_ISSUE_WORKERS=%s\n' "${EFFECTIVE_MAX_RECURRING_ISSUE_WORKERS}"
+    printf 'EFFECTIVE_MAX_LAUNCHES_PER_HEARTBEAT=%s\n' "${EFFECTIVE_MAX_LAUNCHES_PER_HEARTBEAT}"
+    return 0
+  fi
+
+  if [[ "${CODEX_QUOTA_CACHE_MAX_AGE_SECONDS}" =~ ^[0-9]+$ ]] \
+    && [[ "${quota_cache_age_seconds:-}" =~ ^[0-9]+$ ]] \
+    && (( quota_cache_age_seconds > CODEX_QUOTA_CACHE_MAX_AGE_SECONDS )); then
+    printf 'DYNAMIC_CONCURRENCY_QUOTA_MODE=failure-driven-static\n'
+    printf 'DYNAMIC_CONCURRENCY_QUOTA_CACHE_STALE=yes\n'
+    printf 'DYNAMIC_CONCURRENCY_QUOTA_CACHE_AGE_SECONDS=%s\n' "${quota_cache_age_seconds}"
     printf 'EFFECTIVE_MAX_CONCURRENT_WORKERS=%s\n' "${EFFECTIVE_MAX_CONCURRENT_WORKERS}"
     printf 'EFFECTIVE_MAX_CONCURRENT_PR_WORKERS=%s\n' "${EFFECTIVE_MAX_CONCURRENT_PR_WORKERS}"
     printf 'EFFECTIVE_MAX_RECURRING_ISSUE_WORKERS=%s\n' "${EFFECTIVE_MAX_RECURRING_ISSUE_WORKERS}"
