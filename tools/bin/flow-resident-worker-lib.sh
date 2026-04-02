@@ -629,6 +629,26 @@ print(int(dt.timestamp()))
 PY
 }
 
+flow_resident_issue_worktree_is_usable() {
+  local worktree="${1:-}"
+  local worktree_realpath="${2:-}"
+  local resolved_worktree=""
+  local resolved_realpath=""
+
+  [[ -n "${worktree}" && -d "${worktree}" ]] || return 1
+  [[ -e "${worktree}/.git" ]] || return 1
+
+  if [[ -n "${worktree_realpath}" ]]; then
+    [[ -d "${worktree_realpath}" && -e "${worktree_realpath}/.git" ]] || return 1
+    resolved_worktree="$(cd "${worktree}" 2>/dev/null && pwd -P || true)"
+    resolved_realpath="$(cd "${worktree_realpath}" 2>/dev/null && pwd -P || true)"
+    [[ -n "${resolved_worktree}" && -n "${resolved_realpath}" ]] || return 1
+    [[ "${resolved_worktree}" == "${resolved_realpath}" ]] || return 1
+  fi
+
+  return 0
+}
+
 flow_resident_issue_can_reuse() {
   local metadata_file="${1:?metadata file required}"
   local max_tasks="${2:-0}"
@@ -648,7 +668,7 @@ flow_resident_issue_can_reuse() {
     source "${metadata_file}"
     set +a
 
-    [[ -n "${WORKTREE:-}" && -d "${WORKTREE:-}" && -e "${WORKTREE:-}/.git" ]] || exit 1
+    flow_resident_issue_worktree_is_usable "${WORKTREE:-}" "${WORKTREE_REALPATH:-}" || exit 1
 
     task_count="${TASK_COUNT:-0}"
     case "${task_count}" in
