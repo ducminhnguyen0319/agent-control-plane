@@ -15,3 +15,4 @@ tools/vendor/codex-quota/README.md
 tools/dashboard/__pycache__/
 tools/tests/__pycache__/
 *.pyc
+tools/templates/legacy/

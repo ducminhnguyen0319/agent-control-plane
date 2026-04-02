@@ -42,6 +42,7 @@ for (const forbiddenPath of [
   "tools/bin/audit-retained-worktrees.sh",
   "tools/bin/check-skill-contracts.sh",
   "bin/audit-issue-routing.sh",
+  "tools/templates/legacy/issue-prompt-template-pre-slim.md",
 ]) {
   if (paths.has(forbiddenPath)) {
     fail(`forbidden tarball path present: ${forbiddenPath}`);
