@@ -97,6 +97,18 @@ LAST_REASON=scope-guard-blocked
 UPDATED_AT=2026-03-15T10:05:00Z
 OUT
     ;;
+  104)
+    cat <<'OUT'
+KIND=issue
+ITEM_ID=104
+ATTEMPTS=2
+NEXT_ATTEMPT_EPOCH=0
+NEXT_ATTEMPT_AT=
+READY=yes
+LAST_REASON=issue-worker-blocked
+UPDATED_AT=2026-03-15T10:06:00Z
+OUT
+    ;;
   *)
     cat <<OUT
 KIND=issue

@@ -839,6 +839,46 @@ Next step:
 EOF
 }
 
+infer_issue_blocked_failure_reason() {
+  local comment_file="${run_dir}/issue-comment.md"
+  local current_reason="${1:-}"
+
+  if [[ -n "${current_reason:-}" && "${current_reason}" != "issue-worker-blocked" ]]; then
+    printf '%s\n' "${current_reason}"
+    return 0
+  fi
+
+  [[ -s "${comment_file}" ]] || {
+    printf 'issue-worker-blocked\n'
+    return 0
+  }
+
+  ISSUE_COMMENT_FILE="${comment_file}" node <<'EOF'
+const fs = require('fs');
+
+const path = process.env.ISSUE_COMMENT_FILE || '';
+const body = path ? fs.readFileSync(path, 'utf8') : '';
+let reason = '';
+
+const explicitFailureReason = body.match(/Failure reason:\s*[\r\n]+-\s*`([^`]+)`/i);
+if (explicitFailureReason) {
+  reason = explicitFailureReason[1];
+} else if (/^# Blocker: Verification requirements were not satisfied$/im.test(body)) {
+  reason = 'verification-guard-blocked';
+} else if (/^# Blocker: (All checklist items already completed|Worker produced no publishable delta)$/im.test(body)) {
+  reason = 'no-publishable-commits';
+} else if (/^# Blocker: Change scope was too broad$/im.test(body)) {
+  reason = 'scope-guard-blocked';
+} else if (/^# Blocker: Provider quota is currently exhausted$/im.test(body)) {
+  reason = 'provider-quota-limit';
+} else if (/^# Blocker:/im.test(body)) {
+  reason = 'issue-worker-blocked';
+}
+
+process.stdout.write(`${reason || 'issue-worker-blocked'}\n`);
+EOF
+}
+
 extract_recovery_worktree_from_publish_output() {
   local publish_out="${1:-}"
   awk -F= '/^RECOVERY_WORKTREE=/{print $2}' <<<"$publish_out" | tail -n 1
@@ -1001,7 +1041,7 @@ case "$status" in
         printf 'ACTION=%s\n' "$result_action"
         exit 0
       fi
-      failure_reason="issue-worker-blocked"
+      failure_reason="$(infer_issue_blocked_failure_reason "${failure_reason:-}")"
       normalize_issue_runner_state "succeeded" "0" ""
       require_transition "issue_schedule_retry" issue_schedule_retry "$failure_reason"
       require_transition "issue_mark_blocked" issue_mark_blocked

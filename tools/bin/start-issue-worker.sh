@@ -386,6 +386,38 @@ const blockerComment = [...(issue.comments || [])]
     ),
   );
 
+const inferCommentReason = (bodyText) => {
+  const body = String(bodyText || '');
+  const marker = 'Failure reason:';
+  const markerIndex = body.search(/Failure reason:/i);
+  if (markerIndex !== -1) {
+    const backtick = String.fromCharCode(96);
+    const tail = body.slice(markerIndex + marker.length);
+    const firstQuoted = tail.split(backtick)[1];
+    if (firstQuoted) {
+      return firstQuoted.trim();
+    }
+  }
+  if (/^# Blocker: Verification requirements were not satisfied$/im.test(body)) {
+    return 'verification-guard-blocked';
+  }
+  if (/^# Blocker: (All checklist items already completed|Worker produced no publishable delta)$/im.test(body)) {
+    return 'no-publishable-commits';
+  }
+  if (/scope guard/i.test(body)) {
+    return 'scope-guard-blocked';
+  }
+  if (/^# Blocker: Provider quota is currently exhausted$/im.test(body)) {
+    return 'provider-quota-limit';
+  }
+  return '';
+};
+
+const effectiveLastReason =
+  lastReason && lastReason !== 'issue-worker-blocked'
+    ? lastReason
+    : inferCommentReason(blockerComment?.body || '') || lastReason;
+
 if (!blockerComment || !blockerComment.body) {
   const fallbackLines = [
     '',
@@ -393,13 +425,13 @@ if (!blockerComment || !blockerComment.body) {
     'This issue is being retried after an `agent-blocked` stop.',
     '- First resolve the prior blocker instead of repeating the same broad implementation path.',
   ];
-  if (lastReason) {
-    fallbackLines.push(`- Last recorded blocker: \`${lastReason}\`.`);
+  if (effectiveLastReason) {
+    fallbackLines.push('- Last recorded blocker: `' + effectiveLastReason + '`.');
   }
   if (attempts > 0) {
-    fallbackLines.push(`- Blocked retries so far: ${attempts}.`);
+    fallbackLines.push('- Blocked retries so far: ' + attempts + '.');
   }
-  if (lastReason === 'scope-guard-blocked' && attempts >= 2) {
+  if (effectiveLastReason === 'scope-guard-blocked' && attempts >= 2) {
     fallbackLines.push(
       '- This issue has already hit the scope guard multiple times. Do not attempt another broad multi-surface patch.',
       `- Either ship one focused slice that stays under the scope guard, or create focused follow-up issues with \`bash "$FLOW_TOOLS_DIR/create-follow-up-issue.sh" --parent ${issue.number} --title "..." --body-file /tmp/follow-up.md\` and supersede the umbrella.`,
@@ -420,21 +452,21 @@ const lines = [
   '- Address the blocker below before attempting a new implementation/publish cycle.',
 ];
 
-if (lastReason) {
-  lines.push(`- Last recorded blocker: \`${lastReason}\`.`);
+if (effectiveLastReason) {
+  lines.push('- Last recorded blocker: `' + effectiveLastReason + '`.');
 }
 if (attempts > 0) {
-  lines.push(`- Blocked retries so far: ${attempts}.`);
+  lines.push('- Blocked retries so far: ' + attempts + '.');
 }
 if (nextAttemptAt) {
-  lines.push(`- Last scheduled retry target was ${nextAttemptAt}.`);
+  lines.push('- Last scheduled retry target was ' + nextAttemptAt + '.');
 }
-if (lastReason === 'scope-guard-blocked') {
+if (effectiveLastReason === 'scope-guard-blocked') {
   lines.push('- Treat this as a scope problem first: narrow to one safe slice or decompose into focused follow-up issues.');
   if (attempts >= 2) {
     lines.push(`- Because the scope guard has already fired multiple times, do not retry the same umbrella patch. Use \`bash "$FLOW_TOOLS_DIR/create-follow-up-issue.sh" --parent ${issue.number} --title "..." --body-file /tmp/follow-up.md\` for the remaining slices, then supersede the umbrella if you covered the full decomposition.`);
   }
-} else if (lastReason === 'verification-guard-blocked') {
+} else if (effectiveLastReason === 'verification-guard-blocked') {
   lines.push('- Add the missing verification or shrink the touched surface before attempting another publish cycle.');
 }
 

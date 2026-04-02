@@ -119,7 +119,7 @@ heartbeat_issue_blocked_recovery_reason() {
 
   retry_out="$("${FLOW_TOOLS_DIR}/retry-state.sh" issue "$issue_id" get 2>/dev/null || true)"
   retry_reason="$(awk -F= '/^LAST_REASON=/{print $2}' <<<"${retry_out:-}")"
-  if [[ -n "${retry_reason:-}" ]]; then
+  if [[ -n "${retry_reason:-}" && "${retry_reason}" != "issue-worker-blocked" ]]; then
     printf '%s\n' "$retry_reason"
     return 0
   fi
@@ -129,7 +129,7 @@ heartbeat_issue_blocked_recovery_reason() {
     return 0
   fi
 
-  ISSUE_JSON="${issue_json}" node <<'EOF'
+  ISSUE_JSON="${issue_json}" RETRY_REASON="${retry_reason:-}" node <<'EOF'
 const issue = JSON.parse(process.env.ISSUE_JSON || '{}');
 const labels = new Set((issue.labels || []).map((label) => label?.name).filter(Boolean));
 
@@ -171,9 +171,11 @@ if (explicitFailureReason) {
   reason = 'comment-blocked-recovery';
 }
 
-if (reason) {
-  process.stdout.write(`${reason}\n`);
-}
+  if (reason) {
+    process.stdout.write(`${reason}\n`);
+  } else if ((process.env.RETRY_REASON || '').trim()) {
+    process.stdout.write(`${String(process.env.RETRY_REASON).trim()}\n`);
+  }
 EOF
 }
 

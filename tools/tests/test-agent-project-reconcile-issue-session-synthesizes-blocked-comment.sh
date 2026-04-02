@@ -129,7 +129,7 @@ out="$(
 grep -q '^STATUS=SUCCEEDED$' <<<"$out"
 grep -q '^OUTCOME=blocked$' <<<"$out"
 grep -q '^ACTION=host-comment-blocker$' <<<"$out"
-grep -q '^FAILURE_REASON=issue-worker-blocked$' <<<"$out"
+grep -q '^FAILURE_REASON=no-publishable-commits$' <<<"$out"
 
 test -f "$run_dir/issue-comment.md"
 grep -q '^# Blocker: Worker produced no publishable delta$' "$run_dir/issue-comment.md"
