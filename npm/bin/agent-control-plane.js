@@ -1341,7 +1341,9 @@ function printSetupDryRunPlan(context, config, plan) {
   }
   console.log(`- GitHub auth step: ${plan.githubAuthAction.status}${plan.githubAuthAction.reason ? ` (${plan.githubAuthAction.reason})` : ""}`);
   console.log(`- runtime start: ${plan.runtimeStartAction.status}${plan.runtimeStartAction.reason ? ` (${plan.runtimeStartAction.reason})` : ""}`);
-  console.log(`- launchd install: ${plan.launchdAction.status}${plan.launchdAction.reason ? ` (${plan.launchdAction.reason})` : ""}`);
+  if (process.platform === "darwin") {
+    console.log(`- launchd install: ${plan.launchdAction.status}${plan.launchdAction.reason ? ` (${plan.launchdAction.reason})` : ""}`);
+  }
 }
 
 function buildSetupResultPayload(params) {
