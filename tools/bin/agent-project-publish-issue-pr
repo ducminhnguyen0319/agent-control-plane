@@ -24,6 +24,7 @@ base_branch="main"
 remote_name="origin"
 dry_run="false"
 keep_open_label=""
+meta_file_from_archive="no"
 shared_agent_home="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 scope_guard_script="${shared_agent_home}/tools/bin/issue-publish-scope-guard.sh"
 localization_guard_script="${shared_agent_home}/tools/bin/issue-publish-localization-guard.sh"
@@ -52,11 +53,16 @@ fi
 find_archived_session_dir() {
   local root="${1:-}"
   local target_session="${2:-}"
+  local latest=""
   [[ -n "$root" && -d "$root" && -n "$target_session" ]] || return 1
 
-  find "$root" -mindepth 1 -maxdepth 1 -type d -name "${target_session}-*" ! -name "${target_session}-stale-*" 2>/dev/null \
-    | sort -r \
-    | head -n 1
+  latest="$(
+    command find "$root" -mindepth 1 -maxdepth 1 -type d -name "${target_session}-*" ! -name "${target_session}-stale-*" 2>/dev/null \
+      | LC_ALL=C sort -r \
+      | sed -n '1p'
+  )"
+  [[ -n "$latest" ]] || return 1
+  printf '%s\n' "$latest"
 }
 
 find_existing_worktree_for_branch() {
@@ -89,6 +95,64 @@ find_existing_worktree_for_branch() {
   return 1
 }
 
+worktree_is_git_repo() {
+  local worktree_path="${1:-}"
+  [[ -n "$worktree_path" && -d "$worktree_path" ]] || return 1
+  git -C "$worktree_path" rev-parse --is-inside-work-tree >/dev/null 2>&1
+}
+
+worktree_matches_publish_target() {
+  local worktree_path="${1:-}"
+  local current_branch=""
+  local current_head=""
+
+  worktree_is_git_repo "$worktree_path" || return 1
+
+  current_head="$(git -C "$worktree_path" rev-parse HEAD 2>/dev/null || true)"
+  current_branch="$(git -C "$worktree_path" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+
+  if [[ -n "${FINAL_HEAD:-}" && -n "$current_head" && "$current_head" == "$FINAL_HEAD" ]]; then
+    return 0
+  fi
+
+  if [[ -n "${BRANCH:-}" && -n "$current_branch" && "$current_branch" == "$BRANCH" ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
+recover_worktree_from_remote_branch() {
+  local repo_root="${1:-}"
+  local worktree_root="${2:-}"
+  local branch_name="${3:-}"
+  local remote="${4:-}"
+  local remote_ref=""
+  local fallback_worktree=""
+
+  [[ -n "$repo_root" && -d "$repo_root" && -n "$worktree_root" && -n "$branch_name" && -n "$remote" ]] || return 1
+
+  remote_ref="refs/remotes/${remote}/${branch_name}"
+  git -C "$repo_root" fetch "$remote" "$branch_name" >/dev/null 2>&1 || true
+  git -C "$repo_root" rev-parse --verify "$remote_ref" >/dev/null 2>&1 || return 1
+
+  fallback_worktree="$(mktemp -d "${worktree_root}/recovery-XXXXXX")"
+  git -C "$repo_root" worktree add --detach "$fallback_worktree" "$remote_ref" >/dev/null 2>&1 || {
+    rm -rf "$fallback_worktree" 2>/dev/null || true
+    return 1
+  }
+  worktree_is_git_repo "$fallback_worktree" || {
+    rm -rf "$fallback_worktree" 2>/dev/null || true
+    return 1
+  }
+  git -C "$fallback_worktree" checkout -B "$branch_name" "$remote_ref" >/dev/null 2>&1 || {
+    rm -rf "$fallback_worktree" 2>/dev/null || true
+    return 1
+  }
+  git -C "$fallback_worktree" branch --set-upstream-to "${remote}/${branch_name}" "$branch_name" >/dev/null 2>&1 || true
+  printf '%s\n' "$fallback_worktree"
+}
+
 status_out="$(
   "${shared_agent_home}/tools/bin/agent-project-worker-status" \
     --runs-root "$runs_root" \
@@ -99,6 +163,7 @@ if [[ -z "$meta_file" || ! -f "$meta_file" ]]; then
   archived_run_dir="$(find_archived_session_dir "$history_root" "$session" || true)"
   if [[ -n "$archived_run_dir" && -f "${archived_run_dir}/run.env" ]]; then
     meta_file="${archived_run_dir}/run.env"
+    meta_file_from_archive="yes"
   fi
 fi
 if [[ -z "$meta_file" || ! -f "$meta_file" ]]; then
@@ -118,10 +183,34 @@ if [[ -z "${ISSUE_ID:-}" || -z "${BRANCH:-}" ]]; then
   exit 1
 fi
 
+resolve_actor_login() {
+  local login=""
+
+  flow_export_github_cli_auth_env "${repo_slug}"
+  login="$(gh api user --jq .login 2>/dev/null || true)"
+  if [[ -z "${login}" ]]; then
+    login="$(
+      gh auth status 2>/dev/null \
+        | sed -n 's/^  ✓ Logged in to github.com account \([^ ]*\) (.*/\1/p' \
+        | head -n 1
+    )"
+  fi
+  if [[ -z "${login}" ]]; then
+    login="${USER:-}"
+  fi
+  printf '%s\n' "${login}"
+}
+
 issue_json="$(flow_github_issue_view_json "$repo_slug" "$ISSUE_ID")"
 issue_title="$(jq -r '.title' <<<"$issue_json")"
 issue_url="$(jq -r '.url' <<<"$issue_json")"
-actor_login="${GITHUB_ACTOR:-$(gh api user --jq .login)}"
+if [[ -z "${issue_title}" || "${issue_title}" == "null" ]]; then
+  issue_title="Issue #${ISSUE_ID}"
+fi
+if [[ -z "${issue_url}" || "${issue_url}" == "null" ]]; then
+  issue_url="${ISSUE_URL:-}"
+fi
+actor_login="${GITHUB_ACTOR:-$(resolve_actor_login)}"
 issue_keep_open="no"
 if [[ -n "$keep_open_label" ]] && jq -e --arg label "$keep_open_label" 'any(.labels[]?; .name == $label)' >/dev/null <<<"$issue_json"; then
   issue_keep_open="yes"
@@ -207,73 +296,93 @@ if [[ -n "$pr_json" ]]; then
   pr_number="$(jq -r '.number' <<<"$pr_json")"
   pr_url="$(jq -r '.url' <<<"$pr_json")"
 else
-  if [[ -z "${WORKTREE:-}" || ! -d "${WORKTREE:-}" ]]; then
-    # Worktree was cleaned up before publish — try branch fallback
-    fallback_worktree=""
-    if [[ -n "${BRANCH:-}" ]]; then
-      # Resolve the baseline repo from the git common dir of the (now missing) worktree
-      local_repo_root="$(flow_resolve_agent_repo_root "${CONFIG_YAML}")"
-      local_worktree_root="$(flow_resolve_worktree_root "${CONFIG_YAML}")"
+  local_repo_root="$(flow_resolve_agent_repo_root "${CONFIG_YAML}")"
+  local_worktree_root="$(flow_resolve_worktree_root "${CONFIG_YAML}")"
+  remote_branch_ref="refs/remotes/${remote_name}/${BRANCH}"
+  existing_worktree=""
+  fallback_worktree=""
+  remote_head=""
+  current_head=""
 
-      recover_branch_from_final_head() {
-        [[ -n "${FINAL_HEAD:-}" ]] || return 1
-        git -C "$local_repo_root" cat-file -e "${FINAL_HEAD}^{commit}" >/dev/null 2>&1 || return 1
-        git -C "$local_repo_root" branch "$BRANCH" "$FINAL_HEAD" >/dev/null 2>&1 || return 1
-        printf 'BRANCH_RECOVERY=from-final-head\n' >&2
-        printf 'RECOVERY_HEAD=%s\n' "$FINAL_HEAD" >&2
-      }
+  if [[ "${meta_file_from_archive}" == "yes" && -n "${WORKTREE:-}" ]]; then
+    printf 'WORKTREE_RECOVERY=ignored-archived-pointer\n' >&2
+    printf 'RECOVERY_WORKTREE=%s\n' "${WORKTREE}" >&2
+    WORKTREE=""
+  fi
 
-      # Check if the branch exists in the baseline repo
-      if ! git -C "$local_repo_root" rev-parse --verify "${BRANCH}" >/dev/null 2>&1; then
-        recover_branch_from_final_head || true
-      fi
-      if git -C "$local_repo_root" rev-parse --verify "${BRANCH}" >/dev/null 2>&1; then
-        git -C "$local_repo_root" worktree prune >/dev/null 2>&1 || true
-        existing_worktree="$(find_existing_worktree_for_branch "$local_repo_root" "$BRANCH" || true)"
-        if [[ -n "$existing_worktree" && ( -f "$existing_worktree/.git" || -d "$existing_worktree/.git" ) ]]; then
-          WORKTREE="$existing_worktree"
-          fallback_worktree="$existing_worktree"
-          printf 'WORKTREE_RECOVERY=reused-existing\n' >&2
-          printf 'RECOVERY_WORKTREE=%s\n' "$existing_worktree" >&2
-        else
-          fallback_worktree="$(mktemp -d "${local_worktree_root}/recovery-XXXXXX")"
-          git -C "$local_repo_root" worktree add "$fallback_worktree" "$BRANCH" 2>/dev/null || true
-          # Validate the worktree is a real git repo, not just an empty directory
-          if [[ -f "$fallback_worktree/.git" || -d "$fallback_worktree/.git" ]]; then
-            WORKTREE="$fallback_worktree"
-            printf 'WORKTREE_RECOVERY=created\n' >&2
-            printf 'RECOVERY_WORKTREE=%s\n' "$fallback_worktree" >&2
-          else
-            rm -rf "$fallback_worktree" 2>/dev/null || true
-            fallback_worktree=""
-          fi
-        fi
-      fi
-      # Check if branch exists on remote
-      if [[ -z "${fallback_worktree}" ]]; then
-        git -C "$local_repo_root" fetch "$remote_name" 2>/dev/null || true
-        if git -C "$local_repo_root" rev-parse --verify "refs/remotes/${remote_name}/${BRANCH}" >/dev/null 2>&1; then
-          fallback_worktree="$(mktemp -d "${local_worktree_root}/recovery-XXXXXX")"
-          git -C "$local_repo_root" worktree add "$fallback_worktree" "refs/remotes/${remote_name}/${BRANCH}" 2>/dev/null || true
-          # Validate the worktree is a real git repo, not just an empty directory
-          if [[ -f "$fallback_worktree/.git" || -d "$fallback_worktree/.git" ]]; then
-            WORKTREE="$fallback_worktree"
-            printf 'WORKTREE_RECOVERY=from-remote\n' >&2
-            printf 'RECOVERY_WORKTREE=%s\n' "$fallback_worktree" >&2
-          else
-            rm -rf "$fallback_worktree" 2>/dev/null || true
-            fallback_worktree=""
-          fi
-        fi
-      fi
-    fi
-    if [[ -z "${WORKTREE:-}" || ! -d "${WORKTREE:-}" ]]; then
-      echo "session $session is missing a publishable worktree (branch ${BRANCH:-unknown} not found locally or on remote ${remote_name})" >&2
-      exit 1
+  if [[ -n "${WORKTREE:-}" ]] && ! worktree_matches_publish_target "${WORKTREE}"; then
+    printf 'WORKTREE_RECOVERY=ignored-stale\n' >&2
+    printf 'RECOVERY_WORKTREE=%s\n' "${WORKTREE}" >&2
+    WORKTREE=""
+  fi
+
+  git -C "$local_repo_root" worktree prune >/dev/null 2>&1 || true
+
+  if [[ -z "${WORKTREE:-}" ]]; then
+    existing_worktree="$(find_existing_worktree_for_branch "$local_repo_root" "$BRANCH" || true)"
+    if [[ -n "$existing_worktree" ]] && worktree_matches_publish_target "$existing_worktree"; then
+      WORKTREE="$existing_worktree"
+      printf 'WORKTREE_RECOVERY=reused-existing\n' >&2
+      printf 'RECOVERY_WORKTREE=%s\n' "$existing_worktree" >&2
     fi
   fi
 
-  git -C "$WORKTREE" fetch "$remote_name" "$base_branch" --prune >/dev/null
+  if [[ -z "${WORKTREE:-}" && "${meta_file_from_archive}" == "yes" ]]; then
+    fallback_worktree="$(recover_worktree_from_remote_branch "$local_repo_root" "$local_worktree_root" "$BRANCH" "$remote_name" || true)"
+    if [[ -n "$fallback_worktree" ]]; then
+      WORKTREE="$fallback_worktree"
+      printf 'WORKTREE_RECOVERY=from-remote\n' >&2
+      printf 'RECOVERY_WORKTREE=%s\n' "$fallback_worktree" >&2
+    fi
+  fi
+
+  if [[ -z "${WORKTREE:-}" ]]; then
+    if ! git -C "$local_repo_root" rev-parse --verify "${BRANCH}" >/dev/null 2>&1; then
+      if [[ -n "${FINAL_HEAD:-}" ]] && git -C "$local_repo_root" cat-file -e "${FINAL_HEAD}^{commit}" >/dev/null 2>&1; then
+        git -C "$local_repo_root" branch -f "$BRANCH" "$FINAL_HEAD" >/dev/null 2>&1 || true
+        printf 'BRANCH_RECOVERY=from-final-head\n' >&2
+        printf 'RECOVERY_HEAD=%s\n' "$FINAL_HEAD" >&2
+      fi
+    fi
+
+    existing_worktree="$(find_existing_worktree_for_branch "$local_repo_root" "$BRANCH" || true)"
+    if [[ -n "$existing_worktree" ]] && worktree_is_git_repo "$existing_worktree"; then
+      WORKTREE="$existing_worktree"
+      printf 'WORKTREE_RECOVERY=reused-existing\n' >&2
+      printf 'RECOVERY_WORKTREE=%s\n' "$existing_worktree" >&2
+    else
+      fallback_worktree="$(mktemp -d "${local_worktree_root}/recovery-XXXXXX")"
+      if git -C "$local_repo_root" worktree add "$fallback_worktree" "$BRANCH" >/dev/null 2>&1 \
+        || git -C "$local_repo_root" worktree add "$fallback_worktree" "$remote_branch_ref" >/dev/null 2>&1; then
+        if worktree_is_git_repo "$fallback_worktree"; then
+          WORKTREE="$fallback_worktree"
+          printf 'WORKTREE_RECOVERY=created\n' >&2
+          printf 'RECOVERY_WORKTREE=%s\n' "$fallback_worktree" >&2
+        else
+          rm -rf "$fallback_worktree" 2>/dev/null || true
+        fi
+      else
+        rm -rf "$fallback_worktree" 2>/dev/null || true
+      fi
+    fi
+  fi
+
+  if [[ -z "${WORKTREE:-}" || ! -d "${WORKTREE:-}" ]]; then
+    echo "session $session is missing a publishable worktree (branch ${BRANCH:-unknown} not found locally or on remote ${remote_name})" >&2
+    exit 1
+  fi
+
+  git -C "$WORKTREE" fetch "$remote_name" "$base_branch" "$BRANCH" --prune >/dev/null 2>&1 || git -C "$WORKTREE" fetch "$remote_name" "$base_branch" --prune >/dev/null 2>&1 || true
+  if git -C "$local_repo_root" rev-parse --verify "${remote_branch_ref}" >/dev/null 2>&1; then
+    remote_head="$(git -C "$local_repo_root" rev-parse "${remote_branch_ref}" 2>/dev/null || true)"
+    current_head="$(git -C "$WORKTREE" rev-parse HEAD 2>/dev/null || true)"
+    if [[ -n "${remote_head}" && "${current_head}" != "${remote_head}" ]]; then
+      git -C "$WORKTREE" checkout -B "$BRANCH" "${remote_branch_ref}" >/dev/null 2>&1 || true
+      git -C "$WORKTREE" branch --set-upstream-to "${remote_name}/${BRANCH}" "$BRANCH" >/dev/null 2>&1 || true
+      printf 'WORKTREE_RECOVERY=aligned-remote\n' >&2
+      printf 'RECOVERY_HEAD=%s\n' "${remote_head}" >&2
+    fi
+  fi
 
   head_sha="$(git -C "$WORKTREE" rev-parse HEAD)"
   ahead_count="$(git -C "$WORKTREE" rev-list --count "${remote_name}/${base_branch}"..HEAD)"

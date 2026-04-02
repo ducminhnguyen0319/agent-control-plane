@@ -18,6 +18,7 @@ Options:
   --max-resume-attempts <count>           Maximum resume attempts after interruption
   --auth-refresh-timeout-seconds <secs>   How long to wait for refreshed auth before failing
   --auth-refresh-poll-seconds <secs>      Poll interval while waiting for refreshed auth
+  --stall-seconds <secs>                  Fail if Codex stops producing output for too long
   --help                                  Show this help
 EOF
 }
@@ -36,6 +37,7 @@ auth_refresh_timeout_seconds="${ACP_CODEX_AUTH_REFRESH_TIMEOUT_SECONDS:-${F_LOSN
 auth_refresh_poll_seconds="${ACP_CODEX_AUTH_REFRESH_POLL_SECONDS:-${F_LOSNING_CODEX_AUTH_REFRESH_POLL_SECONDS:-10}}"
 max_quota_autoswitch_attempts="${ACP_CODEX_MAX_AUTOSWITCH_ATTEMPTS:-${F_LOSNING_CODEX_MAX_AUTOSWITCH_ATTEMPTS:-1}}"
 codex_progress_heartbeat_seconds="${ACP_CODEX_PROGRESS_HEARTBEAT_SECONDS:-${F_LOSNING_CODEX_PROGRESS_HEARTBEAT_SECONDS:-30}}"
+codex_stall_seconds="${ACP_CODEX_STALL_SECONDS:-${F_LOSNING_CODEX_STALL_SECONDS:-300}}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -51,6 +53,7 @@ while [[ $# -gt 0 ]]; do
     --max-resume-attempts) max_resume_attempts="${2:-}"; shift 2 ;;
     --auth-refresh-timeout-seconds) auth_refresh_timeout_seconds="${2:-}"; shift 2 ;;
     --auth-refresh-poll-seconds) auth_refresh_poll_seconds="${2:-}"; shift 2 ;;
+    --stall-seconds) codex_stall_seconds="${2:-}"; shift 2 ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -84,6 +87,9 @@ esac
 case "$codex_progress_heartbeat_seconds" in
   ''|*[!0-9]*) echo "ACP_CODEX_PROGRESS_HEARTBEAT_SECONDS must be numeric" >&2; exit 1 ;;
   0) echo "ACP_CODEX_PROGRESS_HEARTBEAT_SECONDS must be greater than zero" >&2; exit 1 ;;
+esac
+case "$codex_stall_seconds" in
+  ''|*[!0-9]*) echo "ACP_CODEX_STALL_SECONDS must be numeric" >&2; exit 1 ;;
 esac
 
 FLOW_SKILL_DIR="$(resolve_flow_skill_dir "${BASH_SOURCE[0]}")"
@@ -404,15 +410,43 @@ persist_thread_id_from_line() {
   fi
 }
 
+terminate_codex_producer_tree() {
+  local pid="${1:?pid required}"
+  local deadline=""
+
+  if ! kill -0 "$pid" 2>/dev/null; then
+    return 0
+  fi
+
+  pkill -TERM -P "$pid" 2>/dev/null || true
+  kill "$pid" 2>/dev/null || true
+
+  deadline=$(( $(date +%s) + 2 ))
+  while kill -0 "$pid" 2>/dev/null; do
+    if (( $(date +%s) >= deadline )); then
+      break
+    fi
+    sleep 0.1
+  done
+
+  if kill -0 "$pid" 2>/dev/null; then
+    pkill -KILL -P "$pid" 2>/dev/null || true
+    kill -9 "$pid" 2>/dev/null || true
+  fi
+}
+
 stream_codex_exec() {
   local phase="${1:?phase required}"
   local stream_fifo=""
   local producer_pid=""
   local heartbeat_pid=""
+  local progress_file=""
   local line=""
 
   last_attempt_start_size="$(stat -f %z "$output_file" 2>/dev/null || printf '0')"
   last_attempt_started_epoch="$(date +%s)"
+  progress_file="${host_run_dir}/.codex-progress.$$"
+  rm -f "$progress_file"
   stream_fifo="$(mktemp -u "${TMPDIR:-/tmp}/codex-stream.XXXXXX")"
   mkfifo "$stream_fifo"
 
@@ -450,7 +484,7 @@ stream_codex_exec() {
 
   producer_pid="$!"
   (
-    local now elapsed
+    local now elapsed last_progress_epoch idle_for
     while kill -0 "$producer_pid" 2>/dev/null; do
       sleep "$codex_progress_heartbeat_seconds"
       if ! kill -0 "$producer_pid" 2>/dev/null; then
@@ -458,6 +492,27 @@ stream_codex_exec() {
       fi
       now="$(date +%s)"
       elapsed=$((now - last_attempt_started_epoch))
+      if (( codex_stall_seconds > 0 )); then
+        if [[ ! -f "$progress_file" ]]; then
+          if (( elapsed >= codex_stall_seconds )); then
+            write_state "running" ""
+            log_runner "stale-run no-codex-output-before-stall-threshold elapsed=${elapsed}s"
+            terminate_codex_producer_tree "$producer_pid"
+            break
+          fi
+        else
+          last_progress_epoch="$(stat -f %m "$progress_file" 2>/dev/null || printf '0')"
+          if [[ -n "$last_progress_epoch" && "$last_progress_epoch" != "0" ]]; then
+            idle_for=$((now - last_progress_epoch))
+            if (( idle_for >= codex_stall_seconds )); then
+              write_state "running" ""
+              log_runner "stale-run no-codex-progress-before-stall-threshold elapsed=${elapsed}s idle=${idle_for}s"
+              terminate_codex_producer_tree "$producer_pid"
+              break
+            fi
+          fi
+        fi
+      fi
       write_state "running" ""
       log_runner "heartbeat waiting-for-codex-output elapsed=${elapsed}s"
     done
@@ -466,6 +521,7 @@ stream_codex_exec() {
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     printf '%s\n' "$line" | tee -a "$output_file"
+    touch "$progress_file" 2>/dev/null || true
     persist_thread_id_from_line "$line"
   done <"$stream_fifo"
 
@@ -475,6 +531,7 @@ stream_codex_exec() {
   fi
 
   rm -f "$stream_fifo"
+  rm -f "$progress_file"
 
   if wait "$producer_pid"; then
     last_exit_code="0"
@@ -512,6 +569,16 @@ classify_failure_reason() {
   local recent_chunk
 
   recent_chunk="$(tail -n 120 <<<"$chunk")"
+
+  if grep -Eiq 'stale-run no-codex-output-before-stall-threshold|no-codex-output-before-stall-threshold' <<<"$recent_chunk"; then
+    printf 'no-codex-output-before-stall-threshold\n'
+    return 0
+  fi
+
+  if grep -Eiq 'stale-run no-codex-progress-before-stall-threshold|no-codex-progress-before-stall-threshold' <<<"$recent_chunk"; then
+    printf 'no-codex-progress-before-stall-threshold\n'
+    return 0
+  fi
 
   if grep -Eiq "You've hit your usage limit|You have reached your Codex usage limits|visit https://chatgpt.com/codex/settings/usage|Upgrade to Pro|rate limit exceeded|quota exceeded|usage cap (reached|exceeded)|usage quota (reached|exceeded)" <<<"$recent_chunk"; then
     printf 'usage-limit\n'

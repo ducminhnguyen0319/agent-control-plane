@@ -291,6 +291,13 @@ flow_export_github_cli_auth_env() {
     return 0
   fi
 
+  if command -v gh >/dev/null 2>&1; then
+    if env -u GH_TOKEN -u GITHUB_TOKEN gh auth status >/dev/null 2>&1 \
+      || env -u GH_TOKEN -u GITHUB_TOKEN gh api user --jq .login >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
   token="$(flow_git_credential_token_for_repo_slug "${repo_slug}" || true)"
   if [[ -n "${token}" ]]; then
     export GH_TOKEN="${token}"
@@ -300,6 +307,28 @@ flow_export_github_cli_auth_env() {
   if [[ -n "${GITHUB_PERSONAL_ACCESS_TOKEN:-}" ]]; then
     export GH_TOKEN="${GITHUB_PERSONAL_ACCESS_TOKEN}"
   fi
+}
+
+flow_github_graphql_available() {
+  local repo_slug="${1:-}"
+  local remaining=""
+
+  if [[ "${FLOW_GITHUB_GRAPHQL_AVAILABLE_CACHE:-}" == "yes" ]]; then
+    return 0
+  fi
+  if [[ "${FLOW_GITHUB_GRAPHQL_AVAILABLE_CACHE:-}" == "no" ]]; then
+    return 1
+  fi
+
+  flow_export_github_cli_auth_env "${repo_slug}"
+  remaining="$(gh api rate_limit --jq '.resources.graphql.remaining' 2>/dev/null || true)"
+  if [[ "${remaining}" =~ ^[0-9]+$ ]] && (( remaining > 0 )); then
+    FLOW_GITHUB_GRAPHQL_AVAILABLE_CACHE="yes"
+    return 0
+  fi
+
+  FLOW_GITHUB_GRAPHQL_AVAILABLE_CACHE="no"
+  return 1
 }
 
 flow_github_repo_id_cache_var() {
@@ -455,6 +484,22 @@ flow_github_api_repo() {
   return "${status}"
 }
 
+flow_json_or_default() {
+  local raw_value="${1-}"
+  local default_value="${2:-null}"
+
+  if [[ -z "${raw_value}" ]]; then
+    printf '%s\n' "${default_value}"
+    return 0
+  fi
+
+  if jq -e . >/dev/null 2>&1 <<<"${raw_value}"; then
+    printf '%s\n' "${raw_value}"
+  else
+    printf '%s\n' "${default_value}"
+  fi
+}
+
 flow_github_urlencode() {
   local raw_value="${1:-}"
 
@@ -472,15 +517,16 @@ flow_github_issue_view_json() {
   local issue_json=""
   local comment_pages_json=""
 
-  if issue_json="$(gh issue view "${issue_id}" -R "${repo_slug}" --json number,state,title,body,url,labels,comments,createdAt,updatedAt 2>/dev/null)"; then
+  if flow_github_graphql_available "${repo_slug}" \
+    && issue_json="$(gh issue view "${issue_id}" -R "${repo_slug}" --json number,state,title,body,url,labels,comments,createdAt,updatedAt 2>/dev/null)"; then
     printf '%s\n' "${issue_json}"
     return 0
   fi
 
-  issue_json="$(flow_github_api_repo "${repo_slug}" "issues/${issue_id}")" || return 1
-  comment_pages_json="$(
-    flow_github_api_repo "${repo_slug}" "issues/${issue_id}/comments?per_page=100" --paginate --slurp 2>/dev/null || printf '[]\n'
-  )"
+  issue_json="$(flow_github_api_repo "${repo_slug}" "issues/${issue_id}" 2>/dev/null || true)"
+  issue_json="$(flow_json_or_default "${issue_json}" '{}')"
+  comment_pages_json="$(flow_github_api_repo "${repo_slug}" "issues/${issue_id}/comments?per_page=100" --paginate --slurp 2>/dev/null || true)"
+  comment_pages_json="$(flow_json_or_default "${comment_pages_json}" '[]')"
 
   ISSUE_JSON="${issue_json}" COMMENT_PAGES_JSON="${comment_pages_json}" python3 - <<'PY'
 import json
@@ -527,7 +573,8 @@ flow_github_issue_list_json() {
   local issues_json=""
   local per_page="100"
 
-  if issues_json="$(gh issue list -R "${repo_slug}" --state "${state}" --limit "${limit}" --json number,createdAt,updatedAt,title,url,labels 2>/dev/null)"; then
+  if flow_github_graphql_available "${repo_slug}" \
+    && issues_json="$(gh issue list -R "${repo_slug}" --state "${state}" --limit "${limit}" --json number,createdAt,updatedAt,title,url,labels 2>/dev/null)"; then
     printf '%s\n' "${issues_json}"
     return 0
   fi
@@ -536,9 +583,8 @@ flow_github_issue_list_json() {
     per_page="${limit}"
   fi
 
-  issues_json="$(
-    flow_github_api_repo "${repo_slug}" "issues?state=${state}&per_page=${per_page}" --paginate --slurp
-  )" || return 1
+  issues_json="$(flow_github_api_repo "${repo_slug}" "issues?state=${state}&per_page=${per_page}" --paginate --slurp 2>/dev/null || true)"
+  issues_json="$(flow_json_or_default "${issues_json}" '[]')"
 
   ISSUE_PAGES_JSON="${issues_json}" ISSUE_LIMIT="${limit}" python3 - <<'PY'
 import json
@@ -583,16 +629,18 @@ flow_github_pr_view_json() {
   local check_runs_json="{}"
   local status_json="{}"
 
-  if pr_json="$(gh pr view "${pr_number}" -R "${repo_slug}" --json number,title,body,url,headRefName,baseRefName,mergeStateStatus,statusCheckRollup,labels,comments,state,isDraft 2>/dev/null)"; then
+  if flow_github_graphql_available "${repo_slug}" \
+    && pr_json="$(gh pr view "${pr_number}" -R "${repo_slug}" --json number,title,body,url,headRefName,baseRefName,mergeStateStatus,statusCheckRollup,labels,comments,state,isDraft 2>/dev/null)"; then
     printf '%s\n' "${pr_json}"
     return 0
   fi
 
-  pr_json="$(flow_github_api_repo "${repo_slug}" "pulls/${pr_number}")" || return 1
-  issue_json="$(flow_github_api_repo "${repo_slug}" "issues/${pr_number}")" || return 1
-  comment_pages_json="$(
-    flow_github_api_repo "${repo_slug}" "issues/${pr_number}/comments?per_page=100" --paginate --slurp 2>/dev/null || printf '[]\n'
-  )"
+  pr_json="$(flow_github_api_repo "${repo_slug}" "pulls/${pr_number}" 2>/dev/null || true)"
+  pr_json="$(flow_json_or_default "${pr_json}" '{}')"
+  issue_json="$(flow_github_api_repo "${repo_slug}" "issues/${pr_number}" 2>/dev/null || true)"
+  issue_json="$(flow_json_or_default "${issue_json}" '{}')"
+  comment_pages_json="$(flow_github_api_repo "${repo_slug}" "issues/${pr_number}/comments?per_page=100" --paginate --slurp 2>/dev/null || true)"
+  comment_pages_json="$(flow_json_or_default "${comment_pages_json}" '[]')"
   head_sha="$(
     PR_JSON="${pr_json}" python3 - <<'PY'
 import json
@@ -604,12 +652,10 @@ print(head.get("sha") or "")
 PY
   )"
   if [[ -n "${head_sha}" ]]; then
-    check_runs_json="$(
-      flow_github_api_repo "${repo_slug}" "commits/${head_sha}/check-runs?per_page=100" 2>/dev/null || printf '{}\n'
-    )"
-    status_json="$(
-      flow_github_api_repo "${repo_slug}" "commits/${head_sha}/status" 2>/dev/null || printf '{}\n'
-    )"
+    check_runs_json="$(flow_github_api_repo "${repo_slug}" "commits/${head_sha}/check-runs?per_page=100" 2>/dev/null || true)"
+    check_runs_json="$(flow_json_or_default "${check_runs_json}" '{}')"
+    status_json="$(flow_github_api_repo "${repo_slug}" "commits/${head_sha}/status" 2>/dev/null || true)"
+    status_json="$(flow_json_or_default "${status_json}" '{}')"
   fi
 
   PR_JSON="${pr_json}" ISSUE_JSON="${issue_json}" COMMENT_PAGES_JSON="${comment_pages_json}" CHECK_RUNS_JSON="${check_runs_json}" STATUS_JSON="${status_json}" python3 - <<'PY'
@@ -698,7 +744,8 @@ flow_github_pr_list_json() {
   local comment_pages_json=""
   local pr_number=""
 
-  if pr_json="$(gh pr list -R "${repo_slug}" --state "${state}" --limit "${limit}" --json number,title,body,url,headRefName,labels,comments,createdAt,mergedAt,isDraft 2>/dev/null)"; then
+  if flow_github_graphql_available "${repo_slug}" \
+    && pr_json="$(gh pr list -R "${repo_slug}" --state "${state}" --limit "${limit}" --json number,title,body,url,headRefName,labels,comments,createdAt,mergedAt,isDraft 2>/dev/null)"; then
     printf '%s\n' "${pr_json}"
     return 0
   fi
@@ -710,9 +757,8 @@ flow_github_pr_list_json() {
     per_page="${limit}"
   fi
 
-  pull_pages_json="$(
-    flow_github_api_repo "${repo_slug}" "pulls?state=${pulls_state}&per_page=${per_page}" --paginate --slurp
-  )" || return 1
+  pull_pages_json="$(flow_github_api_repo "${repo_slug}" "pulls?state=${pulls_state}&per_page=${per_page}" --paginate --slurp 2>/dev/null || true)"
+  pull_pages_json="$(flow_json_or_default "${pull_pages_json}" '[]')"
 
   selected_prs_json="$(
     PULL_PAGES_JSON="${pull_pages_json}" PR_LIMIT="${limit}" PR_STATE_FILTER="${state}" python3 - <<'PY'
@@ -751,7 +797,7 @@ for pr in pulls:
 
 print(json.dumps(result))
 PY
-  )"
+  )" || selected_prs_json='[]'
 
   item_jsonl_file="$(mktemp)"
   trap 'rm -f "${item_jsonl_file}"' RETURN
@@ -760,10 +806,10 @@ PY
     [[ -n "${current_pr_json}" ]] || continue
     pr_number="$(jq -r '.number // ""' <<<"${current_pr_json}")"
     [[ -n "${pr_number}" ]] || continue
-    issue_json="$(flow_github_api_repo "${repo_slug}" "issues/${pr_number}" 2>/dev/null || printf '{}\n')"
-    comment_pages_json="$(
-      flow_github_api_repo "${repo_slug}" "issues/${pr_number}/comments?per_page=100" --paginate --slurp 2>/dev/null || printf '[]\n'
-    )"
+    issue_json="$(flow_github_api_repo "${repo_slug}" "issues/${pr_number}" 2>/dev/null || true)"
+    issue_json="$(flow_json_or_default "${issue_json}" '{}')"
+    comment_pages_json="$(flow_github_api_repo "${repo_slug}" "issues/${pr_number}/comments?per_page=100" --paginate --slurp 2>/dev/null || true)"
+    comment_pages_json="$(flow_json_or_default "${comment_pages_json}" '[]')"
     PR_JSON="${current_pr_json}" ISSUE_JSON="${issue_json}" COMMENT_PAGES_JSON="${comment_pages_json}" python3 - <<'PY' >>"${item_jsonl_file}"
 import json
 import os
