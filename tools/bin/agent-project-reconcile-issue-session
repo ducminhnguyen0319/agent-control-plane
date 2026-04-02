@@ -332,6 +332,39 @@ normalize_issue_failure_reason() {
   printf '%s\n' "${current_reason}"
 }
 
+issue_runtime_log_file() {
+  if [[ -f "${run_dir}/${session}.log" ]]; then
+    printf '%s\n' "${run_dir}/${session}.log"
+    return 0
+  fi
+
+  find "${run_dir}" -maxdepth 1 -type f -name '*.log' 2>/dev/null | LC_ALL=C sort | tail -n 1
+}
+
+infer_issue_runtime_failure_from_log() {
+  local log_file=""
+
+  log_file="$(issue_runtime_log_file)"
+  [[ -n "${log_file}" && -f "${log_file}" ]] || return 1
+
+  if grep -Eiq 'stale-run no-codex-output-before-stall-threshold|no-codex-output-before-stall-threshold' "${log_file}" 2>/dev/null; then
+    printf 'no-codex-output-before-stall-threshold\n'
+    return 0
+  fi
+
+  if grep -Eiq 'stale-run no-codex-progress-before-stall-threshold|no-codex-progress-before-stall-threshold' "${log_file}" 2>/dev/null; then
+    printf 'no-codex-progress-before-stall-threshold\n'
+    return 0
+  fi
+
+  if grep -Eiq 'Ignoring invalid cwd .* No such file or directory|/tmp is absolute|Custom tool call output is missing' "${log_file}" 2>/dev/null; then
+    printf 'worker-environment-blocked\n'
+    return 0
+  fi
+
+  return 1
+}
+
 normalize_issue_result_contract() {
   [[ "$status" == "SUCCEEDED" ]] || return 0
 
@@ -876,6 +909,21 @@ Next step:
 EOF
       return 0
       ;;
+    worker-environment-blocked)
+      cat <<EOF
+# Blocker: Worker environment failed before a valid result contract was written
+
+This recurring run did not produce a usable ACP result file because the ${worker_name} execution environment failed mid-run.
+
+Why it was blocked:
+- the worker hit a sandbox/worktree runtime failure before it could write \`result.env\`
+- ACP detected the runtime signature from the session log and converted the missing contract into a concrete blocker instead of retrying with a generic \`invalid-result-contract\`
+
+Next step:
+- refresh the worker runtime/worktree and rerun this cycle after the host-side environment issue is resolved
+EOF
+      return 0
+      ;;
   esac
 
   cat <<EOF
@@ -1073,6 +1121,34 @@ case "$status" in
   SUCCEEDED)
     clear_provider_quota_cooldown
     if ! normalize_issue_result_contract; then
+      inferred_failure_reason="$(infer_issue_runtime_failure_from_log || true)"
+      if [[ -n "${inferred_failure_reason}" ]]; then
+        status="FAILED"
+        failure_reason="$(normalize_issue_failure_reason "${inferred_failure_reason}")"
+        issue_result_contract_note="missing-worker-result-recovered-${failure_reason}"
+        result_outcome="blocked"
+        result_action="host-comment-blocker"
+        normalize_issue_runner_state "failed" "${LAST_EXIT_CODE:-}" "${failure_reason}"
+        if [[ ! -s "${run_dir}/issue-comment.md" ]]; then
+          write_issue_comment_artifact "$(build_issue_runtime_blocker_comment "${failure_reason}")" || true
+        fi
+        post_issue_comment_if_present
+        require_transition "issue_schedule_retry" issue_schedule_retry "$failure_reason"
+        require_transition "issue_mark_ready" issue_mark_ready
+        issue_set_reconcile_summary "$status" "$result_outcome" "$result_action" "$failure_reason"
+        cleanup_issue_session
+        notify_issue_reconciled
+        mark_reconciled
+        printf 'STATUS=%s\n' "$status"
+        printf 'ISSUE_ID=%s\n' "$issue_id"
+        printf 'PR_NUMBER=%s\n' "$pr_number"
+        printf 'OUTCOME=%s\n' "$result_outcome"
+        printf 'ACTION=%s\n' "$result_action"
+        printf 'FAILURE_REASON=%s\n' "$failure_reason"
+        printf 'RESULT_CONTRACT_NOTE=%s\n' "$issue_result_contract_note"
+        exit 0
+      fi
+
       status="FAILED"
       failure_reason="invalid-result-contract"
       issue_result_contract_note="invalid-result-contract"
