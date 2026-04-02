@@ -13,6 +13,7 @@ profile_registry_root="$tmpdir/profiles"
 profile_dir="$profile_registry_root/demo"
 capture_dir="$tmpdir/capture"
 sync_script="$tmpdir/sync.sh"
+ensure_sync_script="$tmpdir/ensure-sync.sh"
 runtime_heartbeat_script="$runtime_home/skills/openclaw/agent-control-plane/tools/bin/heartbeat-safe-auto.sh"
 env_file="$profile_dir/runtime.env"
 
@@ -25,6 +26,25 @@ printf 'SYNC_SOURCE=%s\n' "$1" >"${ACP_PROJECT_RUNTIME_CAPTURE_DIR}/sync.log"
 printf 'SYNC_TARGET=%s\n' "$2" >>"${ACP_PROJECT_RUNTIME_CAPTURE_DIR}/sync.log"
 EOF
 chmod +x "$sync_script"
+
+cat >"$ensure_sync_script" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+args="$*"
+source_value=""
+target_value=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --source-home) source_value="${2:-}"; shift 2 ;;
+    --runtime-home) target_value="${2:-}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf 'ENSURE_ARGS=%s\n' "${args}" >"${ACP_PROJECT_RUNTIME_CAPTURE_DIR}/ensure.log"
+[[ -n "${source_value}" ]] && printf 'ENSURE_SOURCE=%s\n' "${source_value}" >>"${ACP_PROJECT_RUNTIME_CAPTURE_DIR}/ensure.log"
+printf 'ENSURE_TARGET=%s\n' "${target_value}" >>"${ACP_PROJECT_RUNTIME_CAPTURE_DIR}/ensure.log"
+EOF
+chmod +x "$ensure_sync_script"
 
 cat >"$runtime_heartbeat_script" <<'EOF'
 #!/usr/bin/env bash
@@ -51,16 +71,35 @@ ACP_PROJECT_RUNTIME_RUNTIME_HOME="$runtime_home" \
 ACP_PROJECT_RUNTIME_PROFILE_REGISTRY_ROOT="$profile_registry_root" \
 ACP_PROJECT_RUNTIME_PROFILE_ID="demo" \
 ACP_PROJECT_RUNTIME_SYNC_SCRIPT="$sync_script" \
+ACP_PROJECT_RUNTIME_ENSURE_SYNC_SCRIPT="$ensure_sync_script" \
 ACP_PROJECT_RUNTIME_HEARTBEAT_SCRIPT="$runtime_heartbeat_script" \
-ACP_PROJECT_RUNTIME_ALWAYS_SYNC=1 \
 ACP_PROJECT_RUNTIME_CAPTURE_DIR="$capture_dir" \
 bash "$BOOTSTRAP_BIN"
 
-grep -q "^SYNC_SOURCE=$tmpdir/source-home$" "$capture_dir/sync.log"
-grep -q "^SYNC_TARGET=$runtime_home$" "$capture_dir/sync.log"
+grep -q '^ENSURE_ARGS=--source-home '"$tmpdir"'/source-home --runtime-home '"$runtime_home"' --quiet$' "$capture_dir/ensure.log"
+grep -q "^ENSURE_SOURCE=$tmpdir/source-home$" "$capture_dir/ensure.log"
+grep -q "^ENSURE_TARGET=$runtime_home$" "$capture_dir/ensure.log"
 grep -q '^PROFILE_ID=demo$' "$capture_dir/heartbeat.log"
 grep -q "^PROFILE_REGISTRY_ROOT=$profile_registry_root$" "$capture_dir/heartbeat.log"
 grep -q "^HOME=$home_dir$" "$capture_dir/heartbeat.log"
 grep -q '^HAS_OPENROUTER_API_KEY=yes$' "$capture_dir/heartbeat.log"
+
+rm -f "$capture_dir/ensure.log" "$capture_dir/heartbeat.log"
+
+ACP_PROJECT_RUNTIME_HOME_DIR="$home_dir" \
+ACP_PROJECT_RUNTIME_RUNTIME_HOME="$runtime_home" \
+ACP_PROJECT_RUNTIME_PROFILE_REGISTRY_ROOT="$profile_registry_root" \
+ACP_PROJECT_RUNTIME_PROFILE_ID="demo" \
+ACP_PROJECT_RUNTIME_SYNC_SCRIPT="$sync_script" \
+ACP_PROJECT_RUNTIME_ENSURE_SYNC_SCRIPT="$ensure_sync_script" \
+ACP_PROJECT_RUNTIME_HEARTBEAT_SCRIPT="$runtime_heartbeat_script" \
+ACP_PROJECT_RUNTIME_CAPTURE_DIR="$capture_dir" \
+bash "$BOOTSTRAP_BIN"
+
+grep -q '^ENSURE_ARGS=--runtime-home '"$runtime_home"' --quiet$' "$capture_dir/ensure.log"
+if grep -q '^ENSURE_SOURCE=' "$capture_dir/ensure.log"; then
+  echo "bootstrap passed unexpected source-home override" >&2
+  exit 1
+fi
 
 echo "project launchd bootstrap test passed"

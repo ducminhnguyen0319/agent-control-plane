@@ -547,14 +547,20 @@ flow_resident_issue_lane_openclaw_agent_id() {
 flow_resident_issue_openclaw_session_id() {
   local config_file="${1:-}"
   local issue_id="${2:?issue id required}"
+  local task_count="${3:-}"
   local adapter_id=""
+  local base_id=""
 
   if [[ -z "${config_file}" ]]; then
     config_file="$(resolve_flow_config_yaml "${BASH_SOURCE[1]:-${BASH_SOURCE[0]}}")"
   fi
 
   adapter_id="$(flow_resolve_adapter_id "${config_file}")"
-  flow_resident_sanitize_id "${adapter_id}-resident-session-issue-${issue_id}"
+  base_id="${adapter_id}-resident-session-issue-${issue_id}"
+  if [[ -n "${task_count}" ]]; then
+    base_id="${base_id}-cycle-${task_count}"
+  fi
+  flow_resident_sanitize_id "${base_id}"
 }
 
 flow_resident_issue_lane_openclaw_session_id() {

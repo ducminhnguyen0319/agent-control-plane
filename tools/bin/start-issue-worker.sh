@@ -642,10 +642,11 @@ open_or_reuse_issue_worktree() {
       RESIDENT_OPENCLAW_CONFIG_PATH="${current_resident_openclaw_config_path}"
       RESIDENT_TASK_COUNT="$(( ${TASK_COUNT:-0} + 1 ))"
       RESIDENT_WORKTREE_REUSED="yes"
-      if [[ "${CODING_WORKER}" == "openclaw" && -n "${previous_issue_id}" && "${previous_issue_id}" != "${current_issue_id}" ]]; then
+      if [[ "${CODING_WORKER}" == "openclaw" ]]; then
         # Keep the resident lane's warm workspace/agent files, but rotate the
-        # OpenClaw conversation thread when switching issues to reduce context drift.
-        RESIDENT_OPENCLAW_SESSION_ID="$(flow_resident_issue_openclaw_session_id "${CONFIG_YAML}" "${current_issue_id}")"
+        # OpenClaw conversation thread every cycle so a new task does not inherit
+        # stale conversational context from the previous one.
+        RESIDENT_OPENCLAW_SESSION_ID="$(flow_resident_issue_openclaw_session_id "${CONFIG_YAML}" "${current_issue_id}" "${RESIDENT_TASK_COUNT}")"
       fi
       if reuse_output="$("${WORKSPACE_DIR}/bin/reuse-issue-worktree.sh" "${WORKTREE}" "${ISSUE_ID}" "${ISSUE_SLUG}" 2>&1)"; then
         WORKTREE_OUT="${reuse_output}"
@@ -653,6 +654,9 @@ open_or_reuse_issue_worktree() {
         printf 'RESIDENT_REUSE_FALLBACK=issue-%s reason=%s\n' "${ISSUE_ID}" "$(printf '%s' "${reuse_output}" | tr '\n' ' ' | sed 's/  */ /g')" >&2
         RESIDENT_TASK_COUNT="1"
         RESIDENT_WORKTREE_REUSED="no"
+        if [[ "${CODING_WORKER}" == "openclaw" ]]; then
+          RESIDENT_OPENCLAW_SESSION_ID="$(flow_resident_issue_openclaw_session_id "${CONFIG_YAML}" "${current_issue_id}" "${RESIDENT_TASK_COUNT}")"
+        fi
         if [[ "$ISSUE_REQUIRES_LOCAL_WORKSPACE_INSTALL" == "yes" ]]; then
           WORKTREE_OUT="$(ACP_WORKTREE_LOCAL_INSTALL=true F_LOSNING_WORKTREE_LOCAL_INSTALL=true "${WORKSPACE_DIR}/bin/new-worktree.sh" "$ISSUE_ID" "$ISSUE_SLUG")"
         else
@@ -662,6 +666,9 @@ open_or_reuse_issue_worktree() {
     else
       RESIDENT_TASK_COUNT="1"
       RESIDENT_WORKTREE_REUSED="no"
+      if [[ "${CODING_WORKER}" == "openclaw" ]]; then
+        RESIDENT_OPENCLAW_SESSION_ID="$(flow_resident_issue_openclaw_session_id "${CONFIG_YAML}" "${current_issue_id}" "${RESIDENT_TASK_COUNT}")"
+      fi
       if [[ "$ISSUE_REQUIRES_LOCAL_WORKSPACE_INSTALL" == "yes" ]]; then
         WORKTREE_OUT="$(ACP_WORKTREE_LOCAL_INSTALL=true F_LOSNING_WORKTREE_LOCAL_INSTALL=true "${WORKSPACE_DIR}/bin/new-worktree.sh" "$ISSUE_ID" "$ISSUE_SLUG")"
       else
