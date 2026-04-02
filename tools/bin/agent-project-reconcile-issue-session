@@ -359,6 +359,16 @@ infer_issue_runtime_failure_from_log() {
     return 0
   fi
 
+  if grep -Eiq 'stale-run no-agent-output-before-stall-threshold|no-agent-output-before-stall-threshold' "${log_file}" 2>/dev/null; then
+    printf 'no-agent-output-before-stall-threshold\n'
+    return 0
+  fi
+
+  if grep -Eiq 'stale-run no-agent-progress-before-stall-threshold|no-agent-progress-before-stall-threshold' "${log_file}" 2>/dev/null; then
+    printf 'no-agent-progress-before-stall-threshold\n'
+    return 0
+  fi
+
   if grep -Eiq 'Ignoring invalid cwd .* No such file or directory|/tmp is absolute|Custom tool call output is missing' "${log_file}" 2>/dev/null; then
     printf 'worker-environment-blocked\n'
     return 0
