@@ -84,6 +84,11 @@ resolve_source_skill_dir() {
   local skill_name=""
   local root="${1:?source home required}"
 
+  if flow_is_skill_root "${root}"; then
+    printf '%s\n' "${root}"
+    return 0
+  fi
+
   for skill_name in "$(flow_canonical_skill_name)" "$(flow_compat_skill_alias)"; do
     [[ -n "${skill_name}" ]] || continue
     candidate="${root}/skills/openclaw/${skill_name}"
@@ -92,11 +97,6 @@ resolve_source_skill_dir() {
       return 0
     fi
   done
-
-  if flow_is_skill_root "${root}"; then
-    printf '%s\n' "${root}"
-    return 0
-  fi
 
   return 1
 }

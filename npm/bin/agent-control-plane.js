@@ -156,7 +156,7 @@ function createExecutionContext(stage) {
 }
 
 function runScriptWithContext(context, scriptRelativePath, forwardedArgs, options = {}) {
-  const scriptPath = path.join(packageRoot, scriptRelativePath);
+  const scriptPath = options.scriptPath || path.join(packageRoot, scriptRelativePath);
   const stdio = options.stdio || "inherit";
   const result = spawnSync("bash", [scriptPath, ...forwardedArgs], {
     stdio,
@@ -175,11 +175,78 @@ function runScriptWithContext(context, scriptRelativePath, forwardedArgs, option
   };
 }
 
+function resolvePersistentSourceHome(context) {
+  if (process.env.ACP_PROJECT_RUNTIME_SOURCE_HOME) {
+    return process.env.ACP_PROJECT_RUNTIME_SOURCE_HOME;
+  }
+  if (fs.existsSync(path.join(packageRoot, ".git"))) {
+    return packageRoot;
+  }
+  return context.runtimeHome;
+}
+
+function runtimeSkillRoot(context) {
+  return path.join(context.runtimeHome, "skills", "openclaw", skillName);
+}
+
+function createRuntimeExecutionContext(context) {
+  const stableSkillRoot = runtimeSkillRoot(context);
+  const persistentSourceHome = resolvePersistentSourceHome(context);
+  const runtimeScriptEnv = {
+    ACP_PROJECT_RUNTIME_SYNC_SCRIPT:
+      context.env.ACP_PROJECT_RUNTIME_SYNC_SCRIPT || path.join(stableSkillRoot, "tools", "bin", "sync-shared-agent-home.sh"),
+    ACP_PROJECT_RUNTIME_ENSURE_SYNC_SCRIPT:
+      context.env.ACP_PROJECT_RUNTIME_ENSURE_SYNC_SCRIPT || path.join(stableSkillRoot, "tools", "bin", "ensure-runtime-sync.sh"),
+    ACP_PROJECT_RUNTIME_BOOTSTRAP_SCRIPT:
+      context.env.ACP_PROJECT_RUNTIME_BOOTSTRAP_SCRIPT || path.join(stableSkillRoot, "tools", "bin", "project-launchd-bootstrap.sh"),
+    ACP_PROJECT_RUNTIME_SUPERVISOR_SCRIPT:
+      context.env.ACP_PROJECT_RUNTIME_SUPERVISOR_SCRIPT || path.join(stableSkillRoot, "tools", "bin", "project-runtime-supervisor.sh"),
+    ACP_PROJECT_RUNTIME_KICK_SCRIPT:
+      context.env.ACP_PROJECT_RUNTIME_KICK_SCRIPT || path.join(stableSkillRoot, "tools", "bin", "kick-scheduler.sh")
+  };
+  return {
+    ...context,
+    stableSkillRoot,
+    persistentSourceHome,
+    env: {
+      ...context.env,
+      SHARED_AGENT_HOME: context.runtimeHome,
+      AGENT_CONTROL_PLANE_ROOT: stableSkillRoot,
+      ACP_ROOT: stableSkillRoot,
+      AGENT_FLOW_SOURCE_ROOT: stableSkillRoot,
+      ACP_PROJECT_INIT_SOURCE_HOME: persistentSourceHome,
+      ACP_PROJECT_RUNTIME_SOURCE_HOME: persistentSourceHome,
+      ACP_DASHBOARD_SOURCE_HOME: persistentSourceHome,
+      ...runtimeScriptEnv
+    }
+  };
+}
+
+function syncRuntimeHome(context, options = {}) {
+  const result = runScriptWithContext(context, "tools/bin/sync-shared-agent-home.sh", [], {
+    stdio: options.stdio || "inherit"
+  });
+  if (result.status !== 0) {
+    throw new Error("failed to sync runtime home before command execution");
+  }
+}
+
 function runCommand(scriptRelativePath, forwardedArgs) {
   const stage = stageSharedHome();
   const context = createExecutionContext(stage);
 
   try {
+    if (scriptRelativePath !== "tools/bin/sync-shared-agent-home.sh") {
+      syncRuntimeHome(context, { stdio: "inherit" });
+      const runtimeContext = createRuntimeExecutionContext(context);
+      const runtimeScriptPath = path.join(runtimeContext.stableSkillRoot, scriptRelativePath);
+      const result = runScriptWithContext(runtimeContext, scriptRelativePath, forwardedArgs, {
+        stdio: "inherit",
+        scriptPath: runtimeScriptPath
+      });
+      return result.status;
+    }
+
     const result = runScriptWithContext(context, scriptRelativePath, forwardedArgs, { stdio: "inherit" });
     return result.status;
   } finally {
@@ -1470,8 +1537,8 @@ async function maybeRunFinalSetupFixups(options, scopedContext, config, currentS
       runtimeStartReason = `doctor-${doctorKv.DOCTOR_STATUS || "not-ok"}`;
     } else {
       actions.push("runtime-start");
-      runSetupStep(scopedContext, "Start the runtime", "tools/bin/project-runtimectl.sh", ["start", "--profile-id", config.profileId]);
-      const runtimeStatusOutput = runSetupStep(scopedContext, "Read back runtime status", "tools/bin/project-runtimectl.sh", ["status", "--profile-id", config.profileId]);
+      runSetupStep(scopedContext, "Start the runtime", "tools/bin/project-runtimectl.sh", ["start", "--profile-id", config.profileId], { useRuntimeCopy: true });
+      const runtimeStatusOutput = runSetupStep(scopedContext, "Read back runtime status", "tools/bin/project-runtimectl.sh", ["status", "--profile-id", config.profileId], { useRuntimeCopy: true });
       runtimeStatusKv = parseKvOutput(runtimeStatusOutput);
       runtimeStartStatus = "ok";
       runtimeStartReason = "";
@@ -1480,7 +1547,7 @@ async function maybeRunFinalSetupFixups(options, scopedContext, config, currentS
 
   if (config.installLaunchd && process.platform === "darwin" && launchdInstallStatus !== "ok" && runtimeStartStatus === "ok") {
     actions.push("launchd-install");
-    runSetupStep(scopedContext, "Install macOS autostart", "tools/bin/install-project-launchd.sh", ["--profile-id", config.profileId]);
+    runSetupStep(scopedContext, "Install macOS autostart", "tools/bin/install-project-launchd.sh", ["--profile-id", config.profileId], { useRuntimeCopy: true });
     launchdInstallStatus = "ok";
     launchdInstallReason = "";
   }
@@ -1603,7 +1670,21 @@ async function collectSetupConfig(options, context) {
 
 function runSetupStep(context, title, scriptRelativePath, args, options = {}) {
   console.log(`\n== ${title} ==`);
-  const result = runScriptWithContext(context, scriptRelativePath, args, { stdio: "pipe", env: options.env, cwd: options.cwd });
+  let executionContext = context;
+  let scriptPath = undefined;
+
+  if (options.useRuntimeCopy) {
+    syncRuntimeHome(context, { stdio: "pipe" });
+    executionContext = createRuntimeExecutionContext(context);
+    scriptPath = path.join(executionContext.stableSkillRoot, scriptRelativePath);
+  }
+
+  const result = runScriptWithContext(executionContext, scriptRelativePath, args, {
+    stdio: "pipe",
+    env: options.env,
+    cwd: options.cwd,
+    scriptPath
+  });
   if (result.status !== 0) {
     printFailureDetails(result);
     throw new Error(`${title} failed`);
@@ -1868,8 +1949,8 @@ async function runSetupFlow(forwardedArgs) {
         runtimeStartReason = "gh-auth-not-ready";
         console.log("runtime start skipped: GitHub CLI is not authenticated yet. Run `gh auth login` and start the runtime afterwards.");
       } else {
-        runSetupStep(scopedContext, "Start the runtime", "tools/bin/project-runtimectl.sh", ["start", "--profile-id", config.profileId]);
-        const runtimeStatusOutput = runSetupStep(scopedContext, "Read back runtime status", "tools/bin/project-runtimectl.sh", ["status", "--profile-id", config.profileId]);
+        runSetupStep(scopedContext, "Start the runtime", "tools/bin/project-runtimectl.sh", ["start", "--profile-id", config.profileId], { useRuntimeCopy: true });
+        const runtimeStatusOutput = runSetupStep(scopedContext, "Read back runtime status", "tools/bin/project-runtimectl.sh", ["status", "--profile-id", config.profileId], { useRuntimeCopy: true });
         runtimeStatusKv = parseKvOutput(runtimeStatusOutput);
         runtimeStartStatus = "ok";
         runtimeStartReason = "";
@@ -1886,7 +1967,7 @@ async function runSetupFlow(forwardedArgs) {
         launchdInstallReason = "runtime-not-started";
         console.log("launchd install skipped: runtime was not started successfully in this setup run.");
       } else {
-        runSetupStep(scopedContext, "Install macOS autostart", "tools/bin/install-project-launchd.sh", ["--profile-id", config.profileId]);
+        runSetupStep(scopedContext, "Install macOS autostart", "tools/bin/install-project-launchd.sh", ["--profile-id", config.profileId], { useRuntimeCopy: true });
         launchdInstallStatus = "ok";
         launchdInstallReason = "";
       }

@@ -85,4 +85,24 @@ runtime_side_source_home_real="$(awk -F= '/^SOURCE_HOME=/{print $2; exit}' <<<"$
 runtime_side_home_real="$(awk -F= '/^RUNTIME_HOME=/{print $2; exit}' <<<"${runtime_side_output}")"
 grep -q "sync:${runtime_side_source_home_real}:${runtime_side_home_real}" "${sync_log}"
 
+skill_root_source_home="${tmpdir}/skill-root-source"
+skill_root_runtime_home="${tmpdir}/skill-root-runtime"
+mkdir -p "${skill_root_source_home}/tools/bin" "${skill_root_source_home}/assets" "${skill_root_source_home}/bin" "${skill_root_source_home}/hooks"
+printf '# test skill\n' >"${skill_root_source_home}/SKILL.md"
+printf '{}\n' >"${skill_root_source_home}/assets/workflow-catalog.json"
+printf '#!/usr/bin/env bash\n' >"${skill_root_source_home}/bin/agent-control-plane"
+printf '#!/usr/bin/env bash\n' >"${skill_root_source_home}/hooks/heartbeat-hooks.sh"
+chmod +x "${skill_root_source_home}/bin/agent-control-plane" "${skill_root_source_home}/hooks/heartbeat-hooks.sh"
+mkdir -p "${skill_root_source_home}/skills/openclaw/agent-control-plane"
+printf '# stale nested skill\n' >"${skill_root_source_home}/skills/openclaw/agent-control-plane/SKILL.md"
+
+skill_root_output="$(
+  ACP_RUNTIME_SYNC_SCRIPT="${sync_script}" \
+  ACP_TEST_SYNC_LOG="${sync_log}" \
+  bash "${ENSURE_BIN}" --source-home "${skill_root_source_home}" --runtime-home "${skill_root_runtime_home}"
+)"
+grep -q '^SYNC_STATUS=updated$' <<<"${skill_root_output}"
+skill_root_source_home_real="$(cd "${skill_root_source_home}" && pwd -P)"
+grep -q "^SOURCE_SKILL_DIR=${skill_root_source_home_real}$" <<<"${skill_root_output}"
+
 echo "ensure runtime sync test passed"

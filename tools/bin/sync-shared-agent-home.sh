@@ -32,12 +32,21 @@ if [[ ! -d "${FLOW_SKILL_SOURCE}" && -n "${COMPAT_FLOW_SKILL_ALIAS}" ]]; then
 fi
 
 FLOW_SKILL_SOURCE="$(cd "${FLOW_SKILL_SOURCE}" && pwd -P)"
+SOURCE_HOME="$(cd "${SOURCE_HOME}" && pwd -P)"
+
+remove_tree_force() {
+  local target="${1:-}"
+  [[ -n "${target}" ]] || return 0
+  [[ -e "${target}" || -L "${target}" ]] || return 0
+  chmod -R u+w "${target}" 2>/dev/null || true
+  rm -rf "${target}" 2>/dev/null || true
+}
 
 sync_tree_copy_mode() {
   local source_dir="${1:?source dir required}"
   local target_dir="${2:?target dir required}"
   [[ -d "${source_dir}" ]] || return 0
-  rm -rf "${target_dir}"
+  remove_tree_force "${target_dir}"
   mkdir -p "${target_dir}"
   (
     cd "${source_dir}"
@@ -57,12 +66,14 @@ sync_tree_into_target() {
 }
 
 sync_skill_copies() {
-  sync_tree_into_target "${FLOW_SKILL_SOURCE}" "${SOURCE_FLOW_CANONICAL_ALIAS}"
-  sync_tree_into_target "${FLOW_SKILL_SOURCE}" "${FLOW_SKILL_TARGET}"
-
-  if [[ -n "${SOURCE_FLOW_COMPAT_ALIAS}" ]]; then
-    sync_tree_into_target "${FLOW_SKILL_SOURCE}" "${SOURCE_FLOW_COMPAT_ALIAS}"
+  if ! flow_is_skill_root "${SOURCE_HOME}"; then
+    sync_tree_into_target "${FLOW_SKILL_SOURCE}" "${SOURCE_FLOW_CANONICAL_ALIAS}"
+    if [[ -n "${SOURCE_FLOW_COMPAT_ALIAS}" ]]; then
+      sync_tree_into_target "${FLOW_SKILL_SOURCE}" "${SOURCE_FLOW_COMPAT_ALIAS}"
+    fi
   fi
+
+  sync_tree_into_target "${FLOW_SKILL_SOURCE}" "${FLOW_SKILL_TARGET}"
 
   if [[ -n "${TARGET_FLOW_COMPAT_ALIAS}" ]]; then
     sync_tree_into_target "${FLOW_SKILL_SOURCE}" "${TARGET_FLOW_COMPAT_ALIAS}"
@@ -200,18 +211,21 @@ sync_tree_rsync() {
 }
 
 reset_runtime_skill_targets() {
-  rm -rf "${FLOW_SKILL_TARGET}"
+  remove_tree_force "${FLOW_SKILL_TARGET}"
   if [[ -n "${TARGET_FLOW_COMPAT_ALIAS}" ]]; then
-    rm -rf "${TARGET_FLOW_COMPAT_ALIAS}"
+    remove_tree_force "${TARGET_FLOW_COMPAT_ALIAS}"
   fi
 }
 
 reset_source_skill_targets() {
+  if flow_is_skill_root "${SOURCE_HOME}"; then
+    return 0
+  fi
   if [[ "${FLOW_SKILL_SOURCE}" != "${SOURCE_FLOW_CANONICAL_ALIAS}" ]]; then
-    rm -rf "${SOURCE_FLOW_CANONICAL_ALIAS}"
+    remove_tree_force "${SOURCE_FLOW_CANONICAL_ALIAS}"
   fi
   if [[ -n "${SOURCE_FLOW_COMPAT_ALIAS}" && "${FLOW_SKILL_SOURCE}" != "${SOURCE_FLOW_COMPAT_ALIAS}" ]]; then
-    rm -rf "${SOURCE_FLOW_COMPAT_ALIAS}"
+    remove_tree_force "${SOURCE_FLOW_COMPAT_ALIAS}"
   fi
 }
 

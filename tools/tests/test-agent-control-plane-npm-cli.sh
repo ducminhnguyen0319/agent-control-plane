@@ -128,6 +128,65 @@ runtime_status_output="$(
 grep -q '^PROFILE_ID=alpha$' <<<"${runtime_status_output}"
 grep -q "^CONFIG_YAML=${platform_home}/control-plane/profiles/alpha/control-plane.yaml$" <<<"${runtime_status_output}"
 
+runtime_state_root="$(awk -F= '/^STATE_ROOT=/{print $2; exit}' <<<"${runtime_status_output}")"
+runtime_bootstrap_log="${runtime_state_root}/bootstrap-source.log"
+runtime_bootstrap_path="${tmpdir}/fake-runtime-bootstrap.sh"
+mkdir -p "${runtime_state_root}"
+
+HOME="${home_dir}" \
+AGENT_PLATFORM_HOME="${platform_home}" \
+ACP_PROJECT_RUNTIME_LAUNCHCTL_BIN="/nonexistent" \
+node "${CLI_SCRIPT}" runtime stop --profile-id alpha --wait-seconds 1 >/dev/null || true
+
+cat >"${runtime_bootstrap_path}" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'bootstrapped-from=%s\n' "\$0" >>"${runtime_bootstrap_log}"
+mkdir -p "${runtime_state_root}/heartbeat-loop.lock"
+sleep 60 >/dev/null 2>&1 &
+child_pid="\$!"
+printf '%s\n' "\$child_pid" >"${runtime_state_root}/heartbeat-loop.lock/pid"
+wait "\$child_pid"
+EOF
+chmod +x "${runtime_bootstrap_path}"
+
+cat >"${fake_bin}/kick-start-runtime.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'KICK_STATUS=scheduled\nPID=12345\n'
+EOF
+chmod +x "${fake_bin}/kick-start-runtime.sh"
+
+runtime_start_output="$(
+  HOME="${home_dir}" \
+  AGENT_PLATFORM_HOME="${platform_home}" \
+  ACP_PROJECT_RUNTIME_BOOTSTRAP_SCRIPT="${runtime_bootstrap_path}" \
+  ACP_PROJECT_RUNTIME_KICK_SCRIPT="${fake_bin}/kick-start-runtime.sh" \
+  ACP_PROJECT_RUNTIME_LAUNCHCTL_BIN="/nonexistent" \
+  ACP_PROJECT_RUNTIME_START_WAIT_SECONDS=1 \
+  node "${CLI_SCRIPT}" runtime start --profile-id alpha
+)"
+
+grep -q '^ACTION=start$' <<<"${runtime_start_output}"
+grep -q '^START_MODE=kick-scheduler-fallback-supervisor$' <<<"${runtime_start_output}"
+grep -q '^FALLBACK_SUPERVISOR_LOG=' <<<"${runtime_start_output}"
+
+for _ in 1 2 3 4 5; do
+  if [[ -f "${runtime_bootstrap_log}" ]] && grep -q "^bootstrapped-from=${runtime_bootstrap_path}\$" "${runtime_bootstrap_log}"; then
+    break
+  fi
+  sleep 1
+done
+
+grep -q "^bootstrapped-from=${runtime_bootstrap_path}\$" "${runtime_bootstrap_log}"
+
+HOME="${home_dir}" \
+AGENT_PLATFORM_HOME="${platform_home}" \
+ACP_PROJECT_RUNTIME_BOOTSTRAP_SCRIPT="${runtime_bootstrap_path}" \
+ACP_PROJECT_RUNTIME_KICK_SCRIPT="${fake_bin}/kick-start-runtime.sh" \
+ACP_PROJECT_RUNTIME_LAUNCHCTL_BIN="/nonexistent" \
+node "${CLI_SCRIPT}" runtime stop --profile-id alpha --wait-seconds 1 >/dev/null
+
 launchd_help="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
