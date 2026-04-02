@@ -17,12 +17,14 @@ run_env="${runs_root}/${session}/run.env"
 
 mkdir -p "${runs_root}/${session}"
 
+# Minimal run.env
 cat >"$run_env" <<EOF
 SESSION=${session}
 TASK_KIND=issue
 TASK_ID=99
 EOF
 
+# Helper to assert STATUS value
 assert_status() {
   local expected="${1:?expected status required}"
   local actual
@@ -45,11 +47,21 @@ assert_failure_reason() {
   printf .
 }
 
+# ============================================================
+# Test 1: Runner still running, tmux gone → FAILED (crash)
+# This is the primary bug: without the fix, a stale result.env
+# from a prior cycle would cause SUCCEEDED instead.
+# ============================================================
+
+# Simulate a previous cycle that wrote result.env
 cat >"$result_file" <<'EOF'
 OUTCOME=implemented
 ACTION=host-publish-issue-pr
 EOF
 
+# Simulate runner that crashed mid-cycle (still marked running).
+# When LAST_FAILURE_REASON is already set, worker-status preserves it;
+# when empty it falls back to runner-aborted-before-completion.
 cat >"$runner_state_file" <<'EOF'
 RUNNER_STATE=running
 THREAD_ID=some-thread
@@ -61,10 +73,15 @@ LAST_TRIGGER_REASON=schedule
 UPDATED_AT=2025-01-01T00:00:00Z
 EOF
 
+# No exit marker in log
 : >"$session_log"
 
 assert_status "FAILED"
 assert_failure_reason "runner-aborted-before-completion"
+
+# ============================================================
+# Test 2: Runner crashed with waiting-auth-refresh → FAILED
+# ============================================================
 
 cat >"$runner_state_file" <<'EOF'
 RUNNER_STATE=waiting-auth-refresh
@@ -80,6 +97,10 @@ EOF
 assert_status "FAILED"
 assert_failure_reason "runner-aborted-before-completion"
 
+# ============================================================
+# Test 3: Runner crashed with switching-account → FAILED
+# ============================================================
+
 cat >"$runner_state_file" <<'EOF'
 RUNNER_STATE=switching-account
 THREAD_ID=switch-thread
@@ -93,6 +114,11 @@ EOF
 
 assert_status "FAILED"
 
+# ============================================================
+# Test 4: Runner succeeded (normal path unchanged)
+# ============================================================
+
+# Remove stale state
 rm -f "$result_file"
 
 cat >"$runner_state_file" <<'EOF'
@@ -108,6 +134,10 @@ EOF
 
 assert_status "SUCCEEDED"
 
+# ============================================================
+# Test 5: Runner failed (normal path unchanged)
+# ============================================================
+
 cat >"$runner_state_file" <<'EOF'
 RUNNER_STATE=failed
 THREAD_ID=fail-thread
@@ -121,6 +151,11 @@ EOF
 
 assert_status "FAILED"
 assert_failure_reason "syntax-error"
+
+# ============================================================
+# Test 6: Unknown state with stale result.env and no runner crash
+# → SUCCEEDED via result.env (still works for valid completions)
+# ============================================================
 
 rm -f "$runner_state_file"
 : >"$session_log"
