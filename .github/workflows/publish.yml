@@ -112,4 +112,15 @@ jobs:
         run: npm pack --dry-run
 
       - name: Publish to npm
-        run: npm publish --provenance --access public
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_name="$(node -p "require('./package.json').name")"
+          package_version="$(node -p "require('./package.json').version")"
+
+          if npm view "${package_name}@${package_version}" version >/dev/null 2>&1; then
+            echo "npm package ${package_name}@${package_version} is already published; skipping duplicate publish"
+            exit 0
+          fi
+
+          npm publish --provenance --access public
