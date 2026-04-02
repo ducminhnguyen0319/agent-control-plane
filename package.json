@@ -38,6 +38,7 @@
     "tools/dashboard/server.py",
     "tools/dashboard/styles.css",
     "tools/templates",
+    "!tools/templates/legacy/",
     "tools/vendor/codex-quota/LICENSE",
     "tools/vendor/codex-quota/codex-quota.js",
     "tools/vendor/codex-quota/lib",
