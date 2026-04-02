@@ -35,6 +35,13 @@ for (const forbiddenPath of [
   "tools/bin/render-dashboard-demo-media.sh",
   "tools/bin/render-architecture-infographics.sh",
   "tools/vendor/codex-quota/README.md",
+  "tools/bin/audit-agent-worktrees.sh",
+  "tools/bin/audit-issue-routing.sh",
+  "tools/bin/audit-retained-layout.sh",
+  "tools/bin/audit-retained-overlap.sh",
+  "tools/bin/audit-retained-worktrees.sh",
+  "tools/bin/check-skill-contracts.sh",
+  "bin/audit-issue-routing.sh",
 ]) {
   if (paths.has(forbiddenPath)) {
     fail(`forbidden tarball path present: ${forbiddenPath}`);

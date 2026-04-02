@@ -6,6 +6,9 @@
 *.bak
 *.bak2
 *.bak3
+bin/audit-*.sh
+tools/bin/audit-*.sh
+tools/bin/check-skill-contracts.sh
 tools/bin/render-dashboard-demo-media.sh
 tools/bin/render-architecture-infographics.sh
 tools/vendor/codex-quota/README.md
