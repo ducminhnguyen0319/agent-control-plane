@@ -160,17 +160,13 @@ join_by_comma() {
 runtime_started() {
   local heartbeat=""
   local shared_loop=""
-  local controller_pid=""
-  local active_session=""
   local supervisor=""
 
   heartbeat="$(heartbeat_pid)"
   shared_loop="$(shared_loop_pid)"
-  controller_pid="$(collect_controller_pids | head -n 1 || true)"
-  active_session="$(collect_active_tmux_sessions | head -n 1 || true)"
   supervisor="$(supervisor_pid)"
 
-  [[ -n "${heartbeat}" || -n "${shared_loop}" || -n "${controller_pid}" || -n "${active_session}" || -n "${supervisor}" ]]
+  [[ -n "${heartbeat}" || -n "${shared_loop}" || -n "${supervisor}" ]]
 }
 
 wait_for_runtime_start() {
