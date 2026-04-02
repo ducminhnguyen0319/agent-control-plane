@@ -345,24 +345,28 @@ PY
   local effective_pools=""
   healthy_pools="$(
     jq -r --argjson primaryThresh "${CODEX_QUOTA_THRESHOLD}" --argjson weeklyThresh "${CODEX_QUOTA_WEEKLY_THRESHOLD}" '
-      group_by(.accountId)
+      map(. + {poolKey: (.label // .trackedLabel // .email // .accountId // "")})
       | map(select(
-          ((.[0].usage.rate_limit.limit_reached // false) | not)
-          and ((.[0].usage.rate_limit.primary_window.used_percent // 100) < $primaryThresh)
-          and ((.[0].usage.rate_limit.secondary_window.used_percent // 100) < $weeklyThresh)
-        ))
+          (.poolKey != "")
+          and ((.usage.rate_limit.limit_reached // false) | not)
+          and ((.usage.rate_limit.primary_window.used_percent // 100) < $primaryThresh)
+          and ((.usage.rate_limit.secondary_window.used_percent // 100) < $weeklyThresh)
+        ) | .poolKey)
+      | unique
       | length
     ' "${CODEX_QUOTA_FULL_CACHE_FILE}" 2>/dev/null || true
   )"
 
   rotation_pools="$(
     jq -r --argjson weeklyThresh "${CODEX_QUOTA_WEEKLY_THRESHOLD}" '
-      group_by(.accountId)
+      map(. + {poolKey: (.label // .trackedLabel // .email // .accountId // "")})
       | map(select(
-          ((.[0].usage.rate_limit.limit_reached // false) | not)
-          and ((.[0].usage.rate_limit.secondary_window.used_percent // 100) < $weeklyThresh)
-          and ((.[0].planType // "") != "free")
-        ))
+          (.poolKey != "")
+          and ((.usage.rate_limit.limit_reached // false) | not)
+          and ((.usage.rate_limit.secondary_window.used_percent // 100) < $weeklyThresh)
+          and ((.planType // "") != "free")
+        ) | .poolKey)
+      | unique
       | length
     ' "${CODEX_QUOTA_FULL_CACHE_FILE}" 2>/dev/null || true
   )"

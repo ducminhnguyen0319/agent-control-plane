@@ -56,6 +56,7 @@ chmod +x "$bin_dir/codex-quota"
 
 fixture_dir="$tmpdir/fixtures"
 mkdir -p "$fixture_dir/usage-switch" "$fixture_dir/deferred" "$fixture_dir/auth-401"
+mkdir -p "$fixture_dir/stale-cache-healthy"
 
 cat >"$fixture_dir/usage-switch/list.json" <<'EOF'
 {"activeInfo":{"trackedLabel":"current-a"},"accounts":[{"label":"current-a","isActive":true},{"label":"next-b"},{"label":"next-c"}]}
@@ -85,6 +86,16 @@ cat >"$fixture_dir/auth-401/list.json" <<'EOF'
 EOF
 cat >"$fixture_dir/auth-401/quota-good-next.json" <<'EOF'
 [{"label":"good-next","usage":{"rate_limit":{"allowed":true,"limit_reached":false,"primary_window":{"used_percent":15,"reset_at":4102437600},"secondary_window":{"used_percent":19,"reset_at":4102448400}}}}]
+EOF
+
+cat >"$fixture_dir/stale-cache-healthy/list.json" <<'EOF'
+{"activeInfo":{"trackedLabel":"current-a"},"accounts":[{"label":"current-a","isActive":true},{"label":"next-b"}]}
+EOF
+cat >"$fixture_dir/stale-cache-healthy/quota-current-a.json" <<'EOF'
+[{"label":"current-a","usage":{"rate_limit":{"allowed":false,"limit_reached":true,"primary_window":{"used_percent":100,"reset_at":4102444800},"secondary_window":{"used_percent":30,"reset_at":4102444800}}}}]
+EOF
+cat >"$fixture_dir/stale-cache-healthy/quota-next-b.json" <<'EOF'
+[{"label":"next-b","usage":{"rate_limit":{"allowed":true,"limit_reached":false,"primary_window":{"used_percent":12,"reset_at":4102437600},"secondary_window":{"used_percent":18,"reset_at":4102448400}}}}]
 EOF
 
 run_usage_switch_case() {
@@ -171,8 +182,38 @@ run_auth_401_case() {
   test "$(jq -r '.accounts["bad-auth"].removed' "$state_file")" = "true"
 }
 
+run_stale_cache_healthy_case() {
+  rm -f "$state_file" "$switch_state_file" "$switch_log"
+  cat >"$state_file" <<'EOF'
+{"accounts":{"next-b":{"removed":false,"next_retry_at":4102441200,"last_reset_at":4102441200,"last_reason":"quota-window","last_checked_at":4102430000}}}
+EOF
+
+  output="$(
+    HOME="$home_dir" \
+    PATH="$bin_dir:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+    CODEX_QUOTA_BIN="$bin_dir/codex-quota" \
+    MOCK_QUOTA_SCENARIO="stale-cache-healthy" \
+    MOCK_QUOTA_FIXTURE_DIR="$fixture_dir" \
+    MOCK_QUOTA_SWITCH_LOG="$switch_log" \
+    CODEX_QUOTA_MANAGER_STATE_FILE="$state_file" \
+    CODEX_QUOTA_MANAGER_SWITCH_STATE_FILE="$switch_state_file" \
+    bash "$SOURCE_SCRIPT" \
+      --trigger-reason usage-limit \
+      --current-label current-a \
+      --five-hour-threshold 70 \
+      --weekly-threshold 90
+  )"
+
+  grep -q '^SELECTED_LABEL=next-b$' <<<"$output"
+  grep -q '^SWITCH_DECISION=switched$' <<<"$output"
+  test "$(tail -n 1 "$switch_log")" = "next-b"
+  test "$(jq -r '.accounts["next-b"].last_reason' "$state_file")" = "switched"
+  test "$(jq -r '.accounts["next-b"].next_retry_at' "$state_file")" = "0"
+}
+
 run_usage_switch_case
 run_deferred_case
 run_auth_401_case
+run_stale_cache_healthy_case
 
 echo "codex quota manager failure-driven rotation test passed"

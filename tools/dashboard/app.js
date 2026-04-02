@@ -138,6 +138,33 @@ function renderAlerts(alerts) {
   `;
 }
 
+function renderCodexRotation(rotation) {
+  if (!rotation || !rotation.active_label) {
+    return `<div class="empty-state">Codex rotation data is not available yet for this Codex profile.</div>`;
+  }
+  const candidates = (rotation.candidate_labels || []).length ? rotation.candidate_labels.join(", ") : "n/a";
+  const ready = (rotation.ready_candidates || []).length ? rotation.ready_candidates.join(", ") : "none";
+  const nextRetry = rotation.next_retry_at
+    ? `${rotation.next_retry_label || "n/a"} · ${relativeTime(rotation.next_retry_at)}<div class="muted">${rotation.next_retry_at}</div>`
+    : "n/a";
+  const lastSwitch = rotation.last_switch_label
+    ? `${rotation.last_switch_label}${rotation.last_switch_reason ? ` · ${rotation.last_switch_reason}` : ""}`
+    : "n/a";
+
+  return renderTable(
+    [
+      { label: "Current", render: () => `<div class="mono">${rotation.active_label}</div>` },
+      { label: "Decision", render: () => `<span class="status-pill ${statusClass(rotation.switch_decision || "unknown")}">${rotation.switch_decision || "unknown"}</span>` },
+      { label: "Candidates", render: () => `<div class="mono">${candidates}</div>` },
+      { label: "Ready now", render: () => `<div class="mono">${ready}</div>` },
+      { label: "Next retry", render: () => nextRetry },
+      { label: "Last switch", render: () => `<div class="mono">${lastSwitch}</div>` },
+    ],
+    [{}],
+    "No Codex rotation data for this profile.",
+  );
+}
+
 function renderProfile(profile) {
   const providerBadges = [
     profile.coding_worker ? `<span class="badge good">${profile.coding_worker}</span>` : "",
@@ -261,6 +288,17 @@ function renderProfile(profile) {
     "No pending leased issues.",
   );
 
+  const codexRotationPanel =
+    profile.coding_worker === "codex"
+      ? `
+        <section class="panel">
+          <h3>Codex Rotation</h3>
+          <p class="panel-subtitle">Shows the active Codex label, candidate labels, and whether failover is ready or deferred.</p>
+          ${renderCodexRotation(profile.codex_rotation)}
+        </section>
+      `
+      : "";
+
   return `
     <article class="profile">
       <header class="profile-header">
@@ -290,6 +328,7 @@ function renderProfile(profile) {
           <p class="panel-subtitle">Includes provider wait and failover telemetry. Stale controllers show a warning.</p>
           ${controllerTable}
         </section>
+        ${codexRotationPanel}
         <section class="panel half">
           <h3>Issue Retries</h3>
           ${retryTable}

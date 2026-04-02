@@ -111,7 +111,10 @@ output="$(
     --hook-file "$hook_file"
 )"
 
-grep -q '^schedule provider-quota-limit$' "$provider_log"
+if [[ -f "$provider_log" ]] && grep -q . "$provider_log"; then
+  echo "codex usage-limit should not schedule shared provider cooldown" >&2
+  exit 1
+fi
 test "$(cat "$retry_reason_file")" = "provider-quota-limit"
 test -f "$ready_flag"
 grep -q '^STATUS=FAILED$' <<<"$output"

@@ -143,6 +143,15 @@ def file_mtime_iso(path: Path) -> str:
     return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def read_json_file(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return {}
+
+
 def read_tail_text(path: Path, max_bytes: int = 65536) -> str:
     if not path.is_file():
         return ""
@@ -408,6 +417,94 @@ def collect_provider_cooldowns(state_root: Path) -> list[dict[str, Any]]:
     return items
 
 
+def collect_codex_rotation(profile: dict[str, str]) -> dict[str, Any]:
+    coding_worker = profile.get("EFFECTIVE_CODING_WORKER", "")
+    if coding_worker != "codex":
+        return {}
+
+    cache_root = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "codex-quota-manager"
+    state_file = cache_root / "rotation-state.json"
+    switch_file = cache_root / "last-switch.env"
+    state_json = read_json_file(state_file)
+    state_accounts = state_json.get("accounts", {}) if isinstance(state_json, dict) else {}
+    now_epoch = int(datetime.now(timezone.utc).timestamp())
+
+    active_label = ""
+    candidate_labels: list[str] = []
+    list_json: dict[str, Any] = {}
+    quota_bin_override = os.environ.get("CODEX_QUOTA_BIN", "").strip()
+    quota_bin = Path(quota_bin_override) if quota_bin_override else TOOLS_BIN_DIR / "codex-quota"
+    if quota_bin.is_file():
+        try:
+            raw = subprocess.check_output(
+                [str(quota_bin), "codex", "list", "--json"],
+                cwd=str(ROOT_DIR),
+                env=os.environ.copy(),
+                text=True,
+                stderr=subprocess.DEVNULL,
+                timeout=20,
+            )
+            list_json = json.loads(raw)
+        except Exception:
+            list_json = {}
+
+    if isinstance(list_json, dict):
+        active_info = list_json.get("activeInfo", {}) or {}
+        active_label = str(active_info.get("trackedLabel") or active_info.get("activeLabel") or "")
+        seen: set[str] = set()
+        for account in list_json.get("accounts", []) or []:
+            label = str(account.get("label") or "").strip()
+            if not label or label == active_label or label in seen:
+                continue
+            candidate_labels.append(label)
+            seen.add(label)
+
+    next_retry_label = ""
+    next_retry_epoch = 0
+    for label in candidate_labels:
+        entry = state_accounts.get(label, {}) if isinstance(state_accounts, dict) else {}
+        retry_epoch = safe_int(str(entry.get("next_retry_at", "")))
+        removed = bool(entry.get("removed", False))
+        if removed or not retry_epoch or retry_epoch <= now_epoch:
+            continue
+        if next_retry_epoch == 0 or retry_epoch < next_retry_epoch:
+            next_retry_epoch = retry_epoch
+            next_retry_label = label
+
+    ready_candidates = []
+    for label in candidate_labels:
+        entry = state_accounts.get(label, {}) if isinstance(state_accounts, dict) else {}
+        retry_epoch = safe_int(str(entry.get("next_retry_at", ""))) or 0
+        removed = bool(entry.get("removed", False))
+        if not removed and retry_epoch <= now_epoch:
+            ready_candidates.append(label)
+
+    last_switch = read_env_file(switch_file)
+    switch_decision = "unknown"
+    if ready_candidates:
+        switch_decision = "ready-candidate"
+    elif next_retry_label:
+        switch_decision = "deferred"
+    elif last_switch.get("LAST_SWITCH_LABEL"):
+        switch_decision = "switched"
+    elif candidate_labels:
+        switch_decision = "failed"
+
+    return {
+        "active_label": active_label,
+        "candidate_labels": candidate_labels,
+        "ready_candidates": ready_candidates,
+        "next_retry_label": next_retry_label,
+        "next_retry_epoch": next_retry_epoch,
+        "next_retry_at": datetime.fromtimestamp(next_retry_epoch, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if next_retry_epoch else "",
+        "switch_decision": switch_decision,
+        "last_switch_label": last_switch.get("LAST_SWITCH_LABEL", ""),
+        "last_switch_reason": last_switch.get("LAST_SWITCH_REASON", ""),
+        "last_switch_epoch": safe_int(last_switch.get("LAST_SWITCH_EPOCH")),
+        "state_file": str(state_file),
+    }
+
+
 def collect_scheduled_issues(state_root: Path) -> list[dict[str, Any]]:
     scheduled_root = state_root / "scheduled-issues"
     if not scheduled_root.is_dir():
@@ -499,6 +596,7 @@ def build_profile_snapshot(profile_id: str, registry_root: Path) -> dict[str, An
     retries = collect_issue_retries(state_root)
     queue = collect_issue_queue(state_root)
     alerts = [alert for run in runs for alert in run.get("alerts", [])]
+    codex_rotation = collect_codex_rotation(render_env)
 
     return {
         "id": profile_id,
@@ -520,6 +618,7 @@ def build_profile_snapshot(profile_id: str, registry_root: Path) -> dict[str, An
             "last_reason": render_env.get("EFFECTIVE_PROVIDER_POOL_LAST_REASON", ""),
             "pools_exhausted": render_env.get("EFFECTIVE_PROVIDER_POOLS_EXHAUSTED", ""),
         },
+        "codex_rotation": codex_rotation,
         "counts": {
             "active_runs": len(runs),
             "running_runs": sum(1 for item in runs if item["status"] == "RUNNING"),

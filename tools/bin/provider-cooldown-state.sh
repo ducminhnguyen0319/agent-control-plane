@@ -20,6 +20,7 @@ backend=""
 model=""
 action=""
 reason=""
+label=""
 
 case "$#" in
   1)
@@ -75,6 +76,33 @@ resolve_backend() {
   fi
 
   flow_config_get "${CONFIG_YAML}" "execution.coding_worker"
+}
+
+resolve_codex_label() {
+  local configured_label="${ACP_ACTIVE_PROVIDER_LABEL:-${F_LOSNING_ACTIVE_PROVIDER_LABEL:-}}"
+  local codex_quota_bin=""
+  local active_label=""
+
+  if [[ -n "${configured_label}" ]]; then
+    printf '%s\n' "${configured_label}"
+    return 0
+  fi
+
+  if [[ -n "${ACP_CODEX_QUOTA_LABEL:-${F_LOSNING_CODEX_QUOTA_LABEL:-}}" ]]; then
+    printf '%s\n' "${ACP_CODEX_QUOTA_LABEL:-${F_LOSNING_CODEX_QUOTA_LABEL:-}}"
+    return 0
+  fi
+
+  codex_quota_bin="$(flow_resolve_codex_quota_bin "${SCRIPT_DIR}")"
+  if [[ -n "${codex_quota_bin}" && -x "${codex_quota_bin}" ]]; then
+    active_label="$("${codex_quota_bin}" codex list --json 2>/dev/null | jq -r '.activeInfo.trackedLabel // .activeInfo.activeLabel // empty' 2>/dev/null || true)"
+    if [[ -n "${active_label}" ]]; then
+      printf '%s\n' "${active_label}"
+      return 0
+    fi
+  fi
+
+  return 1
 }
 
 resolve_model() {
@@ -147,7 +175,16 @@ case "${action}" in
     ;;
 esac
 
-provider_key="$(flow_sanitize_provider_key "${backend}-${model}")"
+if [[ "${backend}" == "codex" ]]; then
+  label="$(resolve_codex_label || true)"
+fi
+
+provider_key_source="${backend}-${model}"
+if [[ "${backend}" == "codex" && -n "${label}" ]]; then
+  provider_key_source="${provider_key_source}-${label}"
+fi
+
+provider_key="$(flow_sanitize_provider_key "${provider_key_source}")"
 out="$(
   ACP_STATE_ROOT="${STATE_ROOT}" \
   ACP_PROVIDER_QUOTA_COOLDOWNS="${COOLDOWNS}" \
@@ -162,5 +199,6 @@ out="$(
 
 printf 'BACKEND=%s\n' "${backend}"
 printf 'MODEL=%s\n' "${model}"
+printf 'LABEL=%s\n' "${label}"
 printf 'PROVIDER_KEY=%s\n' "${provider_key}"
 printf '%s\n' "${out}"

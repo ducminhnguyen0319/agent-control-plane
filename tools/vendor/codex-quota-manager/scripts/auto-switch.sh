@@ -410,12 +410,6 @@ for label in "${CANDIDATE_LABELS[@]}"; do
     continue
   fi
 
-  retry_at="$(state_next_retry_at "$label")"
-  if [[ "$retry_at" =~ ^[0-9]+$ ]] && (( retry_at > now_epoch )); then
-    note_candidate_retry "$label" "$retry_at"
-    continue
-  fi
-
   quota_output="$(load_account_quota_json "$label" 2>&1 || true)"
   if ! jq -e 'type == "array" and length > 0' >/dev/null 2>&1 <<<"$quota_output"; then
     if is_auth_401_output "$quota_output"; then
@@ -433,6 +427,14 @@ for label in "${CANDIDATE_LABELS[@]}"; do
       printf 'MARKED_COOLDOWN_LABEL=%s\n' "$label"
       printf 'MARKED_COOLDOWN_UNTIL=%s\n' "$short_retry_at"
     fi
+    continue
+  fi
+
+  retry_at="$(state_next_retry_at "$label")"
+  if [[ "$retry_at" =~ ^[0-9]+$ ]] && (( retry_at > now_epoch )) && account_is_eligible "$label" "$quota_output"; then
+    state_mark_ready "$label" "quota-revalidated" "$now_epoch"
+  elif [[ "$retry_at" =~ ^[0-9]+$ ]] && (( retry_at > now_epoch )); then
+    note_candidate_retry "$label" "$retry_at"
     continue
   fi
 

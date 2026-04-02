@@ -307,12 +307,14 @@ schedule_provider_quota_cooldown() {
   local reason="${1:-provider-quota-limit}"
   [[ "${reason}" == "provider-quota-limit" ]] || return 0
   [[ -x "${provider_cooldown_script}" ]] || return 0
+  [[ "${CODING_WORKER:-}" == "codex" ]] && return 0
 
   "${provider_cooldown_script}" schedule "${reason}" >/dev/null || true
 }
 
 clear_provider_quota_cooldown() {
   [[ -x "${provider_cooldown_script}" ]] || return 0
+  [[ "${CODING_WORKER:-}" == "codex" ]] && return 0
 
   "${provider_cooldown_script}" clear >/dev/null || true
 }
