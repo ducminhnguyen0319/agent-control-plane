@@ -24,6 +24,7 @@ EOF
 mode=""
 session=""
 worktree=""
+worktree_realpath=""
 prompt_file=""
 runs_root=""
 adapter_id=""
@@ -105,6 +106,12 @@ if [[ -z "$mode" || -z "$session" || -z "$worktree" || -z "$prompt_file" || -z "
   exit 1
 fi
 
+worktree_realpath="$(cd "$worktree" 2>/dev/null && pwd -P || true)"
+if [[ -z "$worktree_realpath" || ! -d "$worktree_realpath" ]]; then
+  echo "unable to resolve worktree realpath: $worktree" >&2
+  exit 1
+fi
+
 case "$mode" in
   safe|bypass) ;;
   *)
@@ -119,7 +126,7 @@ inner_script="${artifact_dir}/${session}.sh"
 meta_file="${artifact_dir}/run.env"
 result_file="${artifact_dir}/result.env"
 runner_state_file="${artifact_dir}/runner.env"
-sandbox_run_dir="${worktree%/}/${sandbox_subdir}/${session}"
+sandbox_run_dir="${worktree_realpath%/}/${sandbox_subdir}/${session}"
 started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 codex_bin="$(resolve_codex_bin || true)"
 runner_bin="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/agent-project-run-codex-resilient"
@@ -137,13 +144,14 @@ if [[ -z "$codex_bin" || ! -x "$codex_bin" ]]; then
   exit 1
 fi
 
-branch_name="$(git -C "$worktree" branch --show-current 2>/dev/null || true)"
+branch_name="$(git -C "$worktree_realpath" branch --show-current 2>/dev/null || true)"
 
 printf -v session_q '%q' "$session"
 printf -v task_kind_q '%q' "$task_kind"
 printf -v task_id_q '%q' "$task_id"
 printf -v mode_q '%q' "$mode"
 printf -v worktree_q '%q' "$worktree"
+printf -v worktree_realpath_q '%q' "$worktree_realpath"
 printf -v prompt_q '%q' "$prompt_file"
 printf -v output_q '%q' "$output_file"
 printf -v artifact_dir_q '%q' "$artifact_dir"
@@ -166,6 +174,7 @@ printf -v bypass_profile_q '%q' "$bypass_profile"
   printf 'SESSION=%s\n' "$session_q"
   printf 'MODE=%s\n' "$mode_q"
   printf 'WORKTREE=%s\n' "$worktree_q"
+  printf 'WORKTREE_REALPATH=%s\n' "$worktree_realpath_q"
   printf 'PROMPT_FILE=%s\n' "$prompt_q"
   printf 'OUTPUT_FILE=%s\n' "$output_q"
   printf 'SCRIPT=%s\n' "$script_q"
@@ -264,19 +273,59 @@ cat >"$inner_script" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 ${runtime_exports}
-${context_exports}cd ${worktree_q}
+${context_exports}cd ${worktree_realpath_q}
 reset_sandbox_run_dir() {
   mkdir -p ${sandbox_run_dir_q}
   find ${sandbox_run_dir_q} -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
 }
+find_logged_artifact_path() {
+  local artifact_name="\${1:?artifact name required}"
+  local candidate=""
+
+  while IFS= read -r candidate; do
+    [[ -n "\${candidate}" ]] || continue
+    while [[ "\${candidate}" == *')' || "\${candidate}" == *']' || "\${candidate}" == *',' || "\${candidate}" == *'"' || "\${candidate}" == *"'" ]]; do
+      candidate="\${candidate%?}"
+    done
+    if [[ "\$(basename "\${candidate}")" == "\${artifact_name}" && -f "\${candidate}" ]]; then
+      printf '%s\n' "\${candidate}"
+    fi
+  done < <(grep -oE '/(Users|Volumes|tmp)/[^[:space:])"]+' ${output_q} 2>/dev/null || true)
+}
+recover_logged_artifact() {
+  local artifact_name="\${1:?artifact name required}"
+  local destination="\${2:?destination required}"
+  local source_path=""
+
+  source_path="\$(find_logged_artifact_path "\${artifact_name}" | tail -n 1)"
+  [[ -n "\${source_path}" ]] || return 0
+  mkdir -p "\$(dirname "\${destination}")"
+  if [[ "\${source_path}" != "\${destination}" ]]; then
+    cp "\${source_path}" "\${destination}"
+  fi
+}
+recover_collected_artifact() {
+  local artifact_name="\${1:?artifact name required}"
+  local destination="\${2:?destination required}"
+
+  if [[ -f ${sandbox_run_dir_q}/"\${artifact_name}" ]]; then
+    if [[ ${sandbox_run_dir_q}/"\${artifact_name}" != "\${destination}" ]]; then
+      cp ${sandbox_run_dir_q}/"\${artifact_name}" "\${destination}"
+    fi
+    return 0
+  fi
+
+  recover_logged_artifact "\${artifact_name}" "\${destination}"
+}
 record_final_git_state() {
   local final_head final_branch tmp_file
 
-  final_head="\$(git -C ${worktree_q} rev-parse HEAD 2>/dev/null || true)"
-  final_branch="\$(git -C ${worktree_q} branch --show-current 2>/dev/null || true)"
+  final_head="\$(git -C ${worktree_realpath_q} rev-parse HEAD 2>/dev/null || true)"
+  final_branch="\$(git -C ${worktree_realpath_q} branch --show-current 2>/dev/null || true)"
   tmp_file=${meta_file_q}.tmp.final.$$
-  grep -vE '^(FINAL_HEAD|FINAL_BRANCH)=' ${meta_file_q} >"\${tmp_file}" 2>/dev/null || true
+  grep -vE '^(FINAL_HEAD|FINAL_BRANCH|WORKTREE_REALPATH)=' ${meta_file_q} >"\${tmp_file}" 2>/dev/null || true
   {
+    printf 'WORKTREE_REALPATH=%s\n' ${worktree_realpath_q}
     printf 'FINAL_HEAD=%q\n' "\${final_head}"
     printf 'FINAL_BRANCH=%q\n' "\${final_branch}"
   } >>"\${tmp_file}"
@@ -286,7 +335,7 @@ reset_sandbox_run_dir
 set +e
 bash ${runner_bin_q} \\
   --mode ${mode_q} \\
-  --worktree ${worktree_q} \\
+  --worktree ${worktree_realpath_q} \\
   --prompt-file ${prompt_q} \\
   --output-file ${output_q} \\
   --host-run-dir ${artifact_dir_q} \\
@@ -296,9 +345,10 @@ bash ${runner_bin_q} \\
   --codex-bin ${codex_bin_q}
 status=\$?
 record_final_git_state
-if [[ -f ${sandbox_run_dir_q}/result.env ]]; then
-  cp ${sandbox_run_dir_q}/result.env ${result_q}
-fi
+recover_collected_artifact result.env ${result_q}
+recover_collected_artifact issue-comment.md ${artifact_dir_q}/issue-comment.md
+recover_collected_artifact pr-comment.md ${artifact_dir_q}/pr-comment.md
+recover_collected_artifact verification.jsonl ${artifact_dir_q}/verification.jsonl
 ${collect_copy_snippet}${reconcile_snippet}
 printf '\n__CODEX_EXIT__:%s\n' "\$status" | tee -a ${output_q}
 exit "\$status"
