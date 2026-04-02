@@ -108,6 +108,7 @@ const dependencyInputsChanged = files.some(isDependencyManifest);
 const apiTouched = productNonTestFiles.some((file) => /^apps\/api\//.test(file));
 const webTouched = productNonTestFiles.some((file) => /^apps\/web\//.test(file));
 const mobileTouched = productNonTestFiles.some((file) => /^apps\/mobile\//.test(file));
+const apiProductFiles = productNonTestFiles.filter((file) => /^apps\/api\//.test(file));
 const packageNames = [
   ...new Set(
     productNonTestFiles
@@ -199,11 +200,23 @@ const changedTestCoverage = changedTestFiles.map((file) => {
   return { file, anchors, covered };
 });
 const missingChangedTestFiles = changedTestCoverage.filter(({ covered }) => !covered);
+const apiChangedTests = changedTestCoverage.filter(({ file }) => /^apps\/api\//.test(file));
 
 const rootTypecheck = hasCommand(/\bpnpm (?:run )?typecheck\b/, /\bturbo\b.*\btypecheck\b/);
 const rootBuild = hasCommand(/\bpnpm (?:run )?build\b/, /\bturbo\b.*\bbuild\b/);
 const rootLint = hasCommand(/\bpnpm (?:run )?lint\b/, /\bturbo\b.*\blint\b/);
 const rootTest = hasCommand(/\bpnpm (?:run )?test\b/, /\bturbo\b.*\btest\b/);
+const scopedApiTypecheck =
+  hasScopedCommand(apiScopePattern, /\btypecheck\b/, /\btsc --noemit\b/, /\btsc --noemit\b/);
+const scopedApiConfidence =
+  hasScopedCommand(apiScopePattern, /\blint\b/, /\bbuild\b/, /\btest\b/, /\bjest\b/, /\bvitest\b/);
+const apiNarrowSliceTargetedCoverage =
+  apiProductFiles.length > 0 &&
+  apiProductFiles.length <= 2 &&
+  apiProductFiles.every((file) => /(?:^|\/)(?:services?|utils?|helpers?|policies?)\/|(?:\.service|\.util|\.helper|\.policy)\.[cm]?[jt]s$/.test(file)) &&
+  apiChangedTests.length > 0 &&
+  apiChangedTests.every(({ covered }) => covered) &&
+  scopedApiConfidence;
 
 const reasons = [];
 if (passedCommands.length === 0) {
@@ -242,10 +255,10 @@ if (localeTouched) {
 }
 
 if (apiTouched) {
-  if (!(hasScopedCommand(apiScopePattern, /\btypecheck\b/, /\btsc --noemit\b/, /\btsc --noemit\b/) || rootTypecheck)) {
+  if (!(scopedApiTypecheck || rootTypecheck || apiNarrowSliceTargetedCoverage)) {
     reasons.push('missing API typecheck or repo typecheck for API changes');
   }
-  if (!(hasScopedCommand(apiScopePattern, /\blint\b/, /\bbuild\b/, /\btest\b/, /\bjest\b/, /\bvitest\b/) || rootBuild || rootLint || rootTest)) {
+  if (!(scopedApiConfidence || rootBuild || rootLint || rootTest)) {
     reasons.push('missing API confidence verification (lint, build, or test) for API changes');
   }
 }

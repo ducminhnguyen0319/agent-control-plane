@@ -167,6 +167,8 @@ printf -v codex_bin_q '%q' "$codex_bin"
 printf -v runner_bin_q '%q' "$runner_bin"
 printf -v safe_profile_q '%q' "$safe_profile"
 printf -v bypass_profile_q '%q' "$bypass_profile"
+helper_bin_dir="${artifact_dir}/worker-bin"
+printf -v helper_bin_dir_q '%q' "$helper_bin_dir"
 
 {
   printf 'TASK_KIND=%s\n' "$task_kind_q"
@@ -274,6 +276,61 @@ cat >"$inner_script" <<EOF
 set -euo pipefail
 ${runtime_exports}
 ${context_exports}cd ${worktree_realpath_q}
+bootstrap_codex_helper_env() {
+  local helper_bin_dir=${helper_bin_dir_q}
+  local openspec_shim=""
+
+  mkdir -p "\${helper_bin_dir}"
+
+  if [[ -d ${worktree_realpath_q}/node_modules/.bin ]]; then
+    export PATH="${worktree_realpath_q}/node_modules/.bin:\${PATH}"
+  fi
+  export PATH="\${helper_bin_dir}:\${PATH}"
+
+  if command -v openspec >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [[ ! -d ${worktree_realpath_q}/openspec ]]; then
+    return 0
+  fi
+
+  openspec_shim="\${helper_bin_dir}/openspec"
+  cat >"\${openspec_shim}" <<'SHIM'
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="\${ACP_REPO_ROOT:-\${F_LOSNING_REPO_ROOT:-\$(pwd)}}"
+openspec_root="\${repo_root}/openspec"
+
+if [[ ! -d "\${openspec_root}" ]]; then
+  echo "openspec directory not found: \${openspec_root}" >&2
+  exit 1
+fi
+
+command_name="\${1:-}"
+case "\${command_name}" in
+  list)
+    shift || true
+    if [[ "\${1:-}" == "--specs" ]]; then
+      find "\${openspec_root}/specs" -mindepth 1 -maxdepth 1 -type d 2>/dev/null \
+        | xargs -n1 basename 2>/dev/null \
+        | sort
+      exit 0
+    fi
+    find "\${openspec_root}/changes" -mindepth 1 -maxdepth 1 -type d ! -name archive 2>/dev/null \
+      | xargs -n1 basename 2>/dev/null \
+      | sort
+    exit 0
+    ;;
+  *)
+    echo "openspec shim only supports 'list' and 'list --specs'; use direct file reads for other operations" >&2
+    exit 64
+    ;;
+esac
+SHIM
+  chmod +x "\${openspec_shim}"
+}
 reset_sandbox_run_dir() {
   mkdir -p ${sandbox_run_dir_q}
   find ${sandbox_run_dir_q} -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
@@ -331,6 +388,7 @@ record_final_git_state() {
   } >>"\${tmp_file}"
   mv "\${tmp_file}" ${meta_file_q}
 }
+bootstrap_codex_helper_env
 reset_sandbox_run_dir
 set +e
 bash ${runner_bin_q} \\
