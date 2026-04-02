@@ -43,6 +43,7 @@ for (const forbiddenPath of [
   "tools/bin/check-skill-contracts.sh",
   "bin/audit-issue-routing.sh",
   "tools/templates/legacy/issue-prompt-template-pre-slim.md",
+  "tools/bin/render-dashboard-snapshot.py",
 ]) {
   if (paths.has(forbiddenPath)) {
     fail(`forbidden tarball path present: ${forbiddenPath}`);
@@ -73,6 +74,11 @@ const result = {
 };
 
 console.log(JSON.stringify(result));
+
+// Compressed-size budget guard: fail if the tarball creeps above 400 KB.
+if (pack.size > 400 * 1024) {
+  fail(`tarball compressed size ${Math.round(pack.size / 1024)} KB exceeds 400 KB budget`);
+}
 NODE
 
 TMP_PACKAGE_JSON=$(mktemp)

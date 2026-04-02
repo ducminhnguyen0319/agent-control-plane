@@ -85,7 +85,7 @@ tools/bin/uninstall-project-launchd.sh --profile-id <id>
 tools/bin/project-remove.sh --profile-id <id>
 tools/bin/project-remove.sh --profile-id <id> --purge-paths
 tools/bin/sync-shared-agent-home.sh
-python3 tools/bin/render-dashboard-snapshot.py --pretty
+python3 tools/dashboard/dashboard_snapshot.py --pretty
 bash tools/bin/serve-dashboard.sh --host 127.0.0.1 --port 8765
 bash tools/bin/install-dashboard-launchd.sh --host 127.0.0.1 --port 8765
 ```
@@ -97,7 +97,7 @@ prompts live under `tools/templates/`.
 ## Dashboard
 
 ```bash
-python3 tools/bin/render-dashboard-snapshot.py --pretty
+python3 tools/dashboard/dashboard_snapshot.py --pretty
 bash tools/bin/serve-dashboard.sh --host 127.0.0.1 --port 8765
 bash tools/bin/install-dashboard-launchd.sh --host 127.0.0.1 --port 8765
 ```

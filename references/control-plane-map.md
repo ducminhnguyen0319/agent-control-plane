@@ -64,7 +64,7 @@ roots, labels, worker preferences, prompts, and project-specific guardrails.
   before scheduler use.
 - `tools/bin/test-smoke.sh`
   Runs the main shared-package smoke gates in one operator-facing command.
-- `tools/bin/render-dashboard-snapshot.py`
+- `tools/dashboard/dashboard_snapshot.py`
   Emits a JSON snapshot of active runs, resident controllers, cooldown state,
   queue depth, and scheduled issues across installed profiles.
 - `tools/bin/serve-dashboard.sh`
