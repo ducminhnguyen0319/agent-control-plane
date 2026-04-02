@@ -15,6 +15,7 @@ shared_agent_home="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 repo_root="${AGENT_PROJECT_REPO_ROOT:-}"
 runs_root="${AGENT_PROJECT_RUNS_ROOT:-}"
 history_root="${AGENT_PROJECT_HISTORY_ROOT:-}"
+state_root="${AGENT_PROJECT_STATE_ROOT:-${F_LOSNING_STATE_ROOT:-}}"
 session=""
 worktree_path=""
 mode="generic"
@@ -30,6 +31,7 @@ while [[ $# -gt 0 ]]; do
     --repo-root) repo_root="${2:-}"; shift 2 ;;
     --runs-root) runs_root="${2:-}"; shift 2 ;;
     --history-root) history_root="${2:-}"; shift 2 ;;
+    --state-root) state_root="${2:-}"; shift 2 ;;
     --session) session="${2:-}"; shift 2 ;;
     --worktree) worktree_path="${2:-}"; shift 2 ;;
     --mode) mode="${2:-}"; shift 2 ;;
@@ -141,6 +143,62 @@ path_is_within_root() {
   [[ "$target_canonical" == "$root_canonical" || "$target_canonical" == "$root_canonical"/* ]]
 }
 
+derive_state_root() {
+  if [[ -n "${state_root}" && -d "${state_root}" ]]; then
+    printf '%s\n' "${state_root}"
+    return 0
+  fi
+
+  if [[ -n "${runs_root}" && -d "${runs_root}" ]]; then
+    local candidate_root=""
+    candidate_root="$(cd "${runs_root}/.." 2>/dev/null && pwd -P || true)"
+    if [[ -n "${candidate_root}" && -d "${candidate_root}/state" ]]; then
+      printf '%s/state\n' "${candidate_root}"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+resident_worktree_protected() {
+  local candidate_path="${1:-}"
+  local resolved_candidate=""
+  local resolved_state_root=""
+  local metadata_file=""
+  local resident_worktree=""
+  local resident_realpath=""
+  local resolved_resident=""
+
+  [[ -n "${candidate_path}" && -d "${candidate_path}" ]] || return 1
+  resolved_candidate="$(canonicalize_existing_dir "${candidate_path}" || true)"
+  [[ -n "${resolved_candidate}" ]] || return 1
+
+  resolved_state_root="$(derive_state_root || true)"
+  [[ -n "${resolved_state_root}" && -d "${resolved_state_root}/resident-workers/issues" ]] || return 1
+
+  for metadata_file in "${resolved_state_root}"/resident-workers/issues/*/metadata.env; do
+    [[ -f "${metadata_file}" ]] || continue
+    resident_worktree=""
+    resident_realpath=""
+    set +u
+    set -a
+    # shellcheck source=/dev/null
+    source "${metadata_file}"
+    set +a
+    set -u
+    resident_worktree="${WORKTREE_REALPATH:-${WORKTREE:-}}"
+    [[ -n "${resident_worktree}" && -d "${resident_worktree}" ]] || continue
+    resolved_resident="$(canonicalize_existing_dir "${resident_worktree}" || true)"
+    [[ -n "${resolved_resident}" ]] || continue
+    if [[ "${resolved_candidate}" == "${resolved_resident}" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 cleanup_with_branch_tool() {
   local include_path="${1:-yes}"
   local -a cleanup_args
@@ -185,6 +243,8 @@ cleanup_orphan_worktree_dir() {
 
 if [[ "$active_tmux_session" == "true" ]]; then
   cleanup_mode="deferred-active-session"
+elif [[ "$skip_worktree_cleanup" != "true" && -n "${worktree_path}" ]] && resident_worktree_protected "${worktree_path}"; then
+  cleanup_mode="protected-resident-worktree"
 elif [[ "$skip_worktree_cleanup" != "true" && -n "$branch_name" ]]; then
   if cleanup_output="$(cleanup_with_branch_tool yes 2>&1)"; then
     cleanup_mode="branch"

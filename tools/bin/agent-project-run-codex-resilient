@@ -35,6 +35,7 @@ max_resume_attempts="${ACP_CODEX_MAX_RESUME_ATTEMPTS:-${F_LOSNING_CODEX_MAX_RESU
 auth_refresh_timeout_seconds="${ACP_CODEX_AUTH_REFRESH_TIMEOUT_SECONDS:-${F_LOSNING_CODEX_AUTH_REFRESH_TIMEOUT_SECONDS:-900}}"
 auth_refresh_poll_seconds="${ACP_CODEX_AUTH_REFRESH_POLL_SECONDS:-${F_LOSNING_CODEX_AUTH_REFRESH_POLL_SECONDS:-10}}"
 max_quota_autoswitch_attempts="${ACP_CODEX_MAX_AUTOSWITCH_ATTEMPTS:-${F_LOSNING_CODEX_MAX_AUTOSWITCH_ATTEMPTS:-1}}"
+codex_progress_heartbeat_seconds="${ACP_CODEX_PROGRESS_HEARTBEAT_SECONDS:-${F_LOSNING_CODEX_PROGRESS_HEARTBEAT_SECONDS:-30}}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -80,6 +81,10 @@ esac
 case "$max_quota_autoswitch_attempts" in
   ''|*[!0-9]*) echo "ACP_CODEX_MAX_AUTOSWITCH_ATTEMPTS must be numeric" >&2; exit 1 ;;
 esac
+case "$codex_progress_heartbeat_seconds" in
+  ''|*[!0-9]*) echo "ACP_CODEX_PROGRESS_HEARTBEAT_SECONDS must be numeric" >&2; exit 1 ;;
+  0) echo "ACP_CODEX_PROGRESS_HEARTBEAT_SECONDS must be greater than zero" >&2; exit 1 ;;
+esac
 
 FLOW_SKILL_DIR="$(resolve_flow_skill_dir "${BASH_SOURCE[0]}")"
 state_file="${host_run_dir}/runner.env"
@@ -116,6 +121,7 @@ last_quota_switch_status=""
 last_quota_next_retry_at=""
 last_quota_selected_label=""
 quota_autoswitch_attempt_count=0
+last_attempt_started_epoch=0
 
 mkdir -p "$host_run_dir"
 touch "$output_file"
@@ -402,9 +408,11 @@ stream_codex_exec() {
   local phase="${1:?phase required}"
   local stream_fifo=""
   local producer_pid=""
+  local heartbeat_pid=""
   local line=""
 
   last_attempt_start_size="$(stat -f %z "$output_file" 2>/dev/null || printf '0')"
+  last_attempt_started_epoch="$(date +%s)"
   stream_fifo="$(mktemp -u "${TMPDIR:-/tmp}/codex-stream.XXXXXX")"
   mkfifo "$stream_fifo"
 
@@ -441,10 +449,30 @@ stream_codex_exec() {
   esac
 
   producer_pid="$!"
+  (
+    local now elapsed
+    while kill -0 "$producer_pid" 2>/dev/null; do
+      sleep "$codex_progress_heartbeat_seconds"
+      if ! kill -0 "$producer_pid" 2>/dev/null; then
+        break
+      fi
+      now="$(date +%s)"
+      elapsed=$((now - last_attempt_started_epoch))
+      write_state "running" ""
+      log_runner "heartbeat waiting-for-codex-output elapsed=${elapsed}s"
+    done
+  ) &
+  heartbeat_pid="$!"
+
   while IFS= read -r line || [[ -n "$line" ]]; do
     printf '%s\n' "$line" | tee -a "$output_file"
     persist_thread_id_from_line "$line"
   done <"$stream_fifo"
+
+  if [[ -n "$heartbeat_pid" ]] && kill -0 "$heartbeat_pid" 2>/dev/null; then
+    kill "$heartbeat_pid" 2>/dev/null || true
+    wait "$heartbeat_pid" 2>/dev/null || true
+  fi
 
   rm -f "$stream_fifo"
 
