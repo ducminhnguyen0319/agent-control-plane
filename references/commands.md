@@ -76,6 +76,7 @@ tools/bin/profile-smoke.sh
 tools/bin/test-smoke.sh
 tools/bin/profile-adopt.sh --profile-id <id>
 tools/bin/project-runtimectl.sh status --profile-id <id>
+tools/bin/project-runtimectl.sh sync --profile-id <id>
 tools/bin/project-runtimectl.sh stop --profile-id <id>
 tools/bin/project-runtimectl.sh start --profile-id <id>
 tools/bin/project-runtimectl.sh restart --profile-id <id>

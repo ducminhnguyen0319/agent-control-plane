@@ -918,8 +918,9 @@ heartbeat_seconds = max(float(heartbeat_seconds_raw), 1.0)
 hard_deadline = time.monotonic() + timeout_seconds + 15.0
 started_at = time.monotonic()
 next_heartbeat = time.monotonic() + heartbeat_seconds
-seen_agent_output = False
-last_agent_output_at = started_at
+seen_agent_progress = False
+last_agent_progress_at = started_at
+last_progress_source = "none"
 terminal_patterns = [
     re.compile(r"Config was last written by a newer OpenClaw", re.I),
     re.compile(r"invalid api key|authentication failed|unauthorized|provider api key|login required|please authenticate|api_key_invalid", re.I),
@@ -932,6 +933,21 @@ proc = None
 sel = selectors.DefaultSelector()
 matched_terminal_error = False
 tail = ""
+openclaw_state_dir = os.environ.get("OPENCLAW_STATE_DIR", "")
+sandbox_run_dir = (
+    os.environ.get("ACP_RUN_DIR")
+    or os.environ.get("AGENT_PROJECT_RUN_DIR")
+    or os.environ.get("F_LOSNING_RUN_DIR")
+    or ""
+)
+host_managed_prefixes = tuple(
+    prefix
+    for prefix in (
+        os.path.realpath(runner_state_path) if runner_state_path else "",
+        os.path.realpath(output_path) if output_path else "",
+    )
+    if prefix
+)
 
 def write_running_heartbeat() -> None:
     updated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -967,6 +983,47 @@ def terminate_process_group(process: subprocess.Popen) -> None:
     except ProcessLookupError:
         return
 
+def progress_signature() -> tuple[tuple[str, int, int], ...]:
+    entries: list[tuple[str, int, int]] = []
+
+    def add_file(path: str) -> None:
+        real_path = ""
+        if not path:
+            return
+        try:
+            stat_result = os.stat(path)
+        except OSError:
+            return
+        if not os.path.isfile(path):
+            return
+        real_path = os.path.realpath(path)
+        for prefix in host_managed_prefixes:
+            if real_path == prefix or real_path.startswith(f"{prefix}.tmp."):
+                return
+        entries.append((real_path, stat_result.st_mtime_ns, stat_result.st_size))
+
+    if sandbox_run_dir:
+        try:
+            for name in os.listdir(sandbox_run_dir):
+                add_file(os.path.join(sandbox_run_dir, name))
+        except OSError:
+            pass
+
+    if openclaw_state_dir:
+        sessions_dir = os.path.join(openclaw_state_dir, "agents", agent_id, "sessions")
+        add_file(os.path.join(sessions_dir, "sessions.json"))
+        try:
+            for name in os.listdir(sessions_dir):
+                if name.endswith(".jsonl") and not name.endswith(".lock"):
+                    add_file(os.path.join(sessions_dir, name))
+        except OSError:
+            pass
+
+    entries.sort()
+    return tuple(entries)
+
+last_progress_signature = progress_signature()
+
 with open(output_path, "ab", buffering=0) as log_handle:
     proc = subprocess.Popen(
         cmd,
@@ -989,25 +1046,41 @@ with open(output_path, "ab", buffering=0) as log_handle:
           terminate_process_group(proc)
           break
 
+        current_progress_signature = progress_signature()
+        if current_progress_signature != last_progress_signature:
+            last_progress_signature = current_progress_signature
+            seen_agent_progress = True
+            last_agent_progress_at = time.monotonic()
+            last_progress_source = "session-state"
+            next_heartbeat = time.monotonic() + heartbeat_seconds
+
         events = sel.select(timeout=0.2)
         if not events:
-            if proc.poll() is None and not seen_agent_output and stall_seconds > 0 and (time.monotonic() - started_at) >= stall_seconds:
+            if proc.poll() is None and not seen_agent_progress and stall_seconds > 0 and (time.monotonic() - started_at) >= stall_seconds:
                 elapsed = int(time.monotonic() - started_at)
                 write_running_heartbeat()
                 log_handle.write(f"[openclaw] stale-run no-agent-output-before-stall-threshold elapsed={elapsed}s\n".encode("utf-8"))
                 terminate_process_group(proc)
                 break
-            if proc.poll() is None and seen_agent_output and stall_seconds > 0 and (time.monotonic() - last_agent_output_at) >= stall_seconds:
+            if proc.poll() is None and seen_agent_progress and stall_seconds > 0 and (time.monotonic() - last_agent_progress_at) >= stall_seconds:
                 elapsed = int(time.monotonic() - started_at)
-                idle_for = int(time.monotonic() - last_agent_output_at)
+                idle_for = int(time.monotonic() - last_agent_progress_at)
                 write_running_heartbeat()
                 log_handle.write(f"[openclaw] stale-run no-agent-progress-before-stall-threshold elapsed={elapsed}s idle={idle_for}s\n".encode("utf-8"))
                 terminate_process_group(proc)
                 break
-            if proc.poll() is None and time.monotonic() >= next_heartbeat:
+            if proc.poll() is None and not seen_agent_progress and time.monotonic() >= next_heartbeat:
                 elapsed = int(time.monotonic() - started_at)
                 write_running_heartbeat()
                 log_handle.write(f"[openclaw] heartbeat waiting-for-agent-output elapsed={elapsed}s\n".encode("utf-8"))
+                next_heartbeat = time.monotonic() + heartbeat_seconds
+            if proc.poll() is None and seen_agent_progress and time.monotonic() >= next_heartbeat:
+                elapsed = int(time.monotonic() - started_at)
+                idle_for = int(time.monotonic() - last_agent_progress_at)
+                write_running_heartbeat()
+                log_handle.write(
+                    f"[openclaw] heartbeat progress source={last_progress_source} elapsed={elapsed}s idle={idle_for}s\n".encode("utf-8")
+                )
                 next_heartbeat = time.monotonic() + heartbeat_seconds
             if proc.poll() is not None:
                 break
@@ -1022,8 +1095,9 @@ with open(output_path, "ab", buffering=0) as log_handle:
             text = chunk.decode("utf-8", errors="replace")
             tail = (tail + text)[-8192:]
             next_heartbeat = time.monotonic() + heartbeat_seconds
-            seen_agent_output = True
-            last_agent_output_at = time.monotonic()
+            seen_agent_progress = True
+            last_agent_progress_at = time.monotonic()
+            last_progress_source = "stdout"
 
             if not matched_terminal_error and any(pattern.search(tail) for pattern in terminal_patterns):
                 matched_terminal_error = True

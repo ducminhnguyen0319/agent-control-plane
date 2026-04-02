@@ -8,7 +8,7 @@ source "${SCRIPT_DIR}/flow-config-lib.sh"
 usage() {
   cat <<'EOF'
 Usage:
-  project-runtimectl.sh <status|start|stop|restart> --profile-id <id> [options]
+  project-runtimectl.sh <status|start|stop|restart|sync> --profile-id <id> [options]
 
 Manage runtime processes for one installed profile.
 
@@ -16,6 +16,7 @@ Options:
   --profile-id <id>      Profile id to manage
   --delay-seconds <n>    Delay for start via kick-scheduler (default: 0)
   --wait-seconds <n>     Wait for stop to settle before SIGKILL (default: 10)
+  --force                Force a runtime sync refresh when using `sync`
   --help                 Show this help
 EOF
 }
@@ -30,19 +31,21 @@ shift || true
 profile_id_override=""
 delay_seconds="0"
 wait_seconds="10"
+force_sync="0"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --profile-id) profile_id_override="${2:-}"; shift 2 ;;
     --delay-seconds) delay_seconds="${2:-}"; shift 2 ;;
     --wait-seconds) wait_seconds="${2:-}"; shift 2 ;;
+    --force) force_sync="1"; shift ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 64 ;;
   esac
 done
 
 case "${subcommand}" in
-  status|start|stop|restart) ;;
+  status|start|stop|restart|sync) ;;
   *)
     echo "Unknown subcommand: ${subcommand}" >&2
     usage >&2
@@ -97,12 +100,16 @@ PROFILE_ID_SLUG="$(printf '%s' "${PROFILE_ID}" | tr -c 'A-Za-z0-9._-' '-')"
 BOOTSTRAP_SCRIPT="${ACP_PROJECT_RUNTIME_BOOTSTRAP_SCRIPT:-${FLOW_SKILL_DIR}/tools/bin/project-launchd-bootstrap.sh}"
 KICK_SCRIPT="${ACP_PROJECT_RUNTIME_KICK_SCRIPT:-${FLOW_SKILL_DIR}/tools/bin/kick-scheduler.sh}"
 SUPERVISOR_SCRIPT="${ACP_PROJECT_RUNTIME_SUPERVISOR_SCRIPT:-${FLOW_SKILL_DIR}/tools/bin/project-runtime-supervisor.sh}"
+ENSURE_SYNC_SCRIPT="${ACP_PROJECT_RUNTIME_ENSURE_SYNC_SCRIPT:-${FLOW_SKILL_DIR}/tools/bin/ensure-runtime-sync.sh}"
 UPDATE_LABELS_SCRIPT="${ACP_PROJECT_RUNTIME_UPDATE_LABELS_SCRIPT:-${FLOW_SKILL_DIR}/tools/bin/agent-github-update-labels}"
 TMUX_BIN="${ACP_PROJECT_RUNTIME_TMUX_BIN:-$(command -v tmux || true)}"
 LAUNCHCTL_BIN="${ACP_PROJECT_RUNTIME_LAUNCHCTL_BIN:-$(command -v launchctl || true)}"
 LAUNCH_AGENTS_DIR="${ACP_PROJECT_RUNTIME_LAUNCH_AGENTS_DIR:-${HOME}/Library/LaunchAgents}"
 LAUNCHD_LABEL="${ACP_PROJECT_RUNTIME_LAUNCHD_LABEL:-ai.agent.project.${PROFILE_ID_SLUG}}"
 LAUNCHD_PLIST="${ACP_PROJECT_RUNTIME_LAUNCHD_PLIST:-${LAUNCH_AGENTS_DIR}/${LAUNCHD_LABEL}.plist}"
+SOURCE_HOME="${ACP_PROJECT_RUNTIME_SOURCE_HOME:-}"
+RUNTIME_HOME="${ACP_PROJECT_RUNTIME_RUNTIME_HOME:-$(resolve_runtime_home)}"
+SYNC_STAMP_FILE="${RUNTIME_HOME}/.agent-control-plane-runtime-sync.env"
 
 case "${delay_seconds}" in
   ''|*[!0-9]*) echo "--delay-seconds must be numeric" >&2; exit 64 ;;
@@ -181,6 +188,13 @@ wait_for_runtime_start() {
     sleep 1
   done
   return 1
+}
+
+sync_stamp_value() {
+  local key="${1:?key required}"
+  [[ -f "${SYNC_STAMP_FILE}" ]] || return 1
+  awk -F= -v target="${key}" '$1 == target {print $2; exit}' "${SYNC_STAMP_FILE}" 2>/dev/null \
+    | sed -e "s/^'//" -e "s/'$//"
 }
 
 tmux_session_exists() {
@@ -328,6 +342,9 @@ print_status() {
   local active_session_count="0"
   local pending_count="0"
   local launchd_state=""
+  local runtime_sync_status=""
+  local runtime_sync_updated_at=""
+  local runtime_sync_fingerprint=""
 
   heartbeat="$(heartbeat_pid)"
   shared_loop="$(shared_loop_pid)"
@@ -349,6 +366,9 @@ print_status() {
   fi
 
   launchd_state="$(launchd_service_state)"
+  runtime_sync_status="$(sync_stamp_value "SYNC_STATUS" || true)"
+  runtime_sync_updated_at="$(sync_stamp_value "UPDATED_AT" || true)"
+  runtime_sync_fingerprint="$(sync_stamp_value "SOURCE_FINGERPRINT" || true)"
 
   printf 'PROFILE_ID=%s\n' "${PROFILE_ID}"
   printf 'CONFIG_YAML=%s\n' "${CONFIG_YAML}"
@@ -369,6 +389,10 @@ print_status() {
   printf 'CONTROLLER_PIDS=%s\n' "$(printf '%s\n' "${controller_pids}" | join_by_comma)"
   printf 'ACTIVE_TMUX_SESSIONS=%s\n' "$(printf '%s\n' "${active_sessions}" | join_by_comma)"
   printf 'PENDING_LAUNCH_PIDS=%s\n' "$(printf '%s\n' "${pending_pids}" | join_by_comma)"
+  printf 'SYNC_STAMP_FILE=%s\n' "${SYNC_STAMP_FILE}"
+  printf 'RUNTIME_SYNC_STATUS=%s\n' "${runtime_sync_status}"
+  printf 'RUNTIME_SYNC_UPDATED_AT=%s\n' "${runtime_sync_updated_at}"
+  printf 'RUNTIME_SYNC_FINGERPRINT=%s\n' "${runtime_sync_fingerprint}"
 }
 
 terminate_pid_list() {
@@ -577,6 +601,31 @@ start_runtime() {
   fi
 }
 
+sync_runtime() {
+  local ensure_output=""
+  local ensure_args=()
+
+  if [[ ! -x "${ENSURE_SYNC_SCRIPT}" ]]; then
+    echo "missing runtime sync helper: ${ENSURE_SYNC_SCRIPT}" >&2
+    exit 65
+  fi
+
+  ensure_args=(--runtime-home "${RUNTIME_HOME}")
+  if [[ -n "${SOURCE_HOME}" ]]; then
+    ensure_args=(--source-home "${SOURCE_HOME}" "${ensure_args[@]}")
+  fi
+  if [[ "${force_sync}" == "1" ]]; then
+    ensure_args=(--force "${ensure_args[@]}")
+    ensure_output="$(bash "${ENSURE_SYNC_SCRIPT}" "${ensure_args[@]}")"
+  else
+    ensure_output="$(bash "${ENSURE_SYNC_SCRIPT}" "${ensure_args[@]}")"
+  fi
+
+  printf 'ACTION=sync\n'
+  printf 'PROFILE_ID=%s\n' "${PROFILE_ID}"
+  printf '%s\n' "${ensure_output}"
+}
+
 case "${subcommand}" in
   status)
     print_status
@@ -593,5 +642,8 @@ case "${subcommand}" in
     stop_runtime >/dev/null
     start_runtime
     print_status
+    ;;
+  sync)
+    sync_runtime
     ;;
 esac
