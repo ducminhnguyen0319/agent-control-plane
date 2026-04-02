@@ -92,6 +92,7 @@ REPO_SLUG="$(flow_resolve_repo_slug "${CONFIG_YAML}")"
 RUNS_ROOT="$(flow_resolve_runs_root "${CONFIG_YAML}")"
 STATE_ROOT="$(flow_resolve_state_root "${CONFIG_YAML}")"
 SUPERVISOR_PID_FILE="${STATE_ROOT}/runtime-supervisor.pid"
+SUPERVISOR_LOG_FILE="${STATE_ROOT}/runtime-supervisor.log"
 PROFILE_ID_SLUG="$(printf '%s' "${PROFILE_ID}" | tr -c 'A-Za-z0-9._-' '-')"
 BOOTSTRAP_SCRIPT="${ACP_PROJECT_RUNTIME_BOOTSTRAP_SCRIPT:-${FLOW_SKILL_DIR}/tools/bin/project-launchd-bootstrap.sh}"
 KICK_SCRIPT="${ACP_PROJECT_RUNTIME_KICK_SCRIPT:-${FLOW_SKILL_DIR}/tools/bin/kick-scheduler.sh}"
@@ -495,6 +496,7 @@ stop_runtime() {
 start_runtime() {
   local kick_output=""
   local fallback_pid=""
+  local fallback_log_file="${SUPERVISOR_LOG_FILE}"
   local start_timeout="${ACP_PROJECT_RUNTIME_START_WAIT_SECONDS:-${wait_seconds}}"
   local runtime_started_after_kick="0"
   local supervisor_spawned="0"
@@ -533,14 +535,26 @@ start_runtime() {
 
   if [[ "${runtime_started_after_kick}" != "1" && -z "$(supervisor_pid)" ]]; then
     mkdir -p "${STATE_ROOT}"
-    nohup env ACP_PROJECT_ID="${PROFILE_ID}" AGENT_PROJECT_ID="${PROFILE_ID}" \
-      bash "${SUPERVISOR_SCRIPT}" \
-        --bootstrap-script "${BOOTSTRAP_SCRIPT}" \
-        --pid-file "${SUPERVISOR_PID_FILE}" \
-        --delay-seconds "${delay_seconds}" \
-        --interval-seconds "${ACP_PROJECT_RUNTIME_SUPERVISOR_INTERVAL_SECONDS:-15}" \
-        </dev/null >/dev/null 2>&1 &
-    fallback_pid="$!"
+    : >"${fallback_log_file}"
+    if command -v setsid >/dev/null 2>&1; then
+      setsid env ACP_PROJECT_ID="${PROFILE_ID}" AGENT_PROJECT_ID="${PROFILE_ID}" \
+        bash "${SUPERVISOR_SCRIPT}" \
+          --bootstrap-script "${BOOTSTRAP_SCRIPT}" \
+          --pid-file "${SUPERVISOR_PID_FILE}" \
+          --delay-seconds "${delay_seconds}" \
+          --interval-seconds "${ACP_PROJECT_RUNTIME_SUPERVISOR_INTERVAL_SECONDS:-15}" \
+          </dev/null >>"${fallback_log_file}" 2>&1 &
+      fallback_pid="$!"
+    else
+      nohup env ACP_PROJECT_ID="${PROFILE_ID}" AGENT_PROJECT_ID="${PROFILE_ID}" \
+        bash "${SUPERVISOR_SCRIPT}" \
+          --bootstrap-script "${BOOTSTRAP_SCRIPT}" \
+          --pid-file "${SUPERVISOR_PID_FILE}" \
+          --delay-seconds "${delay_seconds}" \
+          --interval-seconds "${ACP_PROJECT_RUNTIME_SUPERVISOR_INTERVAL_SECONDS:-15}" \
+          </dev/null >>"${fallback_log_file}" 2>&1 &
+      fallback_pid="$!"
+    fi
     supervisor_spawned="1"
     wait_for_runtime_start "${start_timeout}" || true
   fi
@@ -559,6 +573,7 @@ start_runtime() {
   printf '%s\n' "${kick_output}"
   if [[ -n "${fallback_pid}" ]]; then
     printf 'FALLBACK_SUPERVISOR_PID=%s\n' "${fallback_pid}"
+    printf 'FALLBACK_SUPERVISOR_LOG=%s\n' "${fallback_log_file}"
   fi
 }
 

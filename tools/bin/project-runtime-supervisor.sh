@@ -47,10 +47,16 @@ trap '' HUP
 
 first_pass="1"
 while true; do
+  printf '[%s] supervisor bootstrap start pid=%s script=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$$" "${bootstrap_script}" >&2
   if [[ "${first_pass}" == "1" && "${delay_seconds}" != "0" ]]; then
     sleep "${delay_seconds}"
   fi
   first_pass="0"
-  "${bootstrap_script}" >/dev/null 2>&1 || true
+  if "${bootstrap_script}"; then
+    printf '[%s] supervisor bootstrap end status=0 pid=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$$" >&2
+  else
+    bootstrap_status=$?
+    printf '[%s] supervisor bootstrap end status=%s pid=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "${bootstrap_status}" "$$" >&2
+  fi
   sleep "${interval_seconds}"
 done

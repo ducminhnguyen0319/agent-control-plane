@@ -77,6 +77,7 @@ grep -q 'PROFILE_ID=demo' <<<"${start_output}"
 grep -q 'START_MODE=kick-scheduler-fallback-supervisor' <<<"${start_output}"
 grep -q 'KICK_STATUS=scheduled' <<<"${start_output}"
 grep -q 'FALLBACK_SUPERVISOR_PID=' <<<"${start_output}"
+grep -q '^FALLBACK_SUPERVISOR_LOG=' <<<"${start_output}"
 grep -q 'kick profile=demo delay=0' "${kick_log}"
 
 for _ in 1 2 3 4 5; do
