@@ -3,7 +3,24 @@ set -euo pipefail
 
 TOOL_BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_ROOT="$(cd "${TOOL_BIN_DIR}/../.." && pwd)"
-ROOT_SOURCE_DIR="$(cd "${SKILL_ROOT}/../../.." && pwd)"
+ROOT_RUNTIME_DIR="${AGENT_PLATFORM_HOME:-${HOME}/.agent-runtime}/runtime-home"
+ROOT_SOURCE_DIR=""
+
+read_runtime_stamp_value() {
+  local key="${1:?key required}"
+  local stamp_file="${ROOT_RUNTIME_DIR}/.agent-control-plane-runtime-sync.env"
+  [[ -f "${stamp_file}" ]] || return 1
+  awk -F= -v target="${key}" '$1 == target {print $2; exit}' "${stamp_file}" 2>/dev/null \
+    | sed -e "s/^'//" -e "s/'$//"
+}
+
+ROOT_SOURCE_DIR="${AGENT_FLOW_SOURCE_HOME:-${ACP_RUNTIME_SYNC_SOURCE_HOME:-}}"
+if [[ -z "${ROOT_SOURCE_DIR}" ]]; then
+  ROOT_SOURCE_DIR="$(read_runtime_stamp_value "SOURCE_HOME" || true)"
+fi
+if [[ -z "${ROOT_SOURCE_DIR}" ]]; then
+  ROOT_SOURCE_DIR="$(cd "${SKILL_ROOT}/../../.." && pwd)"
+fi
 if [[ ! -f "${ROOT_SOURCE_DIR}/tools/bin/agent-project-reconcile-pr-session" ]]; then
   ROOT_SOURCE_DIR="${SKILL_ROOT}"
 fi
@@ -11,7 +28,6 @@ HAS_DISTINCT_ROOT_SOURCE=0
 if [[ "${ROOT_SOURCE_DIR}" != "${SKILL_ROOT}" ]]; then
   HAS_DISTINCT_ROOT_SOURCE=1
 fi
-ROOT_RUNTIME_DIR="${AGENT_PLATFORM_HOME:-${HOME}/.agent-runtime}/runtime-home"
 RUNTIME_SKILL_ROOT="${ROOT_RUNTIME_DIR}/skills/openclaw/agent-control-plane"
 # shellcheck source=/dev/null
 source "${TOOL_BIN_DIR}/flow-config-lib.sh"
