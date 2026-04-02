@@ -971,7 +971,12 @@ if (explicitFailureReason) {
   /required (?:issue-contract )?verification does not currently pass/i.test(body) ||
   /Because the required `pnpm typecheck` did not pass/i.test(body) ||
   /- BLOCKED `pnpm typecheck`/i.test(body) ||
-  /pnpm typecheck(?:`)? fails in unrelated existing file/i.test(body)
+  /pnpm typecheck(?:`)? fails in unrelated existing file/i.test(body) ||
+  /Blocked on required root verification/i.test(body) ||
+  /required root (?:verification command|`pnpm test`)/i.test(body) ||
+  /pnpm test` is currently failing outside this/i.test(body) ||
+  /The required root test command failed/i.test(body) ||
+  /did not commit because the issue contract requires verification to pass/i.test(body)
 ) {
   reason = 'verification-guard-blocked';
 } else if (/^# Blocker: (All checklist items already completed|Worker produced no publishable delta)$/im.test(body)) {
@@ -991,7 +996,12 @@ if (explicitFailureReason) {
   /I’m blocked on the environment, not the issue scope/i.test(body) ||
   /Every local execution path I need for this cycle is failing immediately with `aborted`/i.test(body) ||
   /outside this session['’]s writable sandbox/i.test(body) ||
-  /could not write to the host-required `\$ACP_RUN_DIR`/i.test(body)
+  /could not write to the host-required `\$ACP_RUN_DIR`/i.test(body) ||
+  /cannot access local infrastructure from this sandbox/i.test(body) ||
+  /sandbox socket connection errors/i.test(body) ||
+  /connect EPERM 127\.0\.0\.1:6379/i.test(body) ||
+  /local Postgres\/Redis services/i.test(body) ||
+  /worker can(?:not|'t) connect to the local test Postgres and Redis services/i.test(body)
 ) {
   reason = 'worker-environment-blocked';
 } else if (/^# Blocker:/im.test(body)) {
