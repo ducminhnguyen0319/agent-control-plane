@@ -69,6 +69,31 @@ sync_skill_copies() {
   fi
 }
 
+refresh_legacy_profile_templates() {
+  local profiles_root=""
+  local current_issue_template=""
+  local legacy_issue_template=""
+  local profile_dir=""
+  local profile_issue_template=""
+
+  profiles_root="$(resolve_flow_profile_registry_root)"
+  current_issue_template="${FLOW_SKILL_SOURCE}/tools/templates/issue-prompt-template.md"
+  legacy_issue_template="${FLOW_SKILL_SOURCE}/tools/templates/legacy/issue-prompt-template-pre-slim.md"
+
+  [[ -d "${profiles_root}" ]] || return 0
+  [[ -f "${current_issue_template}" ]] || return 0
+  [[ -f "${legacy_issue_template}" ]] || return 0
+
+  while IFS= read -r profile_dir; do
+    [[ -n "${profile_dir}" ]] || continue
+    profile_issue_template="${profile_dir}/templates/issue-prompt-template.md"
+    [[ -f "${profile_issue_template}" ]] || continue
+    if cmp -s "${profile_issue_template}" "${legacy_issue_template}"; then
+      cp "${current_issue_template}" "${profile_issue_template}"
+    fi
+  done < <(find "${profiles_root}" -mindepth 2 -maxdepth 2 -type f -name 'control-plane.yaml' -exec dirname {} \; 2>/dev/null | sort)
+}
+
 remove_repo_local_profile_dirs() {
   local candidate=""
 
@@ -210,5 +235,6 @@ fi
 sync_skill_copies
 remove_repo_local_profile_dirs
 normalize_script_permissions
+refresh_legacy_profile_templates
 
 printf 'SHARED_AGENT_HOME=%s\n' "${TARGET_HOME}"
