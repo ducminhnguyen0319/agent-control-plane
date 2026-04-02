@@ -759,6 +759,20 @@ pr_is_self_authored_for_current_actor() {
   [[ -n "${actor_login}" && -n "${author_login}" && "${actor_login}" == "${author_login}" ]]
 }
 
+pr_remote_head_oid() {
+  flow_export_github_cli_auth_env "${repo_slug}"
+  gh pr view "${pr_number}" -R "${repo_slug}" --json headRefOid --jq '.headRefOid // ""' 2>/dev/null || true
+}
+
+pr_remote_already_has_final_head() {
+  local final_head="${FINAL_HEAD:-}"
+  local remote_head=""
+
+  [[ -n "${final_head}" ]] || return 1
+  remote_head="$(pr_remote_head_oid)"
+  [[ -n "${remote_head}" && "${remote_head}" == "${final_head}" ]]
+}
+
 approve_and_merge() {
   local approve_output
   if ! pr_is_self_authored_for_current_actor; then
@@ -814,7 +828,14 @@ handle_linked_issue_merge_cleanup() {
 
 handle_updated_branch_result() {
   if [[ -z "$pr_worktree" || ! -d "$pr_worktree" ]]; then
-    if pr_comment_already_posted; then
+    if pr_remote_already_has_final_head; then
+      post_pr_comment_if_present
+      require_transition "pr_clear_retry" pr_clear_retry
+      require_transition "pr_after_updated_branch" pr_after_updated_branch "$pr_number"
+      cleanup_pr_session
+      result_action="${result_action:-host-push-pr-branch}"
+      notify_pr_reconciled
+    elif pr_comment_already_posted; then
       require_transition "pr_clear_retry" pr_clear_retry
       require_transition "pr_after_updated_branch" pr_after_updated_branch "$pr_number"
       cleanup_pr_session

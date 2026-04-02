@@ -584,6 +584,10 @@ classify_failure_reason() {
     printf 'no-agent-output-before-stall-threshold\n'
     return 0
   fi
+  if grep -Eiq 'stale-run no-agent-progress-before-stall-threshold|no-agent-progress-before-stall-threshold' "\${output_file}" 2>/dev/null; then
+    printf 'no-agent-progress-before-stall-threshold\n'
+    return 0
+  fi
   if grep -Eiq 'timeout|timed out|ETIMEDOUT|ECONNREFUSED' "\${output_file}" 2>/dev/null; then
     printf 'timeout\n'
     return 0
@@ -915,6 +919,7 @@ hard_deadline = time.monotonic() + timeout_seconds + 15.0
 started_at = time.monotonic()
 next_heartbeat = time.monotonic() + heartbeat_seconds
 seen_agent_output = False
+last_agent_output_at = started_at
 terminal_patterns = [
     re.compile(r"Config was last written by a newer OpenClaw", re.I),
     re.compile(r"invalid api key|authentication failed|unauthorized|provider api key|login required|please authenticate|api_key_invalid", re.I),
@@ -992,6 +997,13 @@ with open(output_path, "ab", buffering=0) as log_handle:
                 log_handle.write(f"[openclaw] stale-run no-agent-output-before-stall-threshold elapsed={elapsed}s\n".encode("utf-8"))
                 terminate_process_group(proc)
                 break
+            if proc.poll() is None and seen_agent_output and stall_seconds > 0 and (time.monotonic() - last_agent_output_at) >= stall_seconds:
+                elapsed = int(time.monotonic() - started_at)
+                idle_for = int(time.monotonic() - last_agent_output_at)
+                write_running_heartbeat()
+                log_handle.write(f"[openclaw] stale-run no-agent-progress-before-stall-threshold elapsed={elapsed}s idle={idle_for}s\n".encode("utf-8"))
+                terminate_process_group(proc)
+                break
             if proc.poll() is None and time.monotonic() >= next_heartbeat:
                 elapsed = int(time.monotonic() - started_at)
                 write_running_heartbeat()
@@ -1011,6 +1023,7 @@ with open(output_path, "ab", buffering=0) as log_handle:
             tail = (tail + text)[-8192:]
             next_heartbeat = time.monotonic() + heartbeat_seconds
             seen_agent_output = True
+            last_agent_output_at = time.monotonic()
 
             if not matched_terminal_error and any(pattern.search(tail) for pattern in terminal_patterns):
                 matched_terminal_error = True
