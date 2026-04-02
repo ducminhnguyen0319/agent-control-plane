@@ -207,6 +207,9 @@ elif [[ "$skip_worktree_cleanup" != "true" && -n "$worktree_path" ]] && git -C "
   git -C "$repo_root" worktree remove "$worktree_path" --force || true
   git -C "$repo_root" worktree prune
   cleanup_mode="worktree"
+elif [[ "$skip_worktree_cleanup" != "true" ]] && cleanup_orphan_worktree_dir; then
+  orphan_fallback_used="true"
+  cleanup_mode="orphan-worktree"
 elif [[ "$skip_worktree_cleanup" == "true" ]]; then
   cleanup_mode="archived-only"
 fi

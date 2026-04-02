@@ -12,6 +12,7 @@ AGENT_REPO_ROOT="$(flow_resolve_agent_repo_root "${CONFIG_YAML}")"
 AGENT_ROOT="$(flow_resolve_agent_root "${CONFIG_YAML}")"
 RUNS_ROOT="$(flow_resolve_runs_root "${CONFIG_YAML}")"
 HISTORY_ROOT="$(flow_resolve_history_root "${CONFIG_YAML}")"
+WORKTREE_ROOT="$(flow_resolve_worktree_root "${CONFIG_YAML}")"
 RETAINED_REPO_ROOT="$(flow_resolve_retained_repo_root "${CONFIG_YAML}")"
 VSCODE_WORKSPACE_FILE="$(flow_resolve_vscode_workspace_file "${CONFIG_YAML}")"
 ISSUE_SESSION_PREFIX="$(flow_resolve_issue_session_prefix "${CONFIG_YAML}")"
@@ -36,7 +37,9 @@ if [[ -n "$SESSION" ]]; then
   ARGS+=(--session "$SESSION")
 fi
 
-bash "${FLOW_TOOLS_DIR}/agent-project-cleanup-session" "${ARGS[@]}" >/dev/null
+AGENT_PROJECT_WORKTREE_ROOT="$WORKTREE_ROOT" \
+F_LOSNING_WORKTREE_ROOT="$WORKTREE_ROOT" \
+  bash "${FLOW_TOOLS_DIR}/agent-project-cleanup-session" "${ARGS[@]}" >/dev/null
 
 F_LOSNING_AGENT_REPO_ROOT="$AGENT_REPO_ROOT" \
 F_LOSNING_RETAINED_REPO_ROOT="$RETAINED_REPO_ROOT" \
