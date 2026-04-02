@@ -168,6 +168,7 @@ fi
 result_outcome=""
 result_action=""
 result_issue_id="${ISSUE_ID:-}"
+result_detail=""
 run_started_at="${STARTED_AT:-}"
 expected_run_started_at="${ACP_EXPECTED_RUN_STARTED_AT:-${F_LOSNING_EXPECTED_RUN_STARTED_AT:-}}"
 host_blocker_file="${run_dir}/host-blocker.md"
@@ -186,6 +187,7 @@ if [[ -f "$result_file_candidate" ]]; then
   set +a
   result_outcome="${OUTCOME:-}"
   result_action="${ACTION:-}"
+  result_detail="${DETAIL:-}"
   result_issue_id="${ISSUE_ID:-${result_issue_id}}"
 fi
 
@@ -234,6 +236,8 @@ clear_provider_quota_cooldown() {
 
   "${provider_cooldown_script}" clear >/dev/null || true
 }
+
+blocked_runtime_reason=""
 
 owner="${repo_slug%%/*}"
 repo="${repo_slug#*/}"
@@ -412,6 +416,20 @@ blocked_result_indicates_local_bind_failure() {
       return 0
     fi
   done
+  return 1
+}
+
+classify_pr_blocked_runtime_reason() {
+  if [[ "${result_detail:-}" == "worker-tool-exec-empty-command" ]]; then
+    printf 'worker-tool-exec-empty-command\n'
+    return 0
+  fi
+
+  if [[ -f "$session_log_file" ]] && grep -Fq '[tools] exec failed: Provide a command to start.' "$session_log_file"; then
+    printf 'worker-tool-exec-empty-command\n'
+    return 0
+  fi
+
   return 1
 }
 
@@ -722,18 +740,39 @@ merge_state_prepared() {
   git -C "$pr_worktree" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1
 }
 
+current_github_login() {
+  flow_export_github_cli_auth_env "${repo_slug}"
+  gh api user --jq '.login // ""' 2>/dev/null || true
+}
+
+pr_author_login() {
+  flow_export_github_cli_auth_env "${repo_slug}"
+  gh pr view "${pr_number}" -R "${repo_slug}" --json author --jq '.author.login // ""' 2>/dev/null || true
+}
+
+pr_is_self_authored_for_current_actor() {
+  local actor_login=""
+  local author_login=""
+
+  actor_login="$(current_github_login)"
+  author_login="$(pr_author_login)"
+  [[ -n "${actor_login}" && -n "${author_login}" && "${actor_login}" == "${author_login}" ]]
+}
+
 approve_and_merge() {
   local approve_output
-  if ! approve_output="$(
-    flow_github_api_repo "${repo_slug}" "pulls/${pr_number}/reviews" \
-      --method POST \
-      -f event=APPROVE \
-      -f body="Automated final review passed. Safe low-risk scope, green checks, and host-side merge approved." \
-      2>&1
-  )"; then
-    if ! grep -q "Can not approve your own pull request" <<<"$approve_output"; then
-      printf '%s\n' "$approve_output" >&2
-      return 1
+  if ! pr_is_self_authored_for_current_actor; then
+    if ! approve_output="$(
+      flow_github_api_repo "${repo_slug}" "pulls/${pr_number}/reviews" \
+        --method POST \
+        -f event=APPROVE \
+        -f body="Automated final review passed. Safe low-risk scope, green checks, and host-side merge approved." \
+        2>&1
+    )"; then
+      if ! grep -q "Can not approve your own pull request" <<<"$approve_output"; then
+        printf '%s\n' "$approve_output" >&2
+        return 1
+      fi
     fi
   fi
 
@@ -990,7 +1029,16 @@ elif [[ "$status" == "SUCCEEDED" && "$result_outcome" == "no-change-needed" ]]; 
     fi
   fi
 elif [[ "$status" == "SUCCEEDED" && "$result_outcome" == "blocked" ]]; then
-  if attempt_blocked_pr_host_verification_recovery; then
+  blocked_runtime_reason="$(classify_pr_blocked_runtime_reason || true)"
+  if [[ -n "${blocked_runtime_reason:-}" ]]; then
+    status="FAILED"
+    failure_reason="${blocked_runtime_reason}"
+    require_transition "pr_schedule_retry" pr_schedule_retry "$failure_reason"
+    require_transition "pr_after_failed" pr_after_failed "$pr_number"
+    cleanup_pr_session
+    result_action="queued-pr-retry"
+    notify_pr_reconciled
+  elif attempt_blocked_pr_host_verification_recovery; then
     handle_updated_branch_result
   else
     post_pr_comment_if_present

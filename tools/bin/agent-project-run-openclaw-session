@@ -18,6 +18,7 @@ Options:
   --openclaw-model <id>               Model id for the isolated OpenClaw agent
   --openclaw-thinking <level>         OpenClaw thinking level
   --openclaw-timeout-seconds <secs>   OpenClaw local-agent timeout
+  --openclaw-stall-seconds <secs>     Fail when the agent produces no output for too long (0 disables)
   --help                              Show this help
 EOF
 }
@@ -37,6 +38,7 @@ keep_agent="false"
 openclaw_model="${ACP_OPENCLAW_MODEL:-${F_LOSNING_OPENCLAW_MODEL:-openrouter/qwen/qwen3.6-plus-preview:free}}"
 openclaw_thinking="${ACP_OPENCLAW_THINKING:-${F_LOSNING_OPENCLAW_THINKING:-low}}"
 openclaw_timeout_seconds="${ACP_OPENCLAW_TIMEOUT_SECONDS:-${F_LOSNING_OPENCLAW_TIMEOUT_SECONDS:-900}}"
+openclaw_stall_seconds="${ACP_OPENCLAW_STALL_SECONDS:-${F_LOSNING_OPENCLAW_STALL_SECONDS:-180}}"
 openclaw_progress_heartbeat_seconds="${ACP_OPENCLAW_PROGRESS_HEARTBEAT_SECONDS:-${F_LOSNING_OPENCLAW_PROGRESS_HEARTBEAT_SECONDS:-30}}"
 provided_openclaw_agent_id=""
 provided_openclaw_session_id=""
@@ -65,6 +67,7 @@ while [[ $# -gt 0 ]]; do
     --openclaw-model) openclaw_model="${2:-}"; shift 2 ;;
     --openclaw-thinking) openclaw_thinking="${2:-}"; shift 2 ;;
     --openclaw-timeout-seconds) openclaw_timeout_seconds="${2:-}"; shift 2 ;;
+    --openclaw-stall-seconds) openclaw_stall_seconds="${2:-}"; shift 2 ;;
     --openclaw-agent-id) provided_openclaw_agent_id="${2:-}"; shift 2 ;;
     --openclaw-session-id) provided_openclaw_session_id="${2:-}"; shift 2 ;;
     --openclaw-agent-dir) provided_openclaw_agent_dir="${2:-}"; shift 2 ;;
@@ -90,6 +93,9 @@ esac
 
 case "$openclaw_timeout_seconds" in
   ''|*[!0-9]*) echo "--openclaw-timeout-seconds must be numeric" >&2; exit 1 ;;
+esac
+case "$openclaw_stall_seconds" in
+  ''|*[!0-9]*) echo "--openclaw-stall-seconds must be numeric" >&2; exit 1 ;;
 esac
 case "$openclaw_progress_heartbeat_seconds" in
   ''|*[!0-9]*) echo "OpenClaw progress heartbeat seconds must be numeric" >&2; exit 1 ;;
@@ -159,6 +165,7 @@ printf -v openclaw_session_id_q '%q' "$openclaw_session_id"
 printf -v openclaw_model_q '%q' "$openclaw_model"
 printf -v openclaw_thinking_q '%q' "$openclaw_thinking"
 printf -v openclaw_timeout_q '%q' "$openclaw_timeout_seconds"
+printf -v openclaw_stall_q '%q' "$openclaw_stall_seconds"
 printf -v openclaw_progress_heartbeat_q '%q' "$openclaw_progress_heartbeat_seconds"
 printf -v keep_agent_q '%q' "$keep_agent"
 
@@ -186,6 +193,7 @@ printf -v keep_agent_q '%q' "$keep_agent"
   printf 'OPENCLAW_MODEL=%s\n' "$openclaw_model_q"
   printf 'OPENCLAW_THINKING=%s\n' "$openclaw_thinking_q"
   printf 'OPENCLAW_TIMEOUT_SECONDS=%s\n' "$openclaw_timeout_q"
+  printf 'OPENCLAW_STALL_SECONDS=%s\n' "$openclaw_stall_q"
   printf 'OPENCLAW_PROGRESS_HEARTBEAT_SECONDS=%s\n' "$openclaw_progress_heartbeat_q"
   printf 'OPENCLAW_KEEP_AGENT=%s\n' "$keep_agent_q"
 } >"$meta_file"
@@ -272,7 +280,7 @@ fi
 
 reconcile_snippet=""
 if [[ -n "$reconcile_command" ]]; then
-  printf -v delayed_reconcile_q '%q' "export ACP_EXPECTED_RUN_STARTED_AT=${started_at_q}; export F_LOSNING_EXPECTED_RUN_STARTED_AT=${started_at_q}; sleep 2; $reconcile_command"
+  printf -v delayed_reconcile_q '%q' "export ACP_EXPECTED_RUN_STARTED_AT=${started_at_q}; export F_LOSNING_EXPECTED_RUN_STARTED_AT=${started_at_q}; while tmux has-session -t ${session_q} 2>/dev/null; do sleep 1; done; sleep 2; $reconcile_command"
   reconcile_snippet="nohup bash -lc ${delayed_reconcile_q} >> ${output_q} 2>&1 </dev/null &"
 fi
 
@@ -299,6 +307,7 @@ openclaw_session_id=${openclaw_session_id_q}
 openclaw_model=${openclaw_model_q}
 openclaw_bin=${openclaw_bin_q}
 openclaw_timeout=${openclaw_timeout_q}
+openclaw_stall_seconds=${openclaw_stall_q}
 openclaw_progress_heartbeat_seconds=${openclaw_progress_heartbeat_q}
 openclaw_thinking=${openclaw_thinking_q}
 keep_agent=${keep_agent_q}
@@ -571,6 +580,10 @@ classify_failure_reason() {
     printf 'context-length-exceeded\n'
     return 0
   fi
+  if grep -Eiq 'stale-run no-agent-output-before-stall-threshold|no-agent-output-before-stall-threshold' "\${output_file}" 2>/dev/null; then
+    printf 'no-agent-output-before-stall-threshold\n'
+    return 0
+  fi
   if grep -Eiq 'timeout|timed out|ETIMEDOUT|ECONNREFUSED' "\${output_file}" 2>/dev/null; then
     printf 'timeout\n'
     return 0
@@ -583,11 +596,44 @@ infer_result_from_output() {
   local verification_file="\${sandbox_run_dir}/verification.jsonl"
   # Host-side result file (always writable, never inside worktree)
   local host_result_file="\${run_dir}/result.env"
+  local recovered_contract=""
   local write_result=''
 
   write_result() {
     printf '%b' "\$1" > "\${result_file_path}" 2>/dev/null || true
     printf '%b' "\$1" > "\${host_result_file}" 2>/dev/null || true
+  }
+
+  recover_result_contract_from_output() {
+    python3 - "\${output_file}" <<'PY'
+import re
+import sys
+
+log_path = sys.argv[1]
+try:
+    raw = open(log_path, "r", encoding="utf-8", errors="replace").read()
+except Exception:
+    raise SystemExit(1)
+
+matches = re.findall(r"Result file written:\s*([^\r\n]+)", raw, flags=re.IGNORECASE)
+if not matches:
+    raise SystemExit(1)
+
+line = matches[-1]
+fields = {}
+for key in ("OUTCOME", "ACTION", "DETAIL", "ISSUE_ID"):
+    match = re.search(rf"{key}=([A-Za-z0-9._/-]+)", line)
+    if match:
+        fields[key] = match.group(1).strip()
+
+if "OUTCOME" not in fields or "ACTION" not in fields:
+    raise SystemExit(1)
+
+for key in ("OUTCOME", "ACTION", "DETAIL", "ISSUE_ID"):
+    value = fields.get(key)
+    if value:
+        print(f"{key}={value}")
+PY
   }
 
   # If sandbox result.env exists with implemented, validate it has verification
@@ -599,6 +645,17 @@ infer_result_from_output() {
         return 0
       fi
     fi
+    return 0
+  fi
+
+  if grep -Fq '[tools] exec failed: Provide a command to start.' "\${output_file}" 2>/dev/null; then
+    write_result 'OUTCOME=blocked\nACTION=host-comment-blocker\nDETAIL=worker-tool-exec-empty-command\n'
+    return 0
+  fi
+
+  recovered_contract="\$(recover_result_contract_from_output 2>/dev/null || true)"
+  if [[ -n "\${recovered_contract}" ]]; then
+    write_result "\${recovered_contract}"$'\n'
     return 0
   fi
 
@@ -820,7 +877,7 @@ PY
 }
 
 run_openclaw_agent_command() {
-  python3 - "\${output_file}" "\${runner_state_file}" "\${openclaw_timeout}" "\${openclaw_progress_heartbeat_seconds}" "\${openclaw_bin}" "\${openclaw_agent_id}" "\${openclaw_session_id}" "\${openclaw_thinking}" "\${prompt_file_path}" <<'PY'
+  python3 - "\${output_file}" "\${runner_state_file}" "\${openclaw_timeout}" "\${openclaw_stall_seconds}" "\${openclaw_progress_heartbeat_seconds}" "\${openclaw_bin}" "\${openclaw_agent_id}" "\${openclaw_session_id}" "\${openclaw_thinking}" "\${prompt_file_path}" <<'PY'
 import os
 import re
 import selectors
@@ -829,7 +886,7 @@ import subprocess
 import sys
 import time
 
-output_path, runner_state_path, timeout_seconds_raw, heartbeat_seconds_raw, openclaw_bin, agent_id, session_id, thinking, prompt_path = sys.argv[1:10]
+output_path, runner_state_path, timeout_seconds_raw, stall_seconds_raw, heartbeat_seconds_raw, openclaw_bin, agent_id, session_id, thinking, prompt_path = sys.argv[1:11]
 
 with open(prompt_path, "r", encoding="utf-8") as handle:
     prompt = handle.read()
@@ -852,10 +909,12 @@ cmd = [
 ]
 
 timeout_seconds = float(timeout_seconds_raw)
+stall_seconds = float(stall_seconds_raw)
 heartbeat_seconds = max(float(heartbeat_seconds_raw), 1.0)
 hard_deadline = time.monotonic() + timeout_seconds + 15.0
 started_at = time.monotonic()
 next_heartbeat = time.monotonic() + heartbeat_seconds
+seen_agent_output = False
 terminal_patterns = [
     re.compile(r"Config was last written by a newer OpenClaw", re.I),
     re.compile(r"invalid api key|authentication failed|unauthorized|provider api key|login required|please authenticate|api_key_invalid", re.I),
@@ -927,6 +986,12 @@ with open(output_path, "ab", buffering=0) as log_handle:
 
         events = sel.select(timeout=0.2)
         if not events:
+            if proc.poll() is None and not seen_agent_output and stall_seconds > 0 and (time.monotonic() - started_at) >= stall_seconds:
+                elapsed = int(time.monotonic() - started_at)
+                write_running_heartbeat()
+                log_handle.write(f"[openclaw] stale-run no-agent-output-before-stall-threshold elapsed={elapsed}s\n".encode("utf-8"))
+                terminate_process_group(proc)
+                break
             if proc.poll() is None and time.monotonic() >= next_heartbeat:
                 elapsed = int(time.monotonic() - started_at)
                 write_running_heartbeat()
@@ -945,6 +1010,7 @@ with open(output_path, "ab", buffering=0) as log_handle:
             text = chunk.decode("utf-8", errors="replace")
             tail = (tail + text)[-8192:]
             next_heartbeat = time.monotonic() + heartbeat_seconds
+            seen_agent_output = True
 
             if not matched_terminal_error and any(pattern.search(tail) for pattern in terminal_patterns):
                 matched_terminal_error = True
