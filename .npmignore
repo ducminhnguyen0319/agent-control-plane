@@ -16,3 +16,4 @@ tools/dashboard/__pycache__/
 tools/tests/__pycache__/
 *.pyc
 tools/templates/legacy/
+tools/bin/render-dashboard-snapshot.py

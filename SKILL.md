@@ -22,7 +22,7 @@ external profile registry, not inside this repository.
 - installed project profiles in `~/.agent-runtime/control-plane/profiles/*/control-plane.yaml`
 - installed profile notes in `~/.agent-runtime/control-plane/profiles/*/README.md`
 - workflow catalog in `assets/workflow-catalog.json`
-- worker dashboard in `tools/dashboard/` with launchers in `tools/bin/render-dashboard-snapshot.py`
+- worker dashboard in `tools/dashboard/` with launcher at `tools/dashboard/dashboard_snapshot.py`
   and `tools/bin/serve-dashboard.sh`
 - dashboard autostart helpers in `tools/bin/dashboard-launchd-bootstrap.sh` and
   `tools/bin/install-dashboard-launchd.sh`
