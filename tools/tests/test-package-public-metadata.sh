@@ -37,11 +37,20 @@ if (pkg.files.includes("assets")) {
 if (pkg.files.includes("tools/tests")) {
   process.exit(13);
 }
-if (!Array.isArray(pkg.files) || !pkg.files.includes("bin")) {
-  process.exit(7);
-}
 if (!pkg.bin || pkg.bin["agent-control-plane"] !== "./bin/agent-control-plane") {
   process.exit(8);
+}
+const requiredBinPaths = [
+  "bin/agent-control-plane",
+  "bin/issue-resource-class.sh",
+  "bin/label-follow-up-issues.sh",
+  "bin/pr-risk.sh",
+  "bin/sync-pr-labels.sh"
+];
+for (const binPath of requiredBinPaths) {
+  if (!Array.isArray(pkg.files) || !pkg.files.includes(binPath)) {
+    process.exit(7);
+  }
 }
 for (const bundledPath of [
   "tools/vendor/codex-quota/codex-quota.js",
