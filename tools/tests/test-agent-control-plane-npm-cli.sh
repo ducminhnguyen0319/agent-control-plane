@@ -409,3 +409,46 @@ printf '%s' "${setup_dry_run_json_output}" | node -e '
 '
 
 test ! -e "${platform_home}/control-plane/profiles/dry-run-json/control-plane.yaml"
+
+# onboard alias maps to setup
+onboard_output="$(
+  HOME="${home_dir}" \
+  AGENT_PLATFORM_HOME="${platform_home}" \
+  PATH="${fake_bin}:${PATH}" \
+  node "${CLI_SCRIPT}" onboard \
+    --non-interactive \
+    --repo-root "${setup_repo}" \
+    --profile-id onboard-alias-demo \
+    --no-start-runtime \
+    --skip-anchor-sync \
+    --skip-workspace-sync
+)"
+grep -q '^SETUP_STATUS=ok$' <<<"${onboard_output}"
+grep -q '^PROFILE_ID=onboard-alias-demo$' <<<"${onboard_output}"
+test -f "${platform_home}/control-plane/profiles/onboard-alias-demo/control-plane.yaml"
+
+# onboard shows in help output
+help_onboard_output="$(
+  HOME="${home_dir}" \
+  AGENT_PLATFORM_HOME="${platform_home}" \
+  node "${CLI_SCRIPT}" help
+)"
+grep -q 'onboard' <<<"${help_onboard_output}"
+
+# openclaw worker setup outputs OPENROUTER_API_KEY warning when key is absent
+openclaw_setup_output="$(
+  HOME="${home_dir}" \
+  AGENT_PLATFORM_HOME="${platform_home}" \
+  PATH="${fake_bin}:${PATH}" \
+  OPENROUTER_API_KEY="" \
+  node "${CLI_SCRIPT}" setup \
+    --non-interactive \
+    --repo-root "${setup_repo}" \
+    --profile-id openclaw-key-check \
+    --coding-worker openclaw \
+    --no-start-runtime \
+    --skip-anchor-sync \
+    --skip-workspace-sync
+)"
+grep -q '^SETUP_STATUS=ok$' <<<"${openclaw_setup_output}"
+grep -q 'OPENROUTER_API_KEY' <<<"${openclaw_setup_output}"

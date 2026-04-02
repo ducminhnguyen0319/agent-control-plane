@@ -22,6 +22,7 @@ Commands:
   help                 Show this help
   version              Print package version
   setup                Guided setup flow for one repo profile
+  onboard              Alias for setup
   sync                 Publish the packaged runtime into ~/.agent-runtime
   install              Alias for sync
   init                 Scaffold and adopt a project profile
@@ -501,6 +502,20 @@ function createPromptInterface() {
     input: process.stdin,
     output: process.stdout
   });
+}
+
+function printWizardBanner() {
+  console.log("============================================================");
+  console.log("  Agent Control Plane — Setup Wizard");
+  console.log("============================================================");
+  console.log("");
+  console.log("This wizard will guide you through setting up one repo profile.");
+  console.log("Press Enter at any prompt to accept the value shown in [brackets].");
+  console.log("");
+}
+
+function printWizardStep(step, total, title) {
+  console.log(`\n[${step}/${total}] ${title}`);
 }
 
 function question(rl, prompt) {
@@ -1599,19 +1614,20 @@ async function collectSetupConfig(options, context) {
       throw new Error("setup could not detect --repo-slug automatically; pass --repo-slug <owner/repo> or run interactively inside a git checkout with origin set");
     }
   } else {
+    printWizardBanner();
     const rl = createPromptInterface();
     try {
-      console.log("ACP setup will guide one repo profile from install to operator-ready defaults.");
-      console.log("Press Enter to accept the suggested value shown in brackets.\n");
+      printWizardStep(1, 4, "Project details");
 
       repoRoot = path.resolve(await promptText(rl, "Local repo root", detectedRepoRoot));
       repoSlug = await promptText(rl, "GitHub repo slug", repoSlug || "");
       profileId = sanitizeProfileId(await promptText(rl, "Profile id", profileId));
-      codingWorker = await promptText(rl, "Coding worker (codex|claude|openclaw)", codingWorker);
 
-      if (!["codex", "claude", "openclaw"].includes(codingWorker)) {
-        throw new Error(`unsupported coding worker: ${codingWorker}`);
+      let workerInput = codingWorker;
+      while (!["codex", "claude", "openclaw"].includes(workerInput)) {
+        workerInput = await promptText(rl, "Coding worker (codex / claude / openclaw)", codingWorker || "openclaw");
       }
+      codingWorker = workerInput;
     } finally {
       rl.close();
     }
@@ -1632,6 +1648,9 @@ async function collectSetupConfig(options, context) {
     prereq
   };
 
+  if (options.interactive) {
+    printWizardStep(2, 4, "Review plan");
+  }
   renderSetupSummary(config);
 
   if (options.interactive) {
@@ -1643,7 +1662,7 @@ async function collectSetupConfig(options, context) {
       }
       const shouldContinue = await promptYesNo(rl, "Continue with these values", true);
       if (!shouldContinue) {
-        throw new Error("setup cancelled");
+        return null;
       }
       if (options.startRuntime === null) {
         options.startRuntime = await promptYesNo(rl, "Start the runtime after setup", true);
@@ -1735,6 +1754,10 @@ async function runSetupFlow(forwardedArgs) {
 
   try {
     const config = await collectSetupConfig(options, context);
+    if (config === null) {
+      console.log("\nSetup cancelled. Run again when you are ready.");
+      return 0;
+    }
     if (options.dryRun) {
       const plan = buildSetupDryRunPlan(options, context, config);
       printSetupDryRunPlan(context, config, plan);
@@ -1871,6 +1894,10 @@ async function runSetupFlow(forwardedArgs) {
       return 1;
     }
 
+    if (options.interactive) {
+      printWizardStep(3, 4, "Prerequisites");
+    }
+
     let prereq = config.prereq;
     let dependencyInstall = await maybeInstallMissingDependencies(options, prereq);
     if (dependencyInstall.status === "failed") {
@@ -1887,6 +1914,35 @@ async function runSetupFlow(forwardedArgs) {
     prereq = collectPrereqStatus(config.codingWorker);
     let workerSetupStep = await maybeShowWorkerSetupGuide(options, prereq);
     prereq = collectPrereqStatus(config.codingWorker);
+
+    // Check OpenRouter API key when openclaw is selected
+    if (config.codingWorker === "openclaw" && !process.env.OPENROUTER_API_KEY) {
+      console.log("\nOpenClaw requires an OpenRouter API key (OPENROUTER_API_KEY).");
+      console.log("- Get a free key at: https://openrouter.ai/keys");
+      if (options.interactive) {
+        const rl = createPromptInterface();
+        let apiKey = "";
+        try {
+          apiKey = (await promptText(rl, "OpenRouter API key (Enter to skip)", "")).trim();
+        } finally {
+          rl.close();
+        }
+        if (apiKey) {
+          process.env.OPENROUTER_API_KEY = apiKey;
+          console.log("API key set for this session.");
+          console.log("To persist it, add the following to your shell profile (~/.zshrc or ~/.bashrc):");
+          console.log(`  export OPENROUTER_API_KEY=${JSON.stringify(apiKey)}`);
+        } else {
+          console.log("Skipped. Set OPENROUTER_API_KEY before starting the runtime.");
+        }
+      } else {
+        console.log("Set OPENROUTER_API_KEY in your environment before starting the runtime.");
+      }
+    }
+
+    if (options.interactive) {
+      printWizardStep(4, 4, "Install");
+    }
 
     const scopedContext = buildScopedContext(context, config.profileId);
     const anchorSync = buildAnchorSyncDecision(options, config.paths.sourceRepoRoot);
@@ -2049,12 +2105,45 @@ async function runSetupFlow(forwardedArgs) {
 
     if (options.json) {
       emitSetupJsonPayload(runPayload);
+    } else if (options.interactive) {
+      // Human-friendly summary for interactive terminal runs
+      console.log("\n============================================================");
+      console.log("  Setup complete!");
+      console.log("============================================================");
+      console.log(`  Profile : ${config.profileId}`);
+      console.log(`  Repo    : ${config.repoSlug}`);
+      console.log(`  Worker  : ${config.codingWorker}`);
+      console.log(`  Runtime : ${context.runtimeHome}`);
+
+      const pendingItems = [];
+      if (!prereq.ghAuthOk) pendingItems.push("GitHub CLI not authenticated — run: gh auth login");
+      if (!prereq.workerAvailable) pendingItems.push(`${config.codingWorker} not found on PATH — install it before starting`);
+      if (config.codingWorker === "openclaw" && !process.env.OPENROUTER_API_KEY) {
+        pendingItems.push("OPENROUTER_API_KEY not set — required for openclaw workers");
+      }
+      if (anchorSync.status !== "ok") pendingItems.push(`Anchor repo sync deferred (${anchorSync.reason}) — fix git access and re-run setup`);
+      if ((doctorKv.DOCTOR_STATUS || "") !== "ok") pendingItems.push(`Doctor check flagged issues — run: npx agent-control-plane@latest doctor`);
+
+      if (pendingItems.length > 0) {
+        console.log("\n  Pending items before starting:");
+        for (const item of pendingItems) {
+          console.log(`    - ${item}`);
+        }
+      }
+
+      console.log("\n  Next commands:");
+      if (runtimeStartStatus !== "ok") {
+        console.log(`    npx agent-control-plane@latest runtime start --profile-id ${config.profileId}`);
+      }
+      console.log(`    npx agent-control-plane@latest runtime status --profile-id ${config.profileId}`);
+      console.log(`    npx agent-control-plane@latest doctor`);
+      console.log("");
     } else {
+      // Machine-readable KV output for non-interactive / scripted runs
       console.log("\nSetup complete.");
       console.log(`- profile: ${config.profileId}`);
       console.log(`- repo: ${config.repoSlug}`);
       console.log(`- runtime home: ${context.runtimeHome}`);
-      console.log(`- next status command: npx agent-control-plane@latest runtime status --profile-id ${config.profileId}`);
 
       console.log(`SETUP_STATUS=ok`);
       console.log(`PROFILE_ID=${config.profileId}`);
@@ -2172,6 +2261,7 @@ async function main() {
       console.log(packageJson.version);
       return 0;
     case "setup":
+    case "onboard":
       return runSetupFlow(forwardedArgs);
     case "sync":
     case "install":
