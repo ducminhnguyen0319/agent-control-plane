@@ -153,6 +153,54 @@ reap_stale_run_dir() {
   mv "$RUN_DIR" "${HISTORY_ROOT}/${SESSION}-stale-$(date +%Y%m%d-%H%M%S)"
 }
 
+find_archived_issue_session_dir() {
+  local root="${1:-}"
+  local target_session="${2:-}"
+  [[ -n "$root" && -d "$root" && -n "$target_session" ]] || return 1
+
+  find "$root" -mindepth 1 -maxdepth 1 -type d -name "${target_session}-*" ! -name "${target_session}-stale-*" 2>/dev/null \
+    | sort -r \
+    | head -n 1
+}
+
+issue_retry_state_value() {
+  local key="${1:?retry-state key required}"
+  awk -F= -v target_key="$key" '$1 == target_key { print substr($0, index($0, "=") + 1); exit }' <<<"${ISSUE_RETRY_STATE:-}"
+}
+
+issue_host_publish_replay_dir() {
+  local last_reason=""
+  local archived_dir=""
+  local runner_state=""
+  local result_outcome=""
+  local result_action=""
+
+  last_reason="$(issue_retry_state_value LAST_REASON)"
+  case "${last_reason}" in
+    host-publish-failed|issue-worker-blocked) ;;
+    *) return 1 ;;
+  esac
+
+  archived_dir="$(find_archived_issue_session_dir "$HISTORY_ROOT" "$SESSION" || true)"
+  [[ -n "${archived_dir}" && -f "${archived_dir}/run.env" && -f "${archived_dir}/runner.env" && -f "${archived_dir}/result.env" ]] || return 1
+
+  runner_state="$(awk -F= '/^RUNNER_STATE=/{print $2; exit}' "${archived_dir}/runner.env")"
+  result_outcome="$(awk -F= '/^OUTCOME=/{print $2; exit}' "${archived_dir}/result.env")"
+  result_action="$(awk -F= '/^ACTION=/{print $2; exit}' "${archived_dir}/result.env")"
+
+  [[ "${runner_state}" == "succeeded" ]] || return 1
+  [[ "${result_outcome}" == "implemented" ]] || return 1
+  [[ "${result_action}" == "host-publish-issue-pr" ]] || return 1
+
+  printf '%s\n' "${archived_dir}"
+}
+
+replay_issue_host_publish_retry() {
+  local archived_dir="${1:?archived dir required}"
+  printf 'ISSUE_HOST_PUBLISH_REPLAY=session=%s archived_run_dir=%s\n' "${SESSION}" "${archived_dir}" >&2
+  bash "${WORKSPACE_DIR}/bin/reconcile-issue-worker.sh" "${SESSION}"
+}
+
 if tmux has-session -t "$SESSION" 2>/dev/null; then
   echo "worker session already exists: $SESSION" >&2
   exit 1
@@ -179,6 +227,9 @@ EOF
 )"
 ISSUE_REQUIRES_LOCAL_WORKSPACE_INSTALL="$(
   ISSUE_BODY="$ISSUE_BODY" bash "$LOCAL_INSTALL_POLICY_BIN"
+)"
+ISSUE_RETRY_STATE="$(
+  bash "${WORKSPACE_DIR}/bin/retry-state.sh" issue "$ISSUE_ID" get 2>/dev/null || true
 )"
 if [[ "${ISSUE_SCHEDULE_INTERVAL_SECONDS}" =~ ^[1-9][0-9]*$ ]]; then
   TEMPLATE_FILE="${SCHEDULED_TEMPLATE_FILE}"
@@ -225,6 +276,16 @@ fi
 
 if [[ -d "$RUN_DIR" ]]; then
   reap_stale_run_dir
+fi
+
+ISSUE_HOST_PUBLISH_REPLAY_DIR="$(issue_host_publish_replay_dir || true)"
+if [[ -n "${ISSUE_HOST_PUBLISH_REPLAY_DIR}" ]]; then
+  if ! replay_issue_host_publish_retry "${ISSUE_HOST_PUBLISH_REPLAY_DIR}"; then
+    echo "host publish replay failed for session ${SESSION}" >&2
+    exit 1
+  fi
+  launch_success="yes"
+  exit 0
 fi
 
 block_if_recurring_checklist_complete
@@ -348,9 +409,6 @@ if (completedPrs.length > 0) {
 process.stdout.write(`${lines.join('\n')}\n`);
 EOF
 ISSUE_RECURRING_CONTEXT="$(cat "$ISSUE_RECURRING_CONTEXT_FILE")"
-ISSUE_RETRY_STATE="$(
-  bash "${WORKSPACE_DIR}/bin/retry-state.sh" issue "$ISSUE_ID" get 2>/dev/null || true
-)"
 ISSUE_BLOCKER_CONTEXT="$(
   ISSUE_JSON="$ISSUE_JSON" ISSUE_RETRY_STATE="$ISSUE_RETRY_STATE" node <<'EOF'
 const issue = JSON.parse(process.env.ISSUE_JSON || '{}');
