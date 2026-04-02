@@ -16,11 +16,10 @@ profile_dir="$profile_registry_root/demo"
 origin_repo="$tmpdir/origin.git"
 repo_root="$tmpdir/repo"
 worktree_root="$tmpdir/worktrees"
-worktree_path="$worktree_root/issue-440"
-shim_dir="$tmpdir/shim"
+worktree_path="$worktree_root/issue-440-20260402-120000"
 canonical_worktree_root=""
 
-mkdir -p "$bin_dir" "$profile_dir" "$worktree_root" "$shim_dir"
+mkdir -p "$bin_dir" "$profile_dir" "$worktree_root"
 cp "$REAL_REUSE" "$bin_dir/reuse-issue-worktree.sh"
 cp "$REAL_CONFIG_LIB" "$bin_dir/flow-config-lib.sh"
 cp "$REAL_SHELL_LIB" "$bin_dir/flow-shell-lib.sh"
@@ -67,32 +66,27 @@ git -C "$repo_root" push -u origin main >/dev/null 2>&1
 git -C "$repo_root" worktree add -b "agent/demo/issue-440-old" "$worktree_path" origin/main >/dev/null 2>&1
 canonical_worktree_root="$(cd "$worktree_root" && pwd -P)"
 
-real_git="$(command -v git)"
-cat >"$shim_dir/git" <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-if [[ "\${1:-}" == "-C" && ( "\${2:-}" == "$worktree_root/"* || "\${2:-}" == "$canonical_worktree_root/"* ) && "\${3:-}" == "branch" && "\${4:-}" == "--show-current" ]]; then
-  printf 'agent/demo/issue-440-old\n'
-  exit 0
-fi
-exec "$real_git" "\$@"
-EOF
-chmod +x "$shim_dir/git"
+output="$(
+  ACP_PROFILE_REGISTRY_ROOT="$profile_registry_root" \
+  ACP_PROFILE_ID="demo" \
+  bash "$bin_dir/reuse-issue-worktree.sh" "$worktree_path" 441 "rotated-path"
+)"
 
-set +e
-PATH="$shim_dir:$PATH" \
-ACP_PROFILE_REGISTRY_ROOT="$profile_registry_root" \
-ACP_PROFILE_ID="demo" \
-bash "$bin_dir/reuse-issue-worktree.sh" "$worktree_path" 441 "branch-check" \
-  >"$tmpdir/stdout.log" 2>"$tmpdir/stderr.log"
-status=$?
-set -e
+new_worktree="$(awk -F= '/^WORKTREE=/{print $2; exit}' <<<"$output")"
+new_branch="$(awk -F= '/^BRANCH=/{print $2; exit}' <<<"$output")"
 
-if [[ "$status" -eq 0 ]]; then
-  echo "expected reuse-issue-worktree.sh to reject mismatched post-checkout branch" >&2
-  exit 1
-fi
+test -n "$new_worktree"
+test -d "$new_worktree"
+test ! -e "$worktree_path"
+test "$(basename "$new_worktree")" != "$(basename "$worktree_path")"
+case "$new_worktree" in
+  "${canonical_worktree_root}"/issue-441-*) ;;
+  *)
+    echo "expected rotated worktree to live under ${canonical_worktree_root}/issue-441-*" >&2
+    exit 1
+    ;;
+esac
+test "$(git -C "$new_worktree" branch --show-current)" = "$new_branch"
+git -C "$repo_root" worktree list --porcelain | grep -Fqx "worktree $new_worktree"
 
-grep -q '^reused worktree branch mismatch: expected agent/demo/issue-441-branch-check-' "$tmpdir/stderr.log"
-
-echo "reuse issue worktree validates post checkout branch test passed"
+echo "reuse issue worktree rotates path for new issue test passed"

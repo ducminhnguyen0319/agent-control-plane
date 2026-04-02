@@ -31,6 +31,7 @@ fi
 
 CONFIG_YAML="$(resolve_flow_config_yaml "${BASH_SOURCE[0]}")"
 AGENT_REPO_ROOT="$(flow_resolve_agent_repo_root "${CONFIG_YAML}")"
+WORKTREE_ROOT="$(flow_resolve_worktree_root "${CONFIG_YAML}")"
 ISSUE_BRANCH_PREFIX="$(flow_resolve_issue_branch_prefix "${CONFIG_YAML}")"
 DEFAULT_BRANCH="$(flow_resolve_default_branch "${CONFIG_YAML}")"
 BASE_REF="origin/${DEFAULT_BRANCH}"
@@ -48,6 +49,7 @@ branch_name="${ISSUE_BRANCH_PREFIX}-${ISSUE_ID}-${safe_slug}-${stamp}"
 previous_branch="$(git -C "${WORKTREE}" branch --show-current 2>/dev/null || true)"
 resolved_worktree=""
 actual_branch=""
+rotated_worktree=""
 
 if ! git -C "${WORKTREE}" rev-parse --git-dir >/dev/null 2>&1; then
   echo "invalid managed worktree: ${WORKTREE}" >&2
@@ -80,6 +82,26 @@ resolved_worktree="$(cd "${WORKTREE}" 2>/dev/null && pwd -P || true)"
 if [[ -z "${resolved_worktree}" || ! -d "${resolved_worktree}" ]]; then
   echo "reused worktree path is unavailable: ${WORKTREE}" >&2
   exit 1
+fi
+WORKTREE="${resolved_worktree}"
+
+if [[ -n "${WORKTREE_ROOT}" ]]; then
+  mkdir -p "${WORKTREE_ROOT}"
+  rotated_worktree="${WORKTREE_ROOT}/issue-${ISSUE_ID}-${stamp}"
+  if [[ "${resolved_worktree}" != "${rotated_worktree}" ]]; then
+    if [[ -e "${rotated_worktree}" ]]; then
+      echo "rotated worktree path already exists: ${rotated_worktree}" >&2
+      exit 1
+    fi
+    git -C "${AGENT_REPO_ROOT}" worktree move "${resolved_worktree}" "${rotated_worktree}" >/dev/null
+    WORKTREE="${rotated_worktree}"
+    resolved_worktree="$(cd "${WORKTREE}" 2>/dev/null && pwd -P || true)"
+    if [[ -z "${resolved_worktree}" || ! -d "${resolved_worktree}" ]]; then
+      echo "rotated worktree path is unavailable: ${WORKTREE}" >&2
+      exit 1
+    fi
+    WORKTREE="${resolved_worktree}"
+  fi
 fi
 
 if ! git -C "${AGENT_REPO_ROOT}" worktree list --porcelain | grep -Fqx "worktree ${resolved_worktree}"; then
