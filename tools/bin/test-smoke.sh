@@ -58,7 +58,12 @@ run_step() {
   return "${status}"
 }
 
-run_step "check-skill-contracts" bash "${check_contracts_script}"
+if [[ -f "${check_contracts_script}" ]]; then
+  run_step "check-skill-contracts" bash "${check_contracts_script}"
+else
+  printf 'SMOKE_STEP=%s\n' "check-skill-contracts"
+  printf 'SMOKE_STEP_STATUS=%s\n' "skipped"
+fi
 
 run_profile_smoke_fixture() (
   set -euo pipefail

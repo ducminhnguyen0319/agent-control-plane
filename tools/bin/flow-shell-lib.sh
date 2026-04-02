@@ -137,8 +137,22 @@ flow_is_skill_root() {
 
 flow_print_dir() {
   local candidate="${1:-}"
+  local parent_dir=""
+  local base_name=""
   [[ -n "${candidate}" ]] || return 1
-  (cd "${candidate}" && pwd -P)
+  if [[ -e "${candidate}" ]]; then
+    (cd "${candidate}" && pwd -P)
+    return 0
+  fi
+
+  parent_dir="$(dirname "${candidate}")"
+  base_name="$(basename "${candidate}")"
+  if [[ -d "${parent_dir}" ]]; then
+    printf '%s/%s\n' "$(cd "${parent_dir}" && pwd -P)" "${base_name}"
+    return 0
+  fi
+
+  printf '%s\n' "${candidate}"
 }
 
 resolve_flow_skill_dir() {

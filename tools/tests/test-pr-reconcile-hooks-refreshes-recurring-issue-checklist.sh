@@ -87,6 +87,10 @@ chmod +x "$tools_bin_dir/kick-scheduler.sh"
 cat >"$shim_dir/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${1:-}" == "api" && "${2:-}" == "rate_limit" ]]; then
+  printf '5000\n'
+  exit 0
+fi
 if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then
   cat <<'JSON'
 {"number":42,"state":"OPEN","title":"Recurring demo issue","body":"Keep it open.","url":"https://example.test/issues/42","labels":[{"name":"agent-keep-open"}],"comments":[],"createdAt":"2026-03-28T10:00:00Z","updatedAt":"2026-03-28T10:00:00Z"}
