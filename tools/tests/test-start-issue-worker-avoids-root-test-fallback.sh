@@ -65,11 +65,6 @@ execution:
   coding_worker: "codex"
   safe_profile: "demo_safe"
   bypass_profile: "demo_bypass"
-  openclaw:
-    model: "openrouter/stepfun/step-3.5-flash:free"
-    thinking: "minimal"
-    timeout_seconds: 600
-  review_requires_independent_final_review: true
 EOF
 
 cat >"$repo_root/package.json" <<'EOF'
@@ -77,8 +72,7 @@ cat >"$repo_root/package.json" <<'EOF'
   "name": "demo-repo",
   "private": true,
   "scripts": {
-    "test": "node --test",
-    "smoke": "node scripts/smoke.js"
+    "test": "node --test"
   }
 }
 EOF
@@ -96,26 +90,10 @@ chmod +x "$shim_dir/tmux"
 cat >"$shim_dir/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ "${1:-}" == "api" && "${2:-}" == "rate_limit" ]]; then
-  cat <<'JSON'
-{"resources":{"graphql":{"remaining":5000}}}
-JSON
-  exit 0
-fi
-if [[ "${1:-}" == "api" && "${2:-}" == "repos/example/demo/issues/42" ]]; then
-  cat <<'JSON'
-{"number":42,"state":"OPEN","title":"Verification snippet issue 42","body":"Rules for each cycle:\n- Run `npm test` after code changes.\n- If the CLI or fixtures change, also run `npm run smoke`.","url":"https://example.test/issues/42","labels":[],"comments":[]}
-JSON
-  exit 0
-fi
-if [[ "${1:-}" == "api" && "${2:-}" == "repos/example/demo/issues/42/comments?per_page=100" ]]; then
-  printf '[]\n'
-  exit 0
-fi
 if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then
   issue_id="${3:-0}"
   cat <<JSON
-{"number":${issue_id},"title":"Verification snippet issue ${issue_id}","body":"Rules for each cycle:\n- Run \`npm test\` after code changes.\n- If the CLI or fixtures change, also run \`npm run smoke\`.","url":"https://example.test/issues/${issue_id}","labels":[],"comments":[]}
+{"number":${issue_id},"title":"Focused verification issue ${issue_id}","body":"Keep this cycle focused on one narrow slice.","url":"https://example.test/issues/${issue_id}","labels":[],"comments":[]}
 JSON
   exit 0
 fi
@@ -159,13 +137,12 @@ PATH="$shim_dir:$PATH" ACP_PROJECT_ID="demo" ACP_PROFILE_REGISTRY_ROOT="$profile
 
 prompt_file="$agent_root/runs/demo-issue-42/prompt.md"
 
-grep -q 'npm test' "$prompt_file"
-grep -q 'npm run smoke' "$prompt_file"
-grep -q 'git status --short' "$prompt_file"
-grep -q 'If you changed CLI or operator-facing commands' "$prompt_file"
+grep -q 'Pick the narrowest relevant local verification' "$prompt_file"
+grep -q 'Do not default to repo-wide pnpm test' "$prompt_file"
+grep -q '@<repo>/api test' "$prompt_file"
 if grep -q '^pnpm test$' "$prompt_file"; then
-  echo "generic pnpm snippet unexpectedly rendered" >&2
+  echo "root pnpm test fallback unexpectedly rendered" >&2
   exit 1
 fi
 
-echo "start issue worker renders verification snippet test passed"
+echo "start issue worker avoids root test fallback test passed"

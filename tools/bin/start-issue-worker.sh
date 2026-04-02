@@ -727,38 +727,48 @@ for (const line of body.split(/\r?\n/).slice(0, 40)) {
   }
 }
 
-if (commands.length === 0 && repoRoot) {
-  const packageJsonPath = path.join(repoRoot, 'package.json');
-  if (fs.existsSync(packageJsonPath)) {
-    try {
-      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-      if (packageJson?.scripts?.test) {
-        if (fs.existsSync(path.join(repoRoot, 'pnpm-lock.yaml'))) {
-          addCommand('pnpm test');
-        } else if (fs.existsSync(path.join(repoRoot, 'yarn.lock'))) {
-          addCommand('yarn test');
-        } else {
-          addCommand('npm test');
+  if (commands.length === 0 && repoRoot) {
+    const packageJsonPath = path.join(repoRoot, 'package.json');
+    if (fs.existsSync(packageJsonPath)) {
+      try {
+        const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+        if (packageJson?.scripts?.smoke) {
+          addCommand('# If this cycle changes smoke runners, CLI entrypoints, or operator commands, also run the matching smoke command from the repo instructions.');
         }
+      } catch (_error) {
+        // Ignore parse errors and fall through to generic guidance.
       }
-    } catch (_error) {
-      // Ignore parse errors and fall through to generic guidance.
     }
   }
-}
 
-if (commands.length === 0) {
-  addCommand('pnpm test');
-}
+  if (commands.length === 0) {
+    addCommand('# Pick the narrowest relevant local verification for the files you touch.');
+    addCommand('# Do not default to repo-wide pnpm test unless the issue body explicitly requires it.');
+    addCommand('# Examples:');
+    addCommand('# pnpm --filter @<repo>/api test -- --runInBand <target-spec>');
+    addCommand('# pnpm --filter @<repo>/api typecheck');
+    addCommand('# pnpm --filter @<repo>/web test -- --run <target-spec>');
+    addCommand('# pnpm --filter @<repo>/web typecheck');
+    addCommand('# pnpm --filter @<repo>/mobile test -- --runInBand <target-spec>');
+    addCommand('# pnpm --filter @<repo>/mobile typecheck');
+    addCommand('# pnpm --filter @<repo>/<package> test -- --run <target-spec>');
+    addCommand('# pnpm --filter @<repo>/<package> typecheck');
+    addCommand('# After each successful command, record it with record-verification.sh exactly as shown below.');
+  }
 
 const escapeDoubleQuotes = (value) => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 const snippet = commands
-  .map((command) =>
-    command + '\n' +
-    'bash "$ACP_FLOW_TOOLS_DIR/record-verification.sh" --run-dir "$ACP_RUN_DIR" --status pass --command "' +
-    escapeDoubleQuotes(command) +
-    '"',
-  )
+  .map((command) => {
+    if (command.startsWith('#')) {
+      return command;
+    }
+    return (
+      command + '\n' +
+      'bash "$ACP_FLOW_TOOLS_DIR/record-verification.sh" --run-dir "$ACP_RUN_DIR" --status pass --command "' +
+      escapeDoubleQuotes(command) +
+      '"'
+    );
+  })
   .join('\n\n');
 
 process.stdout.write(snippet);

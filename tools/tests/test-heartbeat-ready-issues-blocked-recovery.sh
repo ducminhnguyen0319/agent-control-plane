@@ -11,8 +11,17 @@ node_bin_dir="$(dirname "$(command -v node)")"
 bin_dir="$tmpdir/bin"
 tools_dir="$tmpdir/tools/bin"
 labels_log="$tmpdir/labels.log"
+state_root="$tmpdir/state"
+agent_repo_root="$tmpdir/agent-repo"
 
-mkdir -p "$bin_dir" "$tools_dir"
+mkdir -p "$bin_dir" "$tools_dir" "$state_root/retries/issues" "$agent_repo_root"
+git -C "$agent_repo_root" init -q -b main
+git -C "$agent_repo_root" config user.name "ACP Test"
+git -C "$agent_repo_root" config user.email "acp-test@example.com"
+printf 'baseline\n' >"$agent_repo_root/README.md"
+git -C "$agent_repo_root" add README.md
+git -C "$agent_repo_root" commit -q -m "baseline"
+baseline_head="$(git -C "$agent_repo_root" rev-parse HEAD)"
 
 cat >"$bin_dir/gh" <<'EOF'
 #!/usr/bin/env bash
@@ -35,6 +44,11 @@ JSON
 {"number":104,"title":"Orphan blocked issue","body":"","labels":[{"name":"agent-blocked"}],"comments":[{"body":"# Blocker: Worker session failed before publish\n\nThe worker exited before ACP could publish or reconcile a result for this cycle.\n\nFailure reason:\n- `claude-exit-failed`\n\nNext step:\n- inspect the run logs for this session and re-queue once the underlying worker issue is resolved"}]}
 JSON
       ;;
+    105)
+      cat <<'JSON'
+{"number":105,"title":"Baseline blocked issue","body":"","labels":[{"name":"agent-blocked"}],"comments":[{"body":"# Blocker: Verification guard prevented publish\n\nWhy it was blocked:\n- verification guard blocked publish because unrelated repo-wide checks are red"}]}
+JSON
+      ;;
     *)
       echo "unexpected issue view args: $*" >&2
       exit 1
@@ -49,7 +63,8 @@ if [[ "${1:-}" == "issue" && "${2:-}" == "list" ]]; then
   {"number":101,"createdAt":"2026-03-15T10:00:00Z","labels":[]},
   {"number":102,"createdAt":"2026-03-15T10:01:00Z","labels":[{"name":"agent-blocked"}]},
   {"number":103,"createdAt":"2026-03-15T10:02:00Z","labels":[{"name":"agent-blocked"}]},
-  {"number":104,"createdAt":"2026-03-15T10:03:00Z","labels":[{"name":"agent-blocked"}]}
+  {"number":104,"createdAt":"2026-03-15T10:03:00Z","labels":[{"name":"agent-blocked"}]},
+  {"number":105,"createdAt":"2026-03-15T10:04:00Z","labels":[{"name":"agent-blocked"}]}
 ]
 JSON
   exit 0
@@ -109,6 +124,18 @@ LAST_REASON=issue-worker-blocked
 UPDATED_AT=2026-03-15T10:06:00Z
 OUT
     ;;
+  105)
+    cat <<'OUT'
+KIND=issue
+ITEM_ID=105
+ATTEMPTS=3
+NEXT_ATTEMPT_EPOCH=0
+NEXT_ATTEMPT_AT=
+READY=yes
+LAST_REASON=verification-guard-blocked
+UPDATED_AT=2026-03-15T10:07:00Z
+OUT
+    ;;
   *)
     cat <<OUT
 KIND=issue
@@ -132,6 +159,15 @@ EOF
 
 chmod +x "$bin_dir/gh" "$tools_dir/retry-state.sh" "$tools_dir/agent-github-update-labels"
 
+cat >"$state_root/retries/issues/105.env" <<EOF
+ATTEMPTS=3
+NEXT_ATTEMPT_EPOCH=0
+NEXT_ATTEMPT_AT=
+LAST_REASON=verification-guard-blocked
+UPDATED_AT=2026-03-15T10:07:00Z
+BASELINE_HEAD_SHA=${baseline_head}
+EOF
+
 export PATH="$bin_dir:$node_bin_dir:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export TEST_LABELS_LOG="$labels_log"
 export F_LOSNING_REPO_SLUG="example/repo"
@@ -140,6 +176,45 @@ export F_LOSNING_REPO_SLUG="example/repo"
 source "$HOOKS_FILE"
 FLOW_TOOLS_DIR="$tools_dir"
 REPO_SLUG="example/repo"
+STATE_ROOT="$state_root"
+AGENT_REPO_ROOT="$agent_repo_root"
+DEFAULT_BRANCH="main"
+heartbeat_open_agent_pr_issue_ids() { printf '[]\n'; }
+flow_github_issue_list_json() {
+  cat <<'JSON'
+[
+  {"number":101,"createdAt":"2026-03-15T10:00:00Z","labels":[]},
+  {"number":102,"createdAt":"2026-03-15T10:01:00Z","labels":[{"name":"agent-blocked"}]},
+  {"number":103,"createdAt":"2026-03-15T10:02:00Z","labels":[{"name":"agent-blocked"}]},
+  {"number":104,"createdAt":"2026-03-15T10:03:00Z","labels":[{"name":"agent-blocked"}]},
+  {"number":105,"createdAt":"2026-03-15T10:04:00Z","labels":[{"name":"agent-blocked"}]}
+]
+JSON
+}
+heartbeat_issue_json_cached() {
+  case "${1:-}" in
+    102)
+      cat <<'JSON'
+{"number":102,"title":"Manual blocked issue","body":"","labels":[{"name":"agent-blocked"}],"comments":[]}
+JSON
+      ;;
+    104)
+      cat <<'JSON'
+{"number":104,"title":"Orphan blocked issue","body":"","labels":[{"name":"agent-blocked"}],"comments":[{"body":"# Blocker: Worker session failed before publish\n\nThe worker exited before ACP could publish or reconcile a result for this cycle.\n\nFailure reason:\n- `claude-exit-failed`\n\nNext step:\n- inspect the run logs for this session and re-queue once the underlying worker issue is resolved"}]}
+JSON
+      ;;
+    105)
+      cat <<'JSON'
+{"number":105,"title":"Baseline blocked issue","body":"","labels":[{"name":"agent-blocked"}],"comments":[{"body":"# Blocker: Verification guard prevented publish\n\nWhy it was blocked:\n- verification guard blocked publish because unrelated repo-wide checks are red"}]}
+JSON
+      ;;
+    *)
+      cat <<'JSON'
+{"number":0,"title":"","body":"","labels":[],"comments":[]}
+JSON
+      ;;
+  esac
+}
 
 ready_issue_ids="$(heartbeat_list_ready_issue_ids)"
 blocked_recovery_issue_ids="$(heartbeat_list_blocked_recovery_issue_ids)"
@@ -157,11 +232,19 @@ if grep -q '^104$' <<<"$ready_issue_ids"; then
   echo "orphan blocked issue unexpectedly returned as normal ready" >&2
   exit 1
 fi
+if grep -q '^105$' <<<"$ready_issue_ids"; then
+  echo "baseline-blocked issue unexpectedly returned as normal ready" >&2
+  exit 1
+fi
 
 grep -q '^103$' <<<"$blocked_recovery_issue_ids"
 grep -q '^104$' <<<"$blocked_recovery_issue_ids"
 if grep -q '^102$' <<<"$blocked_recovery_issue_ids"; then
   echo "manual blocked issue unexpectedly returned as blocked-recovery candidate" >&2
+  exit 1
+fi
+if grep -q '^105$' <<<"$blocked_recovery_issue_ids"; then
+  echo "baseline-blocked issue unexpectedly returned as blocked-recovery candidate" >&2
   exit 1
 fi
 

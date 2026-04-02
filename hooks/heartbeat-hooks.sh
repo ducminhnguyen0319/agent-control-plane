@@ -15,6 +15,8 @@ FLOW_TOOLS_DIR="${FLOW_SKILL_DIR}/tools/bin"
 DETACHED_LAUNCH_BIN="${FLOW_TOOLS_DIR}/agent-project-detached-launch"
 RESIDENT_ISSUE_LOOP_BIN="${FLOW_TOOLS_DIR}/start-resident-issue-loop.sh"
 REPO_SLUG="$(flow_resolve_repo_slug "${CONFIG_YAML}")"
+AGENT_REPO_ROOT="$(flow_resolve_agent_repo_root "${CONFIG_YAML}")"
+DEFAULT_BRANCH="$(flow_resolve_default_branch "${CONFIG_YAML}")"
 STATE_ROOT="$(flow_resolve_state_root "${CONFIG_YAML}")"
 PENDING_LAUNCH_DIR="${ACP_PENDING_LAUNCH_DIR:-${F_LOSNING_PENDING_LAUNCH_DIR:-${STATE_ROOT}/pending-launches}}"
 AGENT_PR_PREFIXES_JSON="$(flow_managed_pr_prefixes_json "${CONFIG_YAML}")"
@@ -23,6 +25,51 @@ AGENT_PR_HANDOFF_LABEL="${AGENT_PR_HANDOFF_LABEL:-agent-handoff}"
 AGENT_EXCLUSIVE_LABEL="${AGENT_EXCLUSIVE_LABEL:-agent-exclusive}"
 CODING_WORKER="${ACP_CODING_WORKER:-${F_LOSNING_CODING_WORKER:-codex}}"
 HEARTBEAT_ISSUE_JSON_CACHE_DIR="${TMPDIR:-/tmp}/heartbeat-issue-json.$$"
+
+heartbeat_issue_retry_state_file() {
+  local issue_id="${1:?issue id required}"
+  printf '%s/retries/issues/%s.env\n' "${STATE_ROOT}" "${issue_id}"
+}
+
+heartbeat_reason_requires_baseline_change() {
+  local reason="${1:-}"
+  case "${reason}" in
+    verification-guard-blocked|no-publishable-commits|no-publishable-delta)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+heartbeat_current_baseline_head_sha() {
+  local head_sha=""
+  if [[ -d "${AGENT_REPO_ROOT}" ]]; then
+    head_sha="$(git -C "${AGENT_REPO_ROOT}" rev-parse --verify --quiet "origin/${DEFAULT_BRANCH}" 2>/dev/null || true)"
+    if [[ -z "${head_sha}" ]]; then
+      head_sha="$(git -C "${AGENT_REPO_ROOT}" rev-parse --verify --quiet "${DEFAULT_BRANCH}" 2>/dev/null || true)"
+    fi
+  fi
+  printf '%s\n' "${head_sha}"
+}
+
+heartbeat_retry_reason_is_baseline_blocked() {
+  local issue_id="${1:?issue id required}"
+  local reason="${2:-}"
+  local state_file baseline_head current_head
+
+  heartbeat_reason_requires_baseline_change "${reason}" || return 1
+  state_file="$(heartbeat_issue_retry_state_file "${issue_id}")"
+  [[ -f "${state_file}" ]] || return 1
+
+  baseline_head="$(awk -F= '/^BASELINE_HEAD_SHA=/{print substr($0, index($0, "=") + 1); exit}' "${state_file}" 2>/dev/null | tr -d '\r' || true)"
+  [[ -n "${baseline_head}" ]] || return 1
+  current_head="$(heartbeat_current_baseline_head_sha)"
+  [[ -n "${current_head}" ]] || return 1
+
+  [[ "${baseline_head}" == "${current_head}" ]]
+}
 
 heartbeat_issue_json_cached() {
   local issue_id="${1:?issue id required}"
@@ -152,6 +199,9 @@ heartbeat_issue_blocked_recovery_reason() {
   retry_out="$("${FLOW_TOOLS_DIR}/retry-state.sh" issue "$issue_id" get 2>/dev/null || true)"
   retry_reason="$(awk -F= '/^LAST_REASON=/{print $2}' <<<"${retry_out:-}")"
   if [[ -n "${retry_reason:-}" && "${retry_reason}" != "issue-worker-blocked" ]]; then
+    if heartbeat_retry_reason_is_baseline_blocked "${issue_id}" "${retry_reason}"; then
+      return 0
+    fi
     printf '%s\n' "$retry_reason"
     return 0
   fi

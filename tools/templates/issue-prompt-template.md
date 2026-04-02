@@ -22,7 +22,10 @@ Follow this order:
    bash "$ACP_FLOW_TOOLS_DIR/create-follow-up-issue.sh" --parent {ISSUE_ID} --title "..." --body-file /tmp/follow-up.md
    ```
 3. Implement the smallest root-cause fix in this worktree only.
-4. Run verification and record every successful command with `record-verification.sh`.
+4. Run the narrowest relevant local verification for the files you changed, and record every successful command with `record-verification.sh`.
+
+- Do not default to repo-wide verification such as `pnpm test` unless the issue body explicitly requires it.
+- If unrelated repo-wide suites are already red, keep the cycle focused on targeted verification for your slice and let the host verification guard decide whether publication is safe.
 
 ```bash
 {ISSUE_VERIFICATION_COMMAND_SNIPPET}

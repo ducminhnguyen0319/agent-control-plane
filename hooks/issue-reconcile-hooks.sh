@@ -12,7 +12,9 @@ ADAPTER_BIN_DIR="${FLOW_SKILL_DIR}/bin"
 FLOW_TOOLS_DIR="${FLOW_SKILL_DIR}/tools/bin"
 REPO_SLUG="$(flow_resolve_repo_slug "${CONFIG_YAML}")"
 AGENT_ROOT="$(flow_resolve_agent_root "${CONFIG_YAML}")"
+AGENT_REPO_ROOT="$(flow_resolve_agent_repo_root "${CONFIG_YAML}")"
 STATE_ROOT="$(flow_resolve_state_root "${CONFIG_YAML}")"
+DEFAULT_BRANCH="$(flow_resolve_default_branch "${CONFIG_YAML}")"
 RUNS_ROOT="$(flow_resolve_runs_root "${CONFIG_YAML}")"
 BLOCKED_RECOVERY_STATE_DIR="${STATE_ROOT}/blocked-recovery-issues"
 
@@ -24,6 +26,49 @@ issue_kick_scheduler() {
 
 issue_clear_blocked_recovery_state() {
   rm -f "${BLOCKED_RECOVERY_STATE_DIR}/${ISSUE_ID}.env" 2>/dev/null || true
+}
+
+issue_retry_state_file() {
+  printf '%s/retries/issues/%s.env\n' "${STATE_ROOT}" "${ISSUE_ID}"
+}
+
+issue_reason_requires_baseline_change() {
+  local reason="${1:-}"
+  case "${reason}" in
+    verification-guard-blocked|no-publishable-commits|no-publishable-delta)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+issue_current_baseline_head_sha() {
+  local head_sha=""
+  if [[ -d "${AGENT_REPO_ROOT}" ]]; then
+    head_sha="$(git -C "${AGENT_REPO_ROOT}" rev-parse --verify --quiet "origin/${DEFAULT_BRANCH}" 2>/dev/null || true)"
+    if [[ -z "${head_sha}" ]]; then
+      head_sha="$(git -C "${AGENT_REPO_ROOT}" rev-parse --verify --quiet "${DEFAULT_BRANCH}" 2>/dev/null || true)"
+    fi
+  fi
+  printf '%s\n' "${head_sha}"
+}
+
+issue_record_retry_baseline_gate() {
+  local reason="${1:-}"
+  local state_file head_sha tmp_file
+
+  issue_reason_requires_baseline_change "${reason}" || return 0
+  state_file="$(issue_retry_state_file)"
+  [[ -f "${state_file}" ]] || return 0
+  head_sha="$(issue_current_baseline_head_sha)"
+  [[ -n "${head_sha}" ]] || return 0
+
+  tmp_file="$(mktemp)"
+  grep -v '^BASELINE_HEAD_SHA=' "${state_file}" >"${tmp_file}" || true
+  printf 'BASELINE_HEAD_SHA=%s\n' "${head_sha}" >>"${tmp_file}"
+  mv "${tmp_file}" "${state_file}"
 }
 
 issue_has_schedule_cadence() {
@@ -155,6 +200,7 @@ issue_schedule_retry() {
     return 0
   fi
   "${FLOW_TOOLS_DIR}/retry-state.sh" issue "$ISSUE_ID" schedule "$reason" >/dev/null || true
+  issue_record_retry_baseline_gate "${reason}"
 }
 
 issue_mark_ready() {
