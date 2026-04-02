@@ -199,6 +199,75 @@ resident_worktree_protected() {
   return 1
 }
 
+active_resident_run_worktree_protected() {
+  local candidate_path="${1:-}"
+  local resolved_candidate=""
+  local run_meta=""
+  local run_dir=""
+  local session_name=""
+  local resident_enabled=""
+  local resident_worktree=""
+  local runner_state_file=""
+  local runner_state=""
+  local active_session="false"
+  local resolved_resident=""
+
+  [[ -n "${candidate_path}" && -d "${candidate_path}" ]] || return 1
+  [[ -n "${runs_root}" && -d "${runs_root}" ]] || return 1
+
+  resolved_candidate="$(canonicalize_existing_dir "${candidate_path}" || true)"
+  [[ -n "${resolved_candidate}" ]] || return 1
+
+  for run_meta in "${runs_root}"/*/run.env; do
+    [[ -f "${run_meta}" ]] || continue
+
+    session_name=""
+    resident_enabled=""
+    resident_worktree=""
+    runner_state=""
+    active_session="false"
+
+    set +u
+    set -a
+    # shellcheck source=/dev/null
+    source "${run_meta}"
+    set +a
+    set -u
+
+    resident_enabled="${RESIDENT_WORKER_ENABLED:-no}"
+    [[ "${resident_enabled}" == "yes" ]] || continue
+
+    resident_worktree="${WORKTREE_REALPATH:-${WORKTREE:-}}"
+    [[ -n "${resident_worktree}" && -d "${resident_worktree}" ]] || continue
+    resolved_resident="$(canonicalize_existing_dir "${resident_worktree}" || true)"
+    [[ -n "${resolved_resident}" ]] || continue
+    [[ "${resolved_candidate}" == "${resolved_resident}" ]] || continue
+
+    run_dir="$(dirname "${run_meta}")"
+    runner_state_file="${run_dir}/runner.env"
+    if [[ -f "${runner_state_file}" ]]; then
+      set +u
+      set -a
+      # shellcheck source=/dev/null
+      source "${runner_state_file}"
+      set +a
+      set -u
+      runner_state="${RUNNER_STATE:-}"
+    fi
+
+    session_name="${SESSION:-}"
+    if [[ -n "${session_name}" ]] && tmux has-session -t "${session_name}" 2>/dev/null; then
+      active_session="true"
+    fi
+
+    if [[ "${runner_state}" == "running" || "${active_session}" == "true" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 cleanup_with_branch_tool() {
   local include_path="${1:-yes}"
   local -a cleanup_args
@@ -243,7 +312,8 @@ cleanup_orphan_worktree_dir() {
 
 if [[ "$active_tmux_session" == "true" ]]; then
   cleanup_mode="deferred-active-session"
-elif [[ "$skip_worktree_cleanup" != "true" && -n "${worktree_path}" ]] && resident_worktree_protected "${worktree_path}"; then
+elif [[ "$skip_worktree_cleanup" != "true" && -n "${worktree_path}" ]] \
+  && { resident_worktree_protected "${worktree_path}" || active_resident_run_worktree_protected "${worktree_path}"; }; then
   cleanup_mode="protected-resident-worktree"
 elif [[ "$skip_worktree_cleanup" != "true" && -n "$branch_name" ]]; then
   if cleanup_output="$(cleanup_with_branch_tool yes 2>&1)"; then
