@@ -28,7 +28,7 @@ invocations_file="${state_dir}/invocations.log"
 attempt_file="${state_dir}/attempt"
 
 if [[ "${1:-}" == "login" && "${2:-}" == "status" ]]; then
-  if [[ "$scenario" == "auth-recovery" && ! -f "${state_dir}/auth-ready" ]]; then
+  if [[ ( "$scenario" == "auth-recovery" || "$scenario" == "auth-recovery-before-thread" ) && ! -f "${state_dir}/auth-ready" ]]; then
     printf 'Authentication required\n' >&2
     exit 1
   fi
@@ -58,32 +58,65 @@ if [[ "${1:-}" == "exec" && "${2:-}" == "resume" ]]; then
 fi
 
 if [[ "${1:-}" == "exec" ]]; then
-  printf '%s\n' '{"type":"thread.started","thread_id":"thread-mock-123"}'
   case "$scenario" in
     usage-limit)
+      printf '%s\n' '{"type":"thread.started","thread_id":"thread-mock-123"}'
       printf '%s\n' 'You have reached your Codex usage limits. Please visit https://chatgpt.com/codex/settings/usage'
       ;;
     usage-limit-alt-wording)
+      printf '%s\n' '{"type":"thread.started","thread_id":"thread-mock-123"}'
       printf '%s\n' 'Rate limit exceeded for the active Codex account. Usage cap reached.'
       ;;
     auth-401)
+      printf '%s\n' '{"type":"thread.started","thread_id":"thread-mock-123"}'
       printf '%s\n' 'HTTP 401 Unauthorized: invalid credentials for the active Codex account.'
       ;;
     usage-limit-pre-switched)
+      printf '%s\n' '{"type":"thread.started","thread_id":"thread-mock-123"}'
       printf '%s\n' 'You have reached your Codex usage limits. Please visit https://chatgpt.com/codex/settings/usage'
       printf 'manager-staging\n' >"${state_dir}/active-label"
       ;;
     usage-limit-deferred)
+      printf '%s\n' '{"type":"thread.started","thread_id":"thread-mock-123"}'
       printf '%s\n' 'You have reached your Codex usage limits. Please visit https://chatgpt.com/codex/settings/usage'
       ;;
     usage-limit-repeat-after-switch)
+      printf '%s\n' '{"type":"thread.started","thread_id":"thread-mock-123"}'
       printf '%s\n' 'You have reached your Codex usage limits. Please visit https://chatgpt.com/codex/settings/usage'
       ;;
     auth-recovery)
+      printf '%s\n' '{"type":"thread.started","thread_id":"thread-mock-123"}'
       printf '%s\n' 'Authentication required. Please log in.'
       ;;
+    auth-recovery-before-thread)
+      if [[ "$attempt" == "0" ]]; then
+        printf '%s\n' 'Authentication required. Please log in.'
+        echo "$((attempt + 1))" >"$attempt_file"
+        exit 1
+      fi
+      printf '%s\n' '{"type":"thread.started","thread_id":"thread-mock-123"}'
+      printf '%s\n' '{"type":"turn.started"}'
+      printf '%s\n' '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"initial-retry-ok"}}'
+      printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
+      echo "$((attempt + 1))" >"$attempt_file"
+      exit 0
+      ;;
     auth-recovery-alt-wording)
+      printf '%s\n' '{"type":"thread.started","thread_id":"thread-mock-123"}'
       printf '%s\n' 'Please authenticate to continue. Login required.'
+      ;;
+    usage-limit-before-thread)
+      if [[ "$attempt" == "0" ]]; then
+        printf '%s\n' 'You have reached your Codex usage limits. Please visit https://chatgpt.com/codex/settings/usage'
+        echo "$((attempt + 1))" >"$attempt_file"
+        exit 1
+      fi
+      printf '%s\n' '{"type":"thread.started","thread_id":"thread-mock-123"}'
+      printf '%s\n' '{"type":"turn.started"}'
+      printf '%s\n' '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"initial-retry-ok"}}'
+      printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
+      echo "$((attempt + 1))" >"$attempt_file"
+      exit 0
       ;;
     *)
       echo "unexpected mock codex scenario: $scenario" >&2
@@ -496,6 +529,149 @@ run_auth_recovery_alt_wording_case() {
   wait "$auth_ready_pid"
 }
 
+run_auth_recovery_before_thread_case() {
+  local case_dir="${tmpdir}/auth-recovery-before-thread"
+  local session="auth-recovery-before-thread-session"
+  local runs_root="${case_dir}/runs"
+  local run_dir="${runs_root}/${session}"
+  local output_file="${run_dir}/${session}.log"
+  local prompt_file="${case_dir}/prompt.md"
+  local state_dir="${case_dir}/state"
+  local home_dir="${case_dir}/home"
+  local bin_dir="${case_dir}/bin"
+  local shared_agent_home="${case_dir}/shared-agent-home"
+  local worktree="${case_dir}/worktree"
+  local status_out
+  local auth_ready_pid
+
+  mkdir -p "$run_dir" "$worktree"
+  create_mock_runtime "$case_dir"
+  printf 'Recover even when auth fails before the thread starts.\n' >"$prompt_file"
+  printf '{"account":"stable"}\n' >"${home_dir}/.codex/auth.json"
+
+  (
+    sleep 2
+    [[ -d "${state_dir}" ]] && touch "${state_dir}/auth-ready"
+  ) &
+  auth_ready_pid=$!
+
+  PATH="${bin_dir}:$PATH" \
+  HOME="$home_dir" \
+  ACP_CODEX_QUOTA_BIN="${bin_dir}/codex-quota" \
+  ACP_CODEX_QUOTA_MANAGER_SCRIPT="${shared_agent_home}/skills/openclaw/codex-quota-manager/scripts/auto-switch.sh" \
+  SHARED_AGENT_HOME="$shared_agent_home" \
+  MOCK_CODEX_STATE_DIR="$state_dir" \
+  MOCK_CODEX_SCENARIO="auth-recovery-before-thread" \
+  bash "$HELPER_BIN" \
+    --mode safe \
+    --worktree "$worktree" \
+    --prompt-file "$prompt_file" \
+    --output-file "$output_file" \
+    --host-run-dir "$run_dir" \
+    --sandbox-run-dir "${case_dir}/sandbox" \
+    --safe-profile mock-safe \
+    --codex-bin "${bin_dir}/codex" \
+    --max-resume-attempts 2 \
+    --auth-refresh-timeout-seconds 10 \
+    --auth-refresh-poll-seconds 1
+
+  set -a
+  # shellcheck source=/dev/null
+  source "${run_dir}/runner.env"
+  set +a
+
+  test "$RUNNER_STATE" = "succeeded"
+  test "$THREAD_ID" = "thread-mock-123"
+  test "$RESUME_COUNT" = "1"
+
+  grep -q 'Authentication required. Please log in.' "$output_file"
+  grep -q 'Codex auth is healthy again; resuming initial Codex exec' "$output_file"
+  grep -q 'initial-retry-ok' "$output_file"
+  test "$(grep -c '^exec --json --profile mock-safe --full-auto$' "${state_dir}/invocations.log" | tr -d '[:space:]')" = "2"
+  if grep -q '^exec resume ' "${state_dir}/invocations.log"; then
+    echo "unexpected resume invocation for pre-thread auth recovery" >&2
+    exit 1
+  fi
+
+  status_out="$(
+    PATH="${bin_dir}:$PATH" \
+    HOME="$home_dir" \
+    bash "$STATUS_BIN" --runs-root "$runs_root" --session "$session"
+  )"
+  grep -q '^STATUS=SUCCEEDED$' <<<"$status_out"
+  grep -q '^THREAD_ID=thread-mock-123$' <<<"$status_out"
+  assert_no_failure_reason "$status_out"
+  wait "$auth_ready_pid"
+}
+
+run_usage_limit_recovery_before_thread_case() {
+  local case_dir="${tmpdir}/usage-limit-before-thread"
+  local session="usage-limit-before-thread-session"
+  local runs_root="${case_dir}/runs"
+  local run_dir="${runs_root}/${session}"
+  local output_file="${run_dir}/${session}.log"
+  local prompt_file="${case_dir}/prompt.md"
+  local state_dir="${case_dir}/state"
+  local home_dir="${case_dir}/home"
+  local bin_dir="${case_dir}/bin"
+  local shared_agent_home="${case_dir}/shared-agent-home"
+  local worktree="${case_dir}/worktree"
+  local status_out
+
+  mkdir -p "$run_dir" "$worktree"
+  create_mock_runtime "$case_dir"
+  printf 'Recover even when quota fails before the thread starts.\n' >"$prompt_file"
+  printf '{"account":"initial"}\n' >"${home_dir}/.codex/auth.json"
+  printf 'initial-over-limit\n' >"${state_dir}/active-label"
+
+  PATH="${bin_dir}:$PATH" \
+  HOME="$home_dir" \
+  ACP_CODEX_QUOTA_BIN="${bin_dir}/codex-quota" \
+  ACP_CODEX_QUOTA_MANAGER_SCRIPT="${shared_agent_home}/skills/openclaw/codex-quota-manager/scripts/auto-switch.sh" \
+  SHARED_AGENT_HOME="$shared_agent_home" \
+  MOCK_CODEX_STATE_DIR="$state_dir" \
+  MOCK_CODEX_SCENARIO="usage-limit-before-thread" \
+  bash "$HELPER_BIN" \
+    --mode safe \
+    --worktree "$worktree" \
+    --prompt-file "$prompt_file" \
+    --output-file "$output_file" \
+    --host-run-dir "$run_dir" \
+    --sandbox-run-dir "${case_dir}/sandbox" \
+    --safe-profile mock-safe \
+    --codex-bin "${bin_dir}/codex" \
+    --max-resume-attempts 2 \
+    --auth-refresh-timeout-seconds 10 \
+    --auth-refresh-poll-seconds 1
+
+  set -a
+  # shellcheck source=/dev/null
+  source "${run_dir}/runner.env"
+  set +a
+
+  test "$RUNNER_STATE" = "succeeded"
+  test "$THREAD_ID" = "thread-mock-123"
+  test "$RESUME_COUNT" = "1"
+
+  grep -q 'usage-limit detected; attempting failure-driven Codex account switch' "$output_file"
+  grep -q 'detected refreshed Codex auth after quota interruption; resuming initial Codex exec' "$output_file"
+  grep -q 'initial-retry-ok' "$output_file"
+  test "$(grep -c '^exec --json --profile mock-safe --full-auto$' "${state_dir}/invocations.log" | tr -d '[:space:]')" = "2"
+  if grep -q '^exec resume ' "${state_dir}/invocations.log"; then
+    echo "unexpected resume invocation for pre-thread quota recovery" >&2
+    exit 1
+  fi
+
+  status_out="$(
+    PATH="${bin_dir}:$PATH" \
+    HOME="$home_dir" \
+    bash "$STATUS_BIN" --runs-root "$runs_root" --session "$session"
+  )"
+  grep -q '^STATUS=SUCCEEDED$' <<<"$status_out"
+  grep -q '^THREAD_ID=thread-mock-123$' <<<"$status_out"
+  assert_no_failure_reason "$status_out"
+}
+
 run_auth_401_rotation_case() {
   local case_dir="${tmpdir}/auth-401"
   local session="auth-401-session"
@@ -723,7 +899,9 @@ run_usage_limit_recovery_with_preswitched_account_case
 run_usage_limit_recovery_alt_wording_case
 run_auth_recovery_without_fingerprint_change_case
 run_auth_recovery_alt_wording_case
+run_auth_recovery_before_thread_case
 run_auth_401_rotation_case
+run_usage_limit_recovery_before_thread_case
 run_usage_limit_deferred_fails_without_timed_retry_case
 run_usage_limit_repeat_after_switch_fails_after_one_rotation_case
 run_result_env_completion_override_case

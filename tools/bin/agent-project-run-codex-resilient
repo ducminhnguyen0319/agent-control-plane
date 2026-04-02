@@ -160,6 +160,19 @@ write_state() {
   mv "$tmp_file" "$state_file"
 }
 
+run_codex_command() {
+  # Nested workers must not inherit a parent thread id; the wrapper persists the child thread explicitly.
+  env -u CODEX_THREAD_ID "$codex_bin" "$@"
+}
+
+codex_recovery_target() {
+  if [[ -n "$thread_id" ]]; then
+    printf 'thread %s' "$thread_id"
+    return 0
+  fi
+  printf 'initial Codex exec'
+}
+
 run_with_timeout() {
   local timeout_seconds="${1:?timeout seconds required}"
   shift
@@ -455,10 +468,10 @@ stream_codex_exec() {
       (
         case "$mode" in
           safe)
-            "$codex_bin" exec --json --profile "$safe_profile" --full-auto <"$prompt_file"
+            run_codex_command exec --json --profile "$safe_profile" --full-auto <"$prompt_file"
             ;;
           bypass)
-            "$codex_bin" exec --json --profile "$bypass_profile" --dangerously-bypass-approvals-and-sandbox <"$prompt_file"
+            run_codex_command exec --json --profile "$bypass_profile" --dangerously-bypass-approvals-and-sandbox <"$prompt_file"
             ;;
         esac
       ) >"$stream_fifo" 2>&1 &
@@ -467,10 +480,10 @@ stream_codex_exec() {
       (
         case "$mode" in
           safe)
-            resume_prompt | "$codex_bin" exec resume --json --full-auto "$thread_id" -
+            resume_prompt | run_codex_command exec resume --json --full-auto "$thread_id" -
             ;;
           bypass)
-            resume_prompt | "$codex_bin" exec resume --json --dangerously-bypass-approvals-and-sandbox "$thread_id" -
+            resume_prompt | run_codex_command exec resume --json --dangerously-bypass-approvals-and-sandbox "$thread_id" -
             ;;
         esac
       ) >"$stream_fifo" 2>&1 &
@@ -618,7 +631,7 @@ EOF
 }
 
 codex_login_healthy() {
-  "$codex_bin" login status >/dev/null 2>&1
+  run_codex_command login status >/dev/null 2>&1
 }
 
 wait_for_auth_refresh() {
@@ -628,7 +641,9 @@ wait_for_auth_refresh() {
   local baseline_switch_signature="${4:-}"
   local deadline now current_fingerprint current_quota_label current_switch_signature
   local sleep_seconds
+  local recovery_target
 
+  recovery_target="$(codex_recovery_target)"
   auth_wait_started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   last_trigger_reason="$trigger_reason"
   write_state "waiting-auth-refresh" "$trigger_reason"
@@ -643,28 +658,28 @@ wait_for_auth_refresh() {
         current_switch_signature="$(quota_switch_signature)"
         if codex_login_healthy; then
           if [[ "$current_fingerprint" != "$baseline_fingerprint" ]]; then
-            log_runner "detected refreshed Codex auth after quota interruption; resuming thread ${thread_id}"
+            log_runner "detected refreshed Codex auth after quota interruption; resuming ${recovery_target}"
             auth_wait_started_at=""
             write_state "running" ""
             return 0
           fi
 
           if [[ -n "$baseline_quota_label" && -n "$current_quota_label" && "$current_quota_label" != "$baseline_quota_label" ]]; then
-            log_runner "detected rotated Codex quota account (${baseline_quota_label} -> ${current_quota_label}); resuming thread ${thread_id}"
+            log_runner "detected rotated Codex quota account (${baseline_quota_label} -> ${current_quota_label}); resuming ${recovery_target}"
             auth_wait_started_at=""
             write_state "running" ""
             return 0
           fi
 
           if [[ -n "$baseline_switch_signature" && -n "$current_switch_signature" && "$current_switch_signature" != "$baseline_switch_signature" ]]; then
-            log_runner "detected quota switch state refresh; resuming thread ${thread_id}"
+            log_runner "detected quota switch state refresh; resuming ${recovery_target}"
             auth_wait_started_at=""
             write_state "running" ""
             return 0
           fi
 
           if [[ "$last_quota_switch_status" == "switched" && -n "$current_quota_label" ]]; then
-            log_runner "quota manager reports healthy Codex account ${current_quota_label}; resuming thread ${thread_id}"
+            log_runner "quota manager reports healthy Codex account ${current_quota_label}; resuming ${recovery_target}"
             auth_wait_started_at=""
             write_state "running" ""
             return 0
@@ -675,9 +690,9 @@ wait_for_auth_refresh() {
       *)
         if codex_login_healthy; then
           if [[ "$current_fingerprint" != "$baseline_fingerprint" ]]; then
-            log_runner "detected refreshed Codex auth; resuming thread ${thread_id}"
+            log_runner "detected refreshed Codex auth; resuming ${recovery_target}"
           else
-            log_runner "Codex auth is healthy again; resuming thread ${thread_id}"
+            log_runner "Codex auth is healthy again; resuming ${recovery_target}"
           fi
           auth_wait_started_at=""
           write_state "running" ""
@@ -737,11 +752,6 @@ attempt_run() {
 
   reason="$(classify_failure_reason "$(new_output_since "$last_attempt_start_size")")"
   last_failure_reason="${reason:-worker-exit-failed}"
-
-  if [[ -z "$thread_id" ]]; then
-    write_state "failed" "$last_failure_reason"
-    return 1
-  fi
 
   case "$last_failure_reason" in
     usage-limit|auth-failure|auth-401|account-banned)
