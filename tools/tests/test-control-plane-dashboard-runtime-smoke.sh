@@ -47,6 +47,7 @@ mkdir -p \
   "${state_root}/resident-workers/issues/${recurring_worker_key}" \
   "${state_root}/resident-workers/issues/${scheduled_worker_key}" \
   "${state_root}/resident-workers/issue-queue/pending" \
+  "${state_root}/resident-workers/issue-queue/claims" \
   "${state_root}/retries/providers" \
   "${state_root}/scheduled-issues"
 
@@ -258,6 +259,12 @@ SESSION=demo-issue-6
 UPDATED_AT=2026-03-27T11:13:30Z
 EOF
 
+cat >"${state_root}/resident-workers/issue-queue/claims/issue-7.env" <<'EOF'
+ISSUE_ID=7
+SESSION=demo-issue-7
+UPDATED_AT=2026-03-27T11:14:00Z
+EOF
+
 snapshot_file="${tmpdir}/snapshot.json"
 api_snapshot_file="${tmpdir}/api-snapshot.json"
 
@@ -314,6 +321,7 @@ assert profile["counts"]["blocked_runs"] == 0
 assert profile["counts"]["live_resident_controllers"] == 1
 assert profile["counts"]["resident_workers"] == 2
 assert profile["counts"]["queued_issues"] == 1
+assert profile["counts"]["claimed_issues"] == 1
 assert profile["counts"]["provider_cooldowns"] == 1
 assert profile["counts"]["scheduled_issues"] == 1
 
@@ -333,6 +341,12 @@ assert controller["provider_wait_total_seconds"] == 90
 workers = {item["key"]: item for item in profile["resident_workers"]}
 assert workers["issue-lane-recurring-general-openclaw-safe"]["last_action"] == "host-publish-issue-pr"
 assert workers["issue-lane-scheduled-1800-openclaw-safe"]["last_action"] == "host-comment-scheduled-report"
+
+queue = profile["issue_queue"]
+assert len(queue["pending"]) == 1
+assert queue["pending"][0]["issue_id"] == "6"
+assert len(queue["claims"]) == 1
+assert queue["claims"][0]["issue_id"] == "7"
 
 assert api_profile["counts"]["implemented_runs"] == 1
 assert api_profile["counts"]["reported_runs"] == 1
