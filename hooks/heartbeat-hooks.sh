@@ -52,7 +52,7 @@ heartbeat_open_agent_pr_issue_ids() {
 
 heartbeat_list_ready_issue_ids() {
   local open_agent_pr_issue_ids
-  local ready_issue_rows issue_id is_blocked retry_out retry_reason
+  local ready_issue_rows issue_id is_blocked retry_reason
   open_agent_pr_issue_ids="$(heartbeat_open_agent_pr_issue_ids)"
 
   ready_issue_rows="$(
@@ -73,8 +73,7 @@ heartbeat_list_ready_issue_ids() {
     [[ -n "${issue_id:-}" ]] || continue
 
     if [[ "${is_blocked:-false}" == "true" ]]; then
-      retry_out="$("${FLOW_TOOLS_DIR}/retry-state.sh" issue "$issue_id" get 2>/dev/null || true)"
-      retry_reason="$(awk -F= '/^LAST_REASON=/{print $2}' <<<"${retry_out:-}")"
+      retry_reason="$(heartbeat_issue_blocked_recovery_reason "$issue_id")"
       if [[ -z "${retry_reason:-}" ]]; then
         continue
       fi
@@ -87,7 +86,7 @@ heartbeat_list_ready_issue_ids() {
 
 heartbeat_list_blocked_recovery_issue_ids() {
   local open_agent_pr_issue_ids
-  local blocked_issue_rows issue_id retry_out retry_reason
+  local blocked_issue_rows issue_id retry_reason
   open_agent_pr_issue_ids="$(heartbeat_open_agent_pr_issue_ids)"
 
   blocked_issue_rows="$(
@@ -105,14 +104,77 @@ heartbeat_list_blocked_recovery_issue_ids() {
 
   while IFS= read -r issue_id; do
     [[ -n "${issue_id:-}" ]] || continue
-    retry_out="$("${FLOW_TOOLS_DIR}/retry-state.sh" issue "$issue_id" get 2>/dev/null || true)"
-    retry_reason="$(awk -F= '/^LAST_REASON=/{print $2}' <<<"${retry_out:-}")"
+    retry_reason="$(heartbeat_issue_blocked_recovery_reason "$issue_id")"
     if [[ -z "${retry_reason:-}" ]]; then
       continue
     fi
 
     printf '%s\n' "$issue_id"
   done <<<"$blocked_issue_rows"
+}
+
+heartbeat_issue_blocked_recovery_reason() {
+  local issue_id="${1:?issue id required}"
+  local retry_out retry_reason issue_json
+
+  retry_out="$("${FLOW_TOOLS_DIR}/retry-state.sh" issue "$issue_id" get 2>/dev/null || true)"
+  retry_reason="$(awk -F= '/^LAST_REASON=/{print $2}' <<<"${retry_out:-}")"
+  if [[ -n "${retry_reason:-}" ]]; then
+    printf '%s\n' "$retry_reason"
+    return 0
+  fi
+
+  issue_json="$(flow_github_issue_view_json "$REPO_SLUG" "$issue_id" 2>/dev/null || true)"
+  if [[ -z "${issue_json:-}" ]]; then
+    return 0
+  fi
+
+  ISSUE_JSON="${issue_json}" node <<'EOF'
+const issue = JSON.parse(process.env.ISSUE_JSON || '{}');
+const labels = new Set((issue.labels || []).map((label) => label?.name).filter(Boolean));
+
+if (!labels.has('agent-blocked')) {
+  process.exit(0);
+}
+
+const blockerComment = [...(issue.comments || [])]
+  .reverse()
+  .find((comment) =>
+    /Host-side publish blocked for session|Host-side publish failed for session|Blocked on missing referenced OpenSpec paths for issue|Superseded by focused follow-up issues:|Why it was blocked:|^# Blocker:/i.test(
+      comment?.body || '',
+    ),
+  );
+
+if (!blockerComment || !blockerComment.body) {
+  process.exit(0);
+}
+
+const body = String(blockerComment.body);
+let reason = '';
+
+const explicitFailureReason = body.match(/Failure reason:\s*[\r\n]+-\s*`([^`]+)`/i);
+if (explicitFailureReason) {
+  reason = explicitFailureReason[1];
+} else if (/provider quota is currently exhausted|provider-side rate limit|quota window/i.test(body)) {
+  reason = 'provider-quota-limit';
+} else if (/no publishable delta|no commits ahead of `?origin\/main`?/i.test(body)) {
+  reason = 'no-publishable-delta';
+} else if (/scope guard/i.test(body)) {
+  reason = 'scope-guard-blocked';
+} else if (/verification guard/i.test(body)) {
+  reason = 'verification-guard-blocked';
+} else if (/missing referenced OpenSpec paths/i.test(body)) {
+  reason = 'missing-openspec-paths';
+} else if (/superseded by focused follow-up issues/i.test(body)) {
+  reason = 'superseded-by-follow-ups';
+} else if (/^# Blocker:/im.test(body)) {
+  reason = 'comment-blocked-recovery';
+}
+
+if (reason) {
+  process.stdout.write(`${reason}\n`);
+}
+EOF
 }
 
 heartbeat_list_exclusive_issue_ids() {

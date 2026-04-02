@@ -23,12 +23,33 @@ if [[ "${1:-}" == "pr" && "${2:-}" == "list" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then
+  case "${3:-}" in
+    102)
+      cat <<'JSON'
+{"number":102,"title":"Manual blocked issue","body":"","labels":[{"name":"agent-blocked"}],"comments":[]}
+JSON
+      ;;
+    104)
+      cat <<'JSON'
+{"number":104,"title":"Orphan blocked issue","body":"","labels":[{"name":"agent-blocked"}],"comments":[{"body":"# Blocker: Worker session failed before publish\n\nThe worker exited before ACP could publish or reconcile a result for this cycle.\n\nFailure reason:\n- `claude-exit-failed`\n\nNext step:\n- inspect the run logs for this session and re-queue once the underlying worker issue is resolved"}]}
+JSON
+      ;;
+    *)
+      echo "unexpected issue view args: $*" >&2
+      exit 1
+      ;;
+  esac
+  exit 0
+fi
+
 if [[ "${1:-}" == "issue" && "${2:-}" == "list" ]]; then
   cat <<'JSON'
 [
   {"number":101,"createdAt":"2026-03-15T10:00:00Z","labels":[]},
   {"number":102,"createdAt":"2026-03-15T10:01:00Z","labels":[{"name":"agent-blocked"}]},
-  {"number":103,"createdAt":"2026-03-15T10:02:00Z","labels":[{"name":"agent-blocked"}]}
+  {"number":103,"createdAt":"2026-03-15T10:02:00Z","labels":[{"name":"agent-blocked"}]},
+  {"number":104,"createdAt":"2026-03-15T10:03:00Z","labels":[{"name":"agent-blocked"}]}
 ]
 JSON
   exit 0
@@ -120,8 +141,13 @@ if grep -q '^103$' <<<"$ready_issue_ids"; then
   echo "blocked recovery issue unexpectedly returned as normal ready" >&2
   exit 1
 fi
+if grep -q '^104$' <<<"$ready_issue_ids"; then
+  echo "orphan blocked issue unexpectedly returned as normal ready" >&2
+  exit 1
+fi
 
 grep -q '^103$' <<<"$blocked_recovery_issue_ids"
+grep -q '^104$' <<<"$blocked_recovery_issue_ids"
 if grep -q '^102$' <<<"$blocked_recovery_issue_ids"; then
   echo "manual blocked issue unexpectedly returned as blocked-recovery candidate" >&2
   exit 1
