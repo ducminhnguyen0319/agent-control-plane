@@ -46,6 +46,8 @@ fi
 stamp="$(date +%Y%m%d-%H%M%S)"
 branch_name="${ISSUE_BRANCH_PREFIX}-${ISSUE_ID}-${safe_slug}-${stamp}"
 previous_branch="$(git -C "${WORKTREE}" branch --show-current 2>/dev/null || true)"
+resolved_worktree=""
+actual_branch=""
 
 if ! git -C "${WORKTREE}" rev-parse --git-dir >/dev/null 2>&1; then
   echo "invalid managed worktree: ${WORKTREE}" >&2
@@ -68,6 +70,28 @@ if [[ -n "${previous_branch}" && "${previous_branch}" != "${branch_name}" ]]; th
 fi
 
 "${PREPARE_SCRIPT}" "${WORKTREE}" >/dev/null
+
+if ! git -C "${WORKTREE}" rev-parse --git-dir >/dev/null 2>&1; then
+  echo "invalid managed worktree after reuse: ${WORKTREE}" >&2
+  exit 1
+fi
+
+resolved_worktree="$(cd "${WORKTREE}" 2>/dev/null && pwd -P || true)"
+if [[ -z "${resolved_worktree}" || ! -d "${resolved_worktree}" ]]; then
+  echo "reused worktree path is unavailable: ${WORKTREE}" >&2
+  exit 1
+fi
+
+if ! git -C "${AGENT_REPO_ROOT}" worktree list --porcelain | grep -Fqx "worktree ${resolved_worktree}"; then
+  echo "reused worktree is no longer registered: ${resolved_worktree}" >&2
+  exit 1
+fi
+
+actual_branch="$(git -C "${WORKTREE}" branch --show-current 2>/dev/null || true)"
+if [[ -z "${actual_branch}" || "${actual_branch}" != "${branch_name}" ]]; then
+  echo "reused worktree branch mismatch: expected ${branch_name} got ${actual_branch:-<none>}" >&2
+  exit 1
+fi
 
 printf 'WORKTREE=%s\n' "${WORKTREE}"
 printf 'BRANCH=%s\n' "${branch_name}"

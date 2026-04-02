@@ -785,6 +785,7 @@ while true; do
   controller_refresh_execution_context
   controller_refresh_issue_lane_context "${is_scheduled}" "${schedule_interval_seconds}"
   controller_track_provider_selection "provider-selection"
+  controller_write_state "starting" ""
 
   if controller_yield_to_live_lane_peer; then
     break

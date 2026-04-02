@@ -15,6 +15,8 @@ FLOW_TOOLS_DIR="${FLOW_SKILL_DIR}/tools/bin"
 DETACHED_LAUNCH_BIN="${FLOW_TOOLS_DIR}/agent-project-detached-launch"
 RESIDENT_ISSUE_LOOP_BIN="${FLOW_TOOLS_DIR}/start-resident-issue-loop.sh"
 REPO_SLUG="$(flow_resolve_repo_slug "${CONFIG_YAML}")"
+STATE_ROOT="$(flow_resolve_state_root "${CONFIG_YAML}")"
+PENDING_LAUNCH_DIR="${ACP_PENDING_LAUNCH_DIR:-${F_LOSNING_PENDING_LAUNCH_DIR:-${STATE_ROOT}/pending-launches}}"
 AGENT_PR_PREFIXES_JSON="$(flow_managed_pr_prefixes_json "${CONFIG_YAML}")"
 AGENT_PR_ISSUE_CAPTURE_REGEX="$(flow_managed_issue_branch_regex "${CONFIG_YAML}")"
 AGENT_PR_HANDOFF_LABEL="${AGENT_PR_HANDOFF_LABEL:-agent-handoff}"
@@ -531,6 +533,52 @@ heartbeat_issue_resident_worker_key() {
   flow_resident_issue_lane_key "${CODING_WORKER}" "safe" "${lane_kind}" "${lane_value}"
 }
 
+heartbeat_pending_issue_launch_pid() {
+  local issue_id="${1:?issue id required}"
+  local pending_file pid=""
+
+  pending_file="${PENDING_LAUNCH_DIR}/issue-${issue_id}.pid"
+  [[ -f "${pending_file}" ]] || return 1
+
+  pid="$(tr -d '[:space:]' <"${pending_file}" 2>/dev/null || true)"
+  [[ "${pid}" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "${pid}" 2>/dev/null || return 1
+
+  printf '%s\n' "${pid}"
+}
+
+heartbeat_pending_resident_lane_launch_issue_id() {
+  local issue_id="${1:?issue id required}"
+  local worker_key=""
+  local pending_file=""
+  local candidate_issue_id=""
+  local candidate_worker_key=""
+
+  worker_key="$(heartbeat_issue_resident_worker_key "${issue_id}")"
+  [[ -n "${worker_key}" ]] || return 1
+  [[ -d "${PENDING_LAUNCH_DIR}" ]] || return 1
+
+  for pending_file in "${PENDING_LAUNCH_DIR}"/issue-*.pid; do
+    [[ -f "${pending_file}" ]] || continue
+    candidate_issue_id="${pending_file##*/issue-}"
+    candidate_issue_id="${candidate_issue_id%.pid}"
+    [[ -n "${candidate_issue_id}" ]] || continue
+    if ! heartbeat_pending_issue_launch_pid "${candidate_issue_id}" >/dev/null 2>&1; then
+      rm -f "${pending_file}" 2>/dev/null || true
+      continue
+    fi
+    if [[ "$(heartbeat_issue_uses_resident_loop "${candidate_issue_id}")" != "yes" ]]; then
+      continue
+    fi
+    candidate_worker_key="$(heartbeat_issue_resident_worker_key "${candidate_issue_id}")"
+    [[ -n "${candidate_worker_key}" && "${candidate_worker_key}" == "${worker_key}" ]] || continue
+    printf '%s\n' "${candidate_issue_id}"
+    return 0
+  done
+
+  return 1
+}
+
 heartbeat_live_issue_controller_for_lane() {
   local issue_id="${1:?issue id required}"
   local worker_key=""
@@ -578,9 +626,18 @@ heartbeat_enqueue_issue_for_resident_controller() {
 
 heartbeat_start_issue_worker() {
   local issue_id="${1:?issue id required}"
+  local pending_lane_issue_id=""
   if [[ "$(heartbeat_issue_uses_resident_loop "${issue_id}")" == "yes" ]]; then
     if heartbeat_enqueue_issue_for_live_resident_lane "${issue_id}"; then
       printf 'LAUNCH_MODE=resident-lease\n'
+      return 0
+    fi
+    pending_lane_issue_id="$(heartbeat_pending_resident_lane_launch_issue_id "${issue_id}" || true)"
+    if [[ -n "${pending_lane_issue_id}" ]]; then
+      if [[ "${pending_lane_issue_id}" != "${issue_id}" ]]; then
+        flow_resident_issue_enqueue "${CONFIG_YAML}" "${issue_id}" "heartbeat-pending-lane" >/dev/null
+      fi
+      printf 'LAUNCH_MODE=resident-pending-lane\n'
       return 0
     fi
     if heartbeat_enqueue_issue_for_resident_controller "${issue_id}"; then
