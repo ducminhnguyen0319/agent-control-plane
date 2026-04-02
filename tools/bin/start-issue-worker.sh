@@ -401,6 +401,9 @@ const inferCommentReason = (bodyText) => {
   if (/^# Blocker: Verification requirements were not satisfied$/im.test(body)) {
     return 'verification-guard-blocked';
   }
+  if (/^# Blocker: Localization requirements were not satisfied$/im.test(body)) {
+    return 'localization-guard-blocked';
+  }
   if (/^# Blocker: (All checklist items already completed|Worker produced no publishable delta)$/im.test(body)) {
     return 'no-publishable-commits';
   }
@@ -468,6 +471,8 @@ if (effectiveLastReason === 'scope-guard-blocked') {
   }
 } else if (effectiveLastReason === 'verification-guard-blocked') {
   lines.push('- Add the missing verification or shrink the touched surface before attempting another publish cycle.');
+} else if (effectiveLastReason === 'localization-guard-blocked') {
+  lines.push('- Finish moving the remaining user-facing literals behind translation keys before attempting another publish cycle.');
 }
 
 lines.push('', clippedBody);

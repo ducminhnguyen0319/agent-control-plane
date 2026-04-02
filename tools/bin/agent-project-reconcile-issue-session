@@ -305,7 +305,7 @@ provider_cooldown_script="${shared_tools_dir}/provider-cooldown-state.sh"
 
 schedule_provider_quota_cooldown() {
   local reason="${1:-provider-quota-limit}"
-  [[ "${failure_reason:-}" == "provider-quota-limit" ]] || return 0
+  [[ "${reason}" == "provider-quota-limit" ]] || return 0
   [[ -x "${provider_cooldown_script}" ]] || return 0
 
   "${provider_cooldown_script}" schedule "${reason}" >/dev/null || true
@@ -315,6 +315,21 @@ clear_provider_quota_cooldown() {
   [[ -x "${provider_cooldown_script}" ]] || return 0
 
   "${provider_cooldown_script}" clear >/dev/null || true
+}
+
+normalize_issue_failure_reason() {
+  local current_reason="${1:-}"
+
+  case "${current_reason}" in
+    usage-limit|quota-switch-deferred|quota-switch-attempt-limit)
+      if [[ "${CODING_WORKER:-}" == "codex" ]]; then
+        printf 'provider-quota-limit\n'
+        return 0
+      fi
+      ;;
+  esac
+
+  printf '%s\n' "${current_reason}"
 }
 
 normalize_issue_result_contract() {
@@ -691,6 +706,11 @@ classify_issue_publish_blocker() {
     return 0
   fi
 
+  if grep -Fq 'Localization guard blocked branch publication.' <<<"$publish_out"; then
+    printf 'localization-guard-blocked\n'
+    return 0
+  fi
+
   if grep -Fq 'has no commits ahead of' <<<"$publish_out"; then
     printf 'no-publishable-commits\n'
     return 0
@@ -795,6 +815,23 @@ EOF
     return 0
   fi
 
+  if [[ "${blocker_reason}" == "localization-guard-blocked" ]]; then
+    cat <<EOF
+# Blocker: Localization requirements were not satisfied
+
+Host publication stopped this cycle because the branch updated locale resources but still left obvious hardcoded user-facing strings in the touched UI files.
+
+Why it was blocked:
+- the localization guard found remaining literals that should move behind translation keys
+- recurring issue publication should stop rather than open a partially localized UI change
+
+\`\`\`text
+${publish_out}
+\`\`\`
+EOF
+    return 0
+  fi
+
   cat <<EOF
 Host-side publish blocked for session \`${session}\`.
 
@@ -810,6 +847,21 @@ build_issue_runtime_blocker_comment() {
 
   case "${runtime_reason}" in
     provider-quota-limit)
+      if [[ "${worker_name}" == "codex" ]]; then
+        cat <<EOF
+# Blocker: Provider quota is currently exhausted
+
+This recurring run stopped before implementation because the configured ${worker_name} account hit a provider-side usage limit.
+
+Why it was blocked:
+- the worker reached the current Codex usage cap for the active account
+- ACP records the quota hit, attempts safe account rotation when available, and then waits for the configured cooldown instead of looping indefinitely
+
+Next step:
+- wait for the current quota window to reset, or make another Codex account available to this profile
+EOF
+        return 0
+      fi
       cat <<EOF
 # Blocker: Provider quota is currently exhausted
 
@@ -865,6 +917,8 @@ if (explicitFailureReason) {
   reason = explicitFailureReason[1];
 } else if (/^# Blocker: Verification requirements were not satisfied$/im.test(body)) {
   reason = 'verification-guard-blocked';
+} else if (/^# Blocker: Localization requirements were not satisfied$/im.test(body)) {
+  reason = 'localization-guard-blocked';
 } else if (
   /required (?:issue-contract )?verification does not currently pass/i.test(body) ||
   /Because the required `pnpm typecheck` did not pass/i.test(body) ||
@@ -1216,10 +1270,17 @@ case "$status" in
     notify_issue_reconciled
     ;;
   FAILED)
-    failure_reason="${failure_reason:-worker-exit-failed}"
+    failure_reason="$(normalize_issue_failure_reason "${failure_reason:-worker-exit-failed}")"
     schedule_provider_quota_cooldown "${failure_reason}"
     normalize_issue_runner_state "failed" "${LAST_EXIT_CODE:-}" "${failure_reason}"
-    if [[ "${result_outcome:-}" == "blocked" && "${result_action:-}" == "host-comment-blocker" ]]; then
+    if [[ "${result_outcome:-}" == "blocked" && "${result_action:-}" == "host-comment-blocker" ]] \
+      || [[ "${failure_reason}" == "provider-quota-limit" ]]; then
+      if [[ -z "${result_outcome:-}" ]]; then
+        result_outcome="blocked"
+      fi
+      if [[ -z "${result_action:-}" ]]; then
+        result_action="host-comment-blocker"
+      fi
       if [[ ! -s "${run_dir}/issue-comment.md" ]]; then
         write_issue_comment_artifact "$(build_issue_runtime_blocker_comment "${failure_reason}")" || true
       fi

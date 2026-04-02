@@ -26,6 +26,7 @@ dry_run="false"
 keep_open_label=""
 shared_agent_home="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 scope_guard_script="${shared_agent_home}/tools/bin/issue-publish-scope-guard.sh"
+localization_guard_script="${shared_agent_home}/tools/bin/issue-publish-localization-guard.sh"
 verification_guard_script="${shared_agent_home}/tools/bin/branch-verification-guard.sh"
 
 while [[ $# -gt 0 ]]; do
@@ -285,6 +286,12 @@ else
     --worktree "$WORKTREE" \
     --base-ref "${remote_name}/${base_branch}" \
     --issue-id "$ISSUE_ID"
+
+  if [[ -x "${localization_guard_script}" ]]; then
+    "${localization_guard_script}" \
+      --worktree "$WORKTREE" \
+      --base-ref "${remote_name}/${base_branch}"
+  fi
 
   "${verification_guard_script}" \
     --worktree "$WORKTREE" \

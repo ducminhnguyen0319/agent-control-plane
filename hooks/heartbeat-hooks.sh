@@ -195,6 +195,8 @@ if (explicitFailureReason) {
   reason = 'scope-guard-blocked';
 } else if (/verification guard/i.test(body)) {
   reason = 'verification-guard-blocked';
+} else if (/localization guard/i.test(body) || /^# Blocker: Localization requirements were not satisfied$/im.test(body)) {
+  reason = 'localization-guard-blocked';
 } else if (/missing referenced OpenSpec paths/i.test(body)) {
   reason = 'missing-openspec-paths';
 } else if (/superseded by focused follow-up issues/i.test(body)) {

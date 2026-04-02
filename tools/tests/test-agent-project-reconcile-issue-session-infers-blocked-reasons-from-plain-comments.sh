@@ -14,7 +14,7 @@ history_root="$tmpdir/history"
 repo_root="$tmpdir/repo"
 bin_dir="$tmpdir/bin"
 
-mkdir -p "$shared_bin" "$runs_root/fl-issue-901" "$runs_root/fl-issue-902" "$history_root" "$repo_root" "$bin_dir"
+mkdir -p "$shared_bin" "$runs_root/fl-issue-901" "$runs_root/fl-issue-902" "$runs_root/fl-issue-903" "$history_root" "$repo_root" "$bin_dir"
 git -C "$repo_root" init -b main >/dev/null 2>&1
 
 cat >"$runs_root/fl-issue-901/run.env" <<'EOF'
@@ -62,6 +62,23 @@ What I completed this cycle:
 Additional notes:
 - `pnpm audit` failed with `ENOTFOUND`.
 - `gh issue view` failed to reach `api.github.com`.
+EOF
+
+cat >"$runs_root/fl-issue-903/run.env" <<'EOF'
+ISSUE_ID=903
+SESSION=fl-issue-903
+WORKTREE=/tmp/mock-issue-903
+EOF
+
+cat >"$runs_root/fl-issue-903/result.env" <<'EOF'
+OUTCOME=blocked
+ACTION=host-comment-blocker
+EOF
+
+cat >"$runs_root/fl-issue-903/issue-comment.md" <<'EOF'
+# Blocker: Localization requirements were not satisfied
+
+Host publication stopped this cycle because the branch updated locale resources but still left obvious hardcoded user-facing strings in the touched UI files.
 EOF
 
 cat >"$shared_bin/agent-project-worker-status" <<EOF
@@ -142,11 +159,27 @@ output_902="$(
     --hook-file "$tmpdir/hooks.sh"
 )"
 
+output_903="$(
+  PATH="$bin_dir:$PATH" \
+  SHARED_AGENT_HOME="$shared_home" \
+  TEST_RETRY_REASONS_FILE="$tmpdir/retry-reasons.txt" \
+  bash "$SCRIPT" \
+    --session fl-issue-903 \
+    --repo-slug example/repo \
+    --repo-root "$repo_root" \
+    --runs-root "$runs_root" \
+    --history-root "$history_root" \
+    --hook-file "$tmpdir/hooks.sh"
+)"
+
 grep -q '^STATUS=SUCCEEDED$' <<<"$output_901"
 grep -q '^FAILURE_REASON=verification-guard-blocked$' <<<"$output_901"
 grep -q '^STATUS=SUCCEEDED$' <<<"$output_902"
 grep -q '^FAILURE_REASON=external-network-access-blocked$' <<<"$output_902"
+grep -q '^STATUS=SUCCEEDED$' <<<"$output_903"
+grep -q '^FAILURE_REASON=localization-guard-blocked$' <<<"$output_903"
 grep -q '^901=verification-guard-blocked$' "$tmpdir/retry-reasons.txt"
 grep -q '^902=external-network-access-blocked$' "$tmpdir/retry-reasons.txt"
+grep -q '^903=localization-guard-blocked$' "$tmpdir/retry-reasons.txt"
 
 echo "issue reconcile infers blocked reasons from plain comments test passed"
