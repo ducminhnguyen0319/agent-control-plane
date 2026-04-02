@@ -12,13 +12,16 @@ profile_dir="$profile_registry_root/demo"
 runs_root="$tmpdir/runtime/demo/runs"
 state_root="$tmpdir/runtime/demo/state"
 run_dir="$runs_root/demo-issue-1"
+history_dir="$tmpdir/runtime/demo/history/demo-pr-9-20260326-150500"
 
 mkdir -p \
   "$profile_dir" \
   "$run_dir" \
+  "$history_dir" \
   "$state_root/resident-workers/issues/1" \
   "$state_root/resident-workers/issues/issue-lane-recurring-general-openclaw-safe" \
   "$state_root/retries/providers" \
+  "$state_root/retries/prs" \
   "$state_root/scheduled-issues" \
   "$state_root/resident-workers/issue-queue/pending"
 
@@ -123,6 +126,14 @@ LAST_REASON=provider-quota-limit
 UPDATED_AT=2026-03-26T15:03:00Z
 EOF
 
+cat >"$state_root/retries/prs/9.env" <<'EOF'
+ATTEMPTS=3
+NEXT_ATTEMPT_EPOCH=4102444800
+NEXT_ATTEMPT_AT=2100-01-01T00:00:00Z
+LAST_REASON=github-api-rate-limit
+UPDATED_AT=2026-03-26T15:03:30Z
+EOF
+
 cat >"$state_root/scheduled-issues/1.env" <<'EOF'
 INTERVAL_SECONDS=600
 LAST_STARTED_AT=2026-03-26T15:00:00Z
@@ -134,6 +145,27 @@ cat >"$state_root/resident-workers/issue-queue/pending/issue-2.env" <<'EOF'
 ISSUE_ID=2
 SESSION=demo-issue-2
 UPDATED_AT=2026-03-26T15:04:00Z
+EOF
+
+cat >"$history_dir/run.env" <<'EOF'
+TASK_KIND=pr
+TASK_ID=9
+SESSION=demo-pr-9
+MODE=safe
+STARTED_AT=2026-03-26T15:05:00Z
+CODING_WORKER=openclaw
+EOF
+
+cat >"$history_dir/runner.env" <<'EOF'
+RUNNER_STATE=succeeded
+LAST_EXIT_CODE=0
+LAST_FAILURE_REASON=''
+UPDATED_AT=2026-03-26T15:06:00Z
+EOF
+
+cat >"$history_dir/result.env" <<'EOF'
+OUTCOME=blocked
+ACTION=requested-changes-or-blocked
 EOF
 
 snapshot="$(ACP_PROFILE_REGISTRY_ROOT="$profile_registry_root" python3 "$SNAPSHOT_BIN" --pretty)"
@@ -152,6 +184,10 @@ grep -q '"live_resident_controllers": 0' <<<"$snapshot"
 grep -q '"controller_live": false' <<<"$snapshot"
 grep -q '"result_kind": "implemented"' <<<"$snapshot"
 grep -q '"result_label": "Implemented"' <<<"$snapshot"
+grep -q '"recent_history_runs": 1' <<<"$snapshot"
+grep -q '"session": "demo-pr-9"' <<<"$snapshot"
+grep -q '"pr_number": "9"' <<<"$snapshot"
+grep -q '"last_reason": "github-api-rate-limit"' <<<"$snapshot"
 grep -q '"alert_count": 1' <<<"$snapshot"
 grep -q '"kind": "github-core-rate-limit"' <<<"$snapshot"
 grep -q '"title": "GitHub core API rate limit blocks host actions"' <<<"$snapshot"

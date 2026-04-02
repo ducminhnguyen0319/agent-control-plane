@@ -377,6 +377,30 @@ const recentPrs = recentNumbers.map((number) => {
 const activePrs = recentPrs.filter((pr) => pr.state === 'open' || pr.state === 'draft');
 const completedPrs = recentPrs.filter((pr) => pr.state !== 'open' && pr.state !== 'draft');
 
+const recentCycleNotes = [];
+for (const comment of [...(issue.comments || [])].reverse()) {
+  const body = String(comment?.body || '').trim();
+  if (!body) {
+    continue;
+  }
+  if (!/^(Completed|Blocked on|# Blocker:|Host-side publish blocked|Host-side publish failed)/im.test(body)) {
+    continue;
+  }
+  const summaryLines = body
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 6);
+  if (summaryLines.length === 0) {
+    continue;
+  }
+  const summary = summaryLines.join(' | ');
+  recentCycleNotes.push(summary.length > 420 ? `${summary.slice(0, 417)}...` : summary);
+  if (recentCycleNotes.length >= 3) {
+    break;
+  }
+}
+
 const formatPr = (pr) => {
   const suffix = pr.url ? ` ${pr.url}` : '';
   return `- #${pr.number} (${pr.state}): ${pr.title}${suffix}`;
@@ -389,6 +413,7 @@ const lines = [
   '- Before editing, choose exactly one concrete target module, screen, or flow and keep the cycle limited to that target.',
   '- Do not work on a target already covered by an open or draft PR for this issue, or by the most recent completed cycles listed below, unless you are explicitly fixing a regression introduced there.',
   '- If you cannot identify a small non-overlapping target after reviewing recent cycle history, stop blocked using the blocker contract instead of forcing another PR.',
+  '- Prefer the recent cycle notes below over repeating broad web research; only fetch outside context when the local baseline or linked advisories materially changed.',
   '- In your final worker output, start with `Target:` and `Why now:` lines before the changed-files list.',
 ];
 
@@ -403,6 +428,13 @@ if (completedPrs.length > 0) {
   lines.push('', '### Most recent completed cycles');
   for (const pr of completedPrs) {
     lines.push(formatPr(pr));
+  }
+}
+
+if (recentCycleNotes.length > 0) {
+  lines.push('', '### Recent cycle notes from issue comments');
+  for (const note of recentCycleNotes) {
+    lines.push(`- ${note}`);
   }
 }
 

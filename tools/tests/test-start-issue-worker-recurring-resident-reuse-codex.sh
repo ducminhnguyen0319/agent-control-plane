@@ -89,6 +89,16 @@ chmod +x "$shim_dir/tmux"
 cat >"$shim_dir/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${1:-}" == "api" && "${2:-}" == "rate_limit" ]]; then
+  if [[ "${3:-}" == "--jq" ]]; then
+    printf '5000\n'
+    exit 0
+  fi
+  cat <<'JSON'
+{"resources":{"graphql":{"remaining":5000}}}
+JSON
+  exit 0
+fi
 if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then
   issue_id="${3:-0}"
   cat <<JSON

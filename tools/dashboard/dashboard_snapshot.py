@@ -302,6 +302,64 @@ def collect_runs(runs_root: Path) -> list[dict[str, Any]]:
     return runs
 
 
+def collect_recent_history(history_root: Path, limit: int = 8) -> list[dict[str, Any]]:
+    if not history_root.is_dir():
+        return []
+
+    items: list[dict[str, Any]] = []
+    seen_sessions: set[str] = set()
+    for run_dir in sorted(
+        [entry for entry in history_root.iterdir() if entry.is_dir()],
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    ):
+        run_env = read_env_file(run_dir / "run.env")
+        runner_env = read_env_file(run_dir / "runner.env")
+        result_env = read_env_file(run_dir / "result.env")
+        session = run_env.get("SESSION", "")
+        if not session:
+            name = run_dir.name
+            parts = name.split("-")
+            session = "-".join(parts[:-2]) if len(parts) > 2 else name
+        if session in seen_sessions:
+            continue
+        lifecycle_status = (runner_env.get("RUNNER_STATE", "") or "").strip().upper()
+        if lifecycle_status == "SUCCEEDED":
+            lifecycle_status = "SUCCEEDED"
+        elif lifecycle_status == "FAILED":
+            lifecycle_status = "FAILED"
+        elif lifecycle_status:
+            lifecycle_status = lifecycle_status.upper()
+        else:
+            lifecycle_status = "UNKNOWN"
+        outcome = result_env.get("OUTCOME", "")
+        failure_reason = runner_env.get("LAST_FAILURE_REASON", "")
+        result_kind, result_label = classify_run_result(lifecycle_status, outcome, failure_reason)
+        item = {
+            "session": session,
+            "task_kind": run_env.get("TASK_KIND", ""),
+            "task_id": run_env.get("TASK_ID", ""),
+            "status": lifecycle_status,
+            "lifecycle_status": lifecycle_status,
+            "updated_at": result_env.get("UPDATED_AT", "") or runner_env.get("UPDATED_AT", "") or file_mtime_iso(run_dir),
+            "coding_worker": run_env.get("CODING_WORKER", ""),
+            "failure_reason": failure_reason,
+            "outcome": outcome,
+            "action": result_env.get("ACTION", ""),
+            "result_kind": result_kind,
+            "result_label": result_label,
+            "run_dir": str(run_dir),
+            "archived": True,
+        }
+        alert = extract_github_rate_limit_alert(run_dir, item)
+        item["alerts"] = [alert] if alert else []
+        items.append(item)
+        seen_sessions.add(session)
+        if len(items) >= limit:
+            break
+    return items
+
+
 def controller_is_stale(env: dict[str, str], controller_path: Path) -> bool:
     """A controller is stale if it claims to be running but its PID is dead or its
     UPDATED_AT file mtime is older than 10 minutes."""
@@ -552,6 +610,43 @@ def collect_issue_retries(state_root: Path) -> list[dict[str, Any]]:
     return items
 
 
+def collect_pr_retries(state_root: Path) -> list[dict[str, Any]]:
+    retries_root = state_root / "retries" / "prs"
+    if not retries_root.is_dir():
+        return []
+
+    now_epoch = int(datetime.now(timezone.utc).timestamp())
+    items: list[dict[str, Any]] = []
+    for path in sorted(retries_root.glob("*.env"), key=lambda item: item.stat().st_mtime, reverse=True):
+        env = read_env_file(path)
+        next_attempt_epoch = safe_int(env.get("NEXT_ATTEMPT_EPOCH"))
+        items.append(
+            {
+                "pr_number": path.stem,
+                "attempts": safe_int(env.get("ATTEMPTS")) or 0,
+                "next_attempt_epoch": next_attempt_epoch,
+                "next_attempt_at": env.get("NEXT_ATTEMPT_AT", ""),
+                "last_reason": env.get("LAST_REASON", ""),
+                "updated_at": env.get("UPDATED_AT", "") or file_mtime_iso(path),
+                "ready": not bool(next_attempt_epoch and next_attempt_epoch > now_epoch),
+                "state_file": str(path),
+            }
+        )
+    return items
+
+
+def resolve_history_root(render_env: dict[str, str], yaml_env: dict[str, str], runs_root: Path) -> Path:
+    configured = (
+        render_env.get("EFFECTIVE_HISTORY_ROOT", "").strip()
+        or yaml_env.get("runtime.history_root", "").strip()
+    )
+    if configured and configured != ".":
+        return Path(configured)
+    if runs_root.name == "runs":
+        return runs_root.parent / "history"
+    return Path(".")
+
+
 def collect_issue_queue(state_root: Path) -> dict[str, list[dict[str, Any]]]:
     queue_root = state_root / "resident-workers" / "issue-queue"
     pending_root = queue_root / "pending"
@@ -588,14 +683,17 @@ def build_profile_snapshot(profile_id: str, registry_root: Path) -> dict[str, An
 
     runs_root = Path(render_env.get("EFFECTIVE_RUNS_ROOT", ""))
     state_root = Path(render_env.get("EFFECTIVE_STATE_ROOT", ""))
+    history_root = resolve_history_root(render_env, yaml_env, runs_root)
     runs = collect_runs(runs_root)
+    recent_history = collect_recent_history(history_root)
     controllers = collect_resident_controllers(state_root)
     resident_workers = collect_resident_workers(state_root)
     cooldowns = collect_provider_cooldowns(state_root)
     scheduled = collect_scheduled_issues(state_root)
     retries = collect_issue_retries(state_root)
+    pr_retries = collect_pr_retries(state_root)
     queue = collect_issue_queue(state_root)
-    alerts = [alert for run in runs for alert in run.get("alerts", [])]
+    alerts = [alert for run in (runs + recent_history) for alert in run.get("alerts", [])]
     codex_rotation = collect_codex_rotation(render_env)
 
     return {
@@ -604,6 +702,7 @@ def build_profile_snapshot(profile_id: str, registry_root: Path) -> dict[str, An
         "repo_root": render_env.get("EFFECTIVE_REPO_ROOT", ""),
         "runs_root": str(runs_root),
         "state_root": str(state_root),
+        "history_root": str(history_root),
         "issue_prefix": yaml_env.get("session_naming.issue_prefix", ""),
         "pr_prefix": yaml_env.get("session_naming.pr_prefix", ""),
         "coding_worker": render_env.get("EFFECTIVE_CODING_WORKER", ""),
@@ -630,6 +729,7 @@ def build_profile_snapshot(profile_id: str, registry_root: Path) -> dict[str, An
             "completed_runs": sum(
                 1 for item in runs if item["status"] == "SUCCEEDED" and item["result_kind"] not in {"implemented", "reported", "blocked"}
             ),
+            "recent_history_runs": len(recent_history),
             "resident_controllers": len(controllers),
             "live_resident_controllers": sum(1 for item in controllers if item["state"] != "stopped" and item["controller_live"]),
             "stale_resident_controllers": sum(1 for item in controllers if item.get("controller_stale", False)),
@@ -642,12 +742,14 @@ def build_profile_snapshot(profile_id: str, registry_root: Path) -> dict[str, An
             "alerts": len(alerts),
         },
         "runs": runs,
+        "recent_history": recent_history,
         "alerts": alerts,
         "resident_controllers": controllers,
         "resident_workers": resident_workers,
         "provider_cooldowns": cooldowns,
         "scheduled_issues": scheduled,
         "issue_retries": retries,
+        "pr_retries": pr_retries,
         "issue_queue": queue,
     }
 

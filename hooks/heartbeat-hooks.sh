@@ -95,6 +95,7 @@ heartbeat_open_agent_pr_issue_ids() {
   local pr_issue_ids_json=""
   pr_issue_ids_json="$(
     flow_github_pr_list_json "$REPO_SLUG" open 100 \
+      2>/dev/null \
       | jq --argjson agentPrPrefixes "${AGENT_PR_PREFIXES_JSON}" --arg handoffLabel "${AGENT_PR_HANDOFF_LABEL}" --arg branchIssueRegex "${AGENT_PR_ISSUE_CAPTURE_REGEX}" '
         map(
           . as $pr
@@ -119,7 +120,7 @@ heartbeat_open_agent_pr_issue_ids() {
           | select(. != null and . != "")
         )
         | unique
-      '
+      ' 2>/dev/null || true
   )"
 
   if [[ -z "${pr_issue_ids_json:-}" ]]; then
@@ -136,6 +137,7 @@ heartbeat_list_ready_issue_ids() {
 
   ready_issue_rows="$(
     flow_github_issue_list_json "$REPO_SLUG" open 100 \
+    2>/dev/null \
     | jq -r --argjson openAgentPrIssueIds "${open_agent_pr_issue_ids}" '
         map(select(
           (any(.labels[]?; .name == "agent-running") | not)
@@ -145,7 +147,7 @@ heartbeat_list_ready_issue_ids() {
         | .[]
         | [.number, (any(.labels[]?; .name == "agent-blocked"))]
         | @tsv
-      '
+      ' 2>/dev/null || true
   )"
 
   while IFS=$'\t' read -r issue_id is_blocked; do
@@ -170,6 +172,7 @@ heartbeat_list_blocked_recovery_issue_ids() {
 
   blocked_issue_rows="$(
     flow_github_issue_list_json "$REPO_SLUG" open 100 \
+    2>/dev/null \
     | jq -r --argjson openAgentPrIssueIds "${open_agent_pr_issue_ids}" '
         map(select(
           any(.labels[]?; .name == "agent-blocked")
@@ -178,7 +181,7 @@ heartbeat_list_blocked_recovery_issue_ids() {
         ))
         | sort_by(.createdAt, .number)
         | .[].number
-      '
+      ' 2>/dev/null || true
   )"
 
   while IFS= read -r issue_id; do
@@ -268,6 +271,7 @@ heartbeat_list_exclusive_issue_ids() {
   open_agent_pr_issue_ids="$(heartbeat_open_agent_pr_issue_ids)"
 
   flow_github_issue_list_json "$REPO_SLUG" open 100 \
+    2>/dev/null \
     | jq -r --arg exclusiveLabel "${AGENT_EXCLUSIVE_LABEL}" --argjson openAgentPrIssueIds "${open_agent_pr_issue_ids}" '
         map(select(
           any(.labels[]?; .name == $exclusiveLabel)
@@ -277,20 +281,22 @@ heartbeat_list_exclusive_issue_ids() {
         ))
         | sort_by(.createdAt, .number)
         | .[].number
-      '
+      ' 2>/dev/null || true
 }
 
 heartbeat_list_running_issue_ids() {
   flow_github_issue_list_json "$REPO_SLUG" open 100 \
+    2>/dev/null \
     | jq -r '
         map(select(any(.labels[]?; .name == "agent-running")))
         | sort_by(.createdAt, .number)
         | .[].number
-      '
+      ' 2>/dev/null || true
 }
 
 heartbeat_list_open_agent_pr_ids() {
   flow_github_pr_list_json "$REPO_SLUG" open 100 \
+    2>/dev/null \
     | jq -r --argjson agentPrPrefixes "${AGENT_PR_PREFIXES_JSON}" --arg handoffLabel "${AGENT_PR_HANDOFF_LABEL}" '
         map(select(
           . as $pr
@@ -302,11 +308,12 @@ heartbeat_list_open_agent_pr_ids() {
         ))
         | sort_by(.createdAt)
         | .[].number
-      '
+      ' 2>/dev/null || true
 }
 
 heartbeat_list_exclusive_pr_ids() {
   flow_github_pr_list_json "$REPO_SLUG" open 100 \
+    2>/dev/null \
     | jq -r --argjson agentPrPrefixes "${AGENT_PR_PREFIXES_JSON}" --arg handoffLabel "${AGENT_PR_HANDOFF_LABEL}" --arg exclusiveLabel "${AGENT_EXCLUSIVE_LABEL}" '
         map(select(
           . as $pr
@@ -319,7 +326,7 @@ heartbeat_list_exclusive_pr_ids() {
         ))
         | sort_by(.createdAt)
         | .[].number
-      '
+      ' 2>/dev/null || true
 }
 
 heartbeat_issue_is_heavy() {

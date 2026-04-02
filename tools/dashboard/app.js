@@ -180,6 +180,7 @@ function renderProfile(profile) {
   const summaryCards = [
     ["Run sessions", profile.counts.active_runs],
     ["Running", profile.counts.running_runs],
+    ["Recent completed", profile.counts.recent_history_runs || 0],
     ["Implemented", profile.counts.implemented_runs],
     ["Reported", profile.counts.reported_runs],
     ["Blocked", profile.counts.blocked_runs],
@@ -215,6 +216,19 @@ function renderProfile(profile) {
     "No active run directories for this profile.",
   );
 
+  const recentHistoryTable = renderTable(
+    [
+      { label: "Session", render: (row) => `<div class="mono">${row.session}</div>` },
+      { label: "Task", render: (row) => `${row.task_kind || "n/a"} ${row.task_id || ""}`.trim() },
+      { label: "Lifecycle", render: renderLifecycle },
+      { label: "Worker", key: "coding_worker" },
+      { label: "Result", render: renderResult },
+      { label: "Updated", render: (row) => row.updated_at ? `${relativeTime(row.updated_at)}<div class="muted">${row.updated_at}</div>` : "n/a" },
+    ],
+    profile.recent_history || [],
+    "No recently archived runs.",
+  );
+
   const controllerTable = renderTable(
     [
       { label: "Issue", key: "issue_id" },
@@ -239,6 +253,18 @@ function renderProfile(profile) {
     ],
     profile.issue_retries || [],
     "No issue retries recorded.",
+  );
+
+  const prRetryTable = renderTable(
+    [
+      { label: "PR", key: "pr_number" },
+      { label: "Status", render: (row) => `<span class="status-pill ${row.ready ? "" : "waiting-provider"}">${row.ready ? "ready" : "retrying"}</span>` },
+      { label: "Reason", render: (row) => row.last_reason || "n/a" },
+      { label: "Attempts", key: "attempts" },
+      { label: "Next attempt", render: (row) => row.next_attempt_at ? `${relativeTime(row.next_attempt_at)}<div class="muted">${row.next_attempt_at}</div>` : "n/a" },
+    ],
+    profile.pr_retries || [],
+    "No PR retries recorded.",
   );
 
   const workerTable = renderTable(
@@ -324,6 +350,11 @@ function renderProfile(profile) {
           ${runsTable}
         </section>
         <section class="panel">
+          <h3>Recent Completed Runs</h3>
+          <p class="panel-subtitle">Recently archived runs so they do not disappear from the dashboard immediately after completion.</p>
+          ${recentHistoryTable}
+        </section>
+        <section class="panel">
           <h3>Resident Controllers</h3>
           <p class="panel-subtitle">Includes provider wait and failover telemetry. Stale controllers show a warning.</p>
           ${controllerTable}
@@ -332,6 +363,10 @@ function renderProfile(profile) {
         <section class="panel half">
           <h3>Issue Retries</h3>
           ${retryTable}
+        </section>
+        <section class="panel half">
+          <h3>PR Retries</h3>
+          ${prRetryTable}
         </section>
         <section class="panel">
           <h3>Resident Worker Metadata</h3>

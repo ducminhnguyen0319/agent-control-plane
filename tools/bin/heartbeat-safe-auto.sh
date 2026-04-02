@@ -475,6 +475,12 @@ fi
 
 run_codex_quota_preflight
 
+# Sync skill files to runtime-home if source has changed since last sync.
+# This ensures start-issue-worker.sh and other scripts are always up to date.
+if [[ -x "${FLOW_TOOLS_DIR}/ensure-runtime-sync.sh" ]]; then
+  "${FLOW_TOOLS_DIR}/ensure-runtime-sync.sh" --quiet 2>/dev/null || true
+fi
+
 acquire_lock
 
 reap_orphan_shared_loop_groups

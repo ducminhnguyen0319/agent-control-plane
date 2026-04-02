@@ -227,23 +227,30 @@ schedule_provider_quota_cooldown() {
   local reason="${1:-provider-quota-limit}"
   [[ "${failure_reason:-}" == "provider-quota-limit" ]] || return 0
   [[ -x "${provider_cooldown_script}" ]] || return 0
+  [[ "${CODING_WORKER:-}" == "codex" ]] && return 0
 
   "${provider_cooldown_script}" schedule "${reason}" >/dev/null || true
 }
 
 clear_provider_quota_cooldown() {
   [[ -x "${provider_cooldown_script}" ]] || return 0
+  [[ "${CODING_WORKER:-}" == "codex" ]] && return 0
 
   "${provider_cooldown_script}" clear >/dev/null || true
 }
 
 blocked_runtime_reason=""
+host_github_rate_limited="no"
+host_github_rate_limit_detail=""
 
 owner="${repo_slug%%/*}"
 repo="${repo_slug#*/}"
 pr_view_json="$(flow_github_pr_view_json "$repo_slug" "$pr_number")"
 pr_state="$(jq -r '.state' <<<"$pr_view_json")"
-pr_base_ref="$(jq -r '.baseRefName // "main"' <<<"$pr_view_json")"
+pr_base_ref="$(jq -r '.baseRefName // empty' <<<"$pr_view_json")"
+if [[ -z "${pr_base_ref}" ]]; then
+  pr_base_ref="main"
+fi
 
 if [[ "$status" == "RUNNING" && "$pr_state" != "MERGED" && "$pr_state" != "CLOSED" ]]; then
   printf 'STATUS=%s\n' "$status"
@@ -395,7 +402,9 @@ post_pr_comment_if_present() {
   if pr_comment_already_posted; then
     return 0
   fi
-  flow_github_api_repo "${repo_slug}" "issues/${pr_number}/comments" --method POST -f body="$(cat "$comment_file")" >/dev/null
+  if ! host_github_post_issue_comment "${pr_number}" "$(cat "$comment_file")"; then
+    return 1
+  fi
 }
 
 pr_comment_already_posted() {
@@ -406,6 +415,120 @@ pr_comment_already_posted() {
   comments_json="$(flow_github_pr_view_json "$repo_slug" "$pr_number" 2>/dev/null || true)"
   [[ -n "$comments_json" ]] || return 1
   jq -e --arg body "$comment_body" 'any(.comments[]?; .body == $body)' >/dev/null <<<"$comments_json"
+}
+
+host_github_output_indicates_rate_limit() {
+  grep -Eiq 'API rate limit exceeded|secondary rate limit|rate limit exceeded|HTTP 403' <<<"${1:-}"
+}
+
+record_host_github_rate_limit() {
+  local output="${1:-}"
+  local detail_file="${run_dir}/host-github-rate-limit.log"
+  host_github_rate_limited="yes"
+  host_github_rate_limit_detail="${output}"
+  printf '%s\n' "${output}" >"${detail_file}"
+}
+
+host_github_post_issue_comment() {
+  local issue_number="${1:?issue number required}"
+  local body="${2:-}"
+  local output=""
+
+  flow_export_github_cli_auth_env "${repo_slug}"
+  if output="$(
+    gh api "repos/${repo_slug}/issues/${issue_number}/comments" \
+      --method POST \
+      -f body="${body}" 2>&1
+  )"; then
+    return 0
+  fi
+
+  if host_github_output_indicates_rate_limit "${output}"; then
+    record_host_github_rate_limit "${output}"
+    return 1
+  fi
+
+  printf '%s\n' "${output}" >&2
+  return 1
+}
+
+host_github_submit_pr_approval() {
+  local output=""
+
+  flow_export_github_cli_auth_env "${repo_slug}"
+  if output="$(
+    gh api "repos/${repo_slug}/pulls/${pr_number}/reviews" \
+      --method POST \
+      -f event=APPROVE \
+      -f body="Automated final review passed. Safe low-risk scope, green checks, and host-side merge approved." \
+      2>&1
+  )"; then
+    return 0
+  fi
+
+  if grep -q "Can not approve your own pull request" <<<"${output}"; then
+    return 0
+  fi
+
+  if host_github_output_indicates_rate_limit "${output}"; then
+    record_host_github_rate_limit "${output}"
+    return 1
+  fi
+
+  printf '%s\n' "${output}" >&2
+  return 1
+}
+
+append_host_rate_limit_comment() {
+  local detail="${1:-GitHub API rate limit blocked host actions.}"
+  local reset_line=""
+
+  if grep -Eiq 'resets at ' <<<"${detail}"; then
+    reset_line="$(grep -Eio 'resets at [^.]+' <<<"${detail}" | head -n 1 || true)"
+  fi
+
+  {
+    if [[ -s "${pr_comment_file}" ]]; then
+      printf '\n\n'
+    fi
+    printf '## Host action blocked\n\n'
+    printf 'GitHub API rate limit blocked ACP from posting the PR review outcome or merge action.\n'
+    if [[ -n "${reset_line}" ]]; then
+      printf '\n- %s\n' "${reset_line}"
+    fi
+    printf -- '- ACP kept the local review artifacts and scheduled an automatic retry for the host action.\n'
+  } >>"${pr_comment_file}"
+}
+
+handle_host_github_rate_limit_retry() {
+  local reason="${1:-github-api-rate-limit}"
+  local result_action_override="${2:-host-rate-limit-retry}"
+
+  append_host_rate_limit_comment "${host_github_rate_limit_detail:-}"
+  require_transition "pr_schedule_retry" pr_schedule_retry "${reason}"
+  require_transition "pr_after_blocked" pr_after_blocked "${pr_number}"
+  cleanup_pr_session
+  result_outcome="blocked"
+  result_action="${result_action_override}"
+  failure_reason="${reason}"
+  notify_pr_reconciled
+  mark_reconciled
+  printf 'STATUS=FAILED\n'
+  printf 'PR_NUMBER=%s\n' "${pr_number}"
+  printf 'PR_STATE=%s\n' "${pr_state}"
+  printf 'OUTCOME=%s\n' "${result_outcome}"
+  printf 'ACTION=%s\n' "${result_action}"
+  printf 'FAILURE_REASON=%s\n' "${failure_reason}"
+  exit 0
+}
+
+maybe_handle_host_github_rate_limit() {
+  local reason="${1:-github-api-rate-limit}"
+  local result_action_override="${2:-host-rate-limit-retry}"
+  if [[ "${host_github_rate_limited}" == "yes" ]]; then
+    handle_host_github_rate_limit_retry "${reason}" "${result_action_override}"
+  fi
+  return 1
 }
 
 blocked_result_indicates_local_bind_failure() {
@@ -774,23 +897,38 @@ pr_remote_already_has_final_head() {
 }
 
 approve_and_merge() {
-  local approve_output
   if ! pr_is_self_authored_for_current_actor; then
-    if ! approve_output="$(
-      flow_github_api_repo "${repo_slug}" "pulls/${pr_number}/reviews" \
-        --method POST \
-        -f event=APPROVE \
-        -f body="Automated final review passed. Safe low-risk scope, green checks, and host-side merge approved." \
-        2>&1
-    )"; then
-      if ! grep -q "Can not approve your own pull request" <<<"$approve_output"; then
-        printf '%s\n' "$approve_output" >&2
-        return 1
+    if ! host_github_submit_pr_approval; then
+      if [[ "${host_github_rate_limited}" == "yes" ]]; then
+        return 2
       fi
+      return 1
     fi
   fi
 
-  flow_github_pr_merge "$repo_slug" "$pr_number" "squash" "yes"
+  flow_export_github_cli_auth_env "${repo_slug}"
+  if ! gh pr merge "${pr_number}" -R "${repo_slug}" --squash --delete-branch --admin >"${run_dir}/host-github-merge.out" 2>"${run_dir}/host-github-merge.err"; then
+    local merge_output=""
+    merge_output="$(cat "${run_dir}/host-github-merge.err" 2>/dev/null || true)"
+    if host_github_output_indicates_rate_limit "${merge_output}"; then
+      record_host_github_rate_limit "${merge_output}"
+      return 2
+    fi
+    if flow_github_pr_merge "$repo_slug" "$pr_number" "squash" "yes" 2>"${run_dir}/host-github-merge.err"; then
+      return 0
+    fi
+    merge_output="$(cat "${run_dir}/host-github-merge.err" 2>/dev/null || true)"
+    if host_github_output_indicates_rate_limit "${merge_output}"; then
+      record_host_github_rate_limit "${merge_output}"
+      return 2
+    fi
+    if [[ -n "${merge_output}" ]]; then
+      printf '%s\n' "${merge_output}" >&2
+    fi
+    return 1
+  fi
+
+  return 0
 }
 
 cleanup_pr_session() {
@@ -829,7 +967,7 @@ handle_linked_issue_merge_cleanup() {
 handle_updated_branch_result() {
   if [[ -z "$pr_worktree" || ! -d "$pr_worktree" ]]; then
     if pr_remote_already_has_final_head; then
-      post_pr_comment_if_present
+      post_pr_comment_if_present || maybe_handle_host_github_rate_limit "github-api-rate-limit" "host-comment-rate-limit-retry"
       require_transition "pr_clear_retry" pr_clear_retry
       require_transition "pr_after_updated_branch" pr_after_updated_branch "$pr_number"
       cleanup_pr_session
@@ -895,7 +1033,7 @@ handle_updated_branch_result() {
   fi
 
   push_pr_branch
-  post_pr_comment_if_present
+  post_pr_comment_if_present || maybe_handle_host_github_rate_limit "github-api-rate-limit" "host-comment-rate-limit-retry"
   require_transition "pr_clear_retry" pr_clear_retry
   require_transition "pr_after_updated_branch" pr_after_updated_branch "$pr_number"
   cleanup_pr_session
@@ -936,7 +1074,7 @@ elif [[ "$pr_state" == "CLOSED" ]]; then
   result_action="${result_action:-cleaned-closed-pr}"
   notify_pr_reconciled
 elif [[ "$status" == "SUCCEEDED" && "$result_outcome" == "approved-local-review-passed" ]]; then
-  if ! review_pass_action="$(review_pass_action_from_result_action "${result_action:-}" 2>/dev/null)"; then
+      if ! review_pass_action="$(review_pass_action_from_result_action "${result_action:-}" 2>/dev/null)"; then
     review_pass_action="$(pr_review_pass_action "$pr_number")"
   fi
   case "$review_pass_action" in
@@ -963,8 +1101,13 @@ elif [[ "$status" == "SUCCEEDED" && "$result_outcome" == "approved-local-review-
       fi
 
       require_transition "pr_clear_retry" pr_clear_retry
-      approve_and_merge
-      pr_state="$(flow_github_pr_view_json "$repo_slug" "$pr_number" | jq -r '.state')"
+      if ! approve_and_merge; then
+        if [[ "${host_github_rate_limited}" == "yes" ]]; then
+          handle_host_github_rate_limit_retry "github-api-rate-limit" "host-merge-rate-limit-retry"
+        fi
+        exit 1
+      fi
+      pr_state="MERGED"
       if [[ "$pr_state" != "MERGED" ]]; then
         echo "PR ${pr_number} did not merge successfully" >&2
         exit 1
@@ -1018,7 +1161,7 @@ elif [[ "$status" == "SUCCEEDED" && "$result_outcome" == "no-change-needed" ]]; 
           result_action="host-rejected-noop-promotion"
         else
           push_pr_branch
-          post_pr_comment_if_present
+          post_pr_comment_if_present || maybe_handle_host_github_rate_limit "github-api-rate-limit" "host-comment-rate-limit-retry"
           require_transition "pr_clear_retry" pr_clear_retry
           require_transition "pr_after_updated_branch" pr_after_updated_branch "$pr_number"
           cleanup_pr_session
@@ -1041,7 +1184,7 @@ elif [[ "$status" == "SUCCEEDED" && "$result_outcome" == "no-change-needed" ]]; 
       result_action="host-rejected-no-change-needed"
       notify_pr_reconciled
     else
-      post_pr_comment_if_present
+      post_pr_comment_if_present || maybe_handle_host_github_rate_limit "github-api-rate-limit" "host-comment-rate-limit-retry"
       require_transition "pr_clear_retry" pr_clear_retry
       require_transition "pr_after_succeeded" pr_after_succeeded "$pr_number"
       cleanup_pr_session
@@ -1062,7 +1205,7 @@ elif [[ "$status" == "SUCCEEDED" && "$result_outcome" == "blocked" ]]; then
   elif attempt_blocked_pr_host_verification_recovery; then
     handle_updated_branch_result
   else
-    post_pr_comment_if_present
+    post_pr_comment_if_present || maybe_handle_host_github_rate_limit "github-api-rate-limit" "host-comment-rate-limit-retry"
     require_transition "pr_clear_retry" pr_clear_retry
     require_transition "pr_after_blocked" pr_after_blocked "$pr_number"
     cleanup_pr_session
@@ -1079,6 +1222,7 @@ elif [[ "$status" == "FAILED" ]]; then
   schedule_provider_quota_cooldown "${failure_reason:-worker-exit-failed}"
   require_transition "pr_schedule_retry" pr_schedule_retry "${failure_reason:-worker-exit-failed}"
   require_transition "pr_after_failed" pr_after_failed "$pr_number"
+  cleanup_pr_session
   notify_pr_reconciled
 fi
 
