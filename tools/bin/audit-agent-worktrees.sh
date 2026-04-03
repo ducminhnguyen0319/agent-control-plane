@@ -12,6 +12,7 @@ AGENT_REPO_ROOT="$(flow_resolve_agent_repo_root "${CONFIG_YAML}")"
 WORKTREE_ROOT="$(flow_resolve_worktree_root "${CONFIG_YAML}")"
 AGENT_ROOT="$(flow_resolve_agent_root "${CONFIG_YAML}")"
 RUNS_ROOT="$(flow_resolve_runs_root "${CONFIG_YAML}")"
+STATE_ROOT="$(flow_resolve_state_root "${CONFIG_YAML}")"
 PENDING_LAUNCH_DIR="${ACP_PENDING_LAUNCH_DIR:-${F_LOSNING_PENDING_LAUNCH_DIR:-$(flow_resolve_state_root "${CONFIG_YAML}")/pending-launches}}"
 ISSUE_SESSION_PREFIX="$(flow_resolve_issue_session_prefix "${CONFIG_YAML}")"
 PR_SESSION_PREFIX="$(flow_resolve_pr_session_prefix "${CONFIG_YAML}")"
@@ -195,6 +196,68 @@ worktree_has_active_launch() {
   kill -0 "$pending_pid" 2>/dev/null
 }
 
+artifact_only_worktree_dir() {
+  local worktree_path="${1:?worktree path required}"
+  local entry_count="0"
+  local entry_path=""
+  local entry_name=""
+
+  [[ -d "$worktree_path" ]] || return 1
+  git -C "$worktree_path" rev-parse --is-inside-work-tree >/dev/null 2>&1 && return 1
+
+  shopt -s nullglob dotglob
+  for entry_path in "$worktree_path"/* "$worktree_path"/.*; do
+    [[ -e "$entry_path" ]] || continue
+    entry_name="$(basename "$entry_path")"
+    case "$entry_name" in
+      .|..|.openclaw-artifacts|node_modules)
+        ;;
+      *)
+        shopt -u nullglob dotglob
+        return 1
+        ;;
+    esac
+    entry_count=$((entry_count + 1))
+  done
+  shopt -u nullglob dotglob
+
+  [[ "$entry_count" -gt 0 ]]
+}
+
+clear_stale_resident_worktree_metadata() {
+  local metadata_file=""
+  local resident_realpath=""
+  local tmp_file=""
+
+  [[ -d "${STATE_ROOT}/resident-workers/issues" ]] || return 0
+
+  for metadata_file in "${STATE_ROOT}"/resident-workers/issues/*/metadata.env; do
+    [[ -f "$metadata_file" ]] || continue
+    resident_realpath="$(awk -F= '/^WORKTREE_REALPATH=/{print $2; exit}' "$metadata_file" 2>/dev/null | sed -e "s/^'//" -e "s/'$//" || true)"
+    [[ -n "$resident_realpath" ]] || continue
+    if [[ -d "$resident_realpath" ]]; then
+      continue
+    fi
+    tmp_file="${metadata_file}.tmp.$$"
+    awk '
+      BEGIN { replaced = 0 }
+      /^WORKTREE_REALPATH=/ {
+        print "WORKTREE_REALPATH='\'''\''"
+        replaced = 1
+        next
+      }
+      { print }
+      END {
+        if (replaced == 0) {
+          print "WORKTREE_REALPATH='\'''\''"
+        }
+      }
+    ' "${metadata_file}" >"${tmp_file}"
+    mv "${tmp_file}" "${metadata_file}"
+    printf 'CLEARED_STALE_RESIDENT_WORKTREE=%s\n' "${metadata_file}"
+  done
+}
+
 remove_agent_worktree() {
   local worktree_path="${1:-}"
   local branch_ref="${2:-}"
@@ -232,6 +295,8 @@ remove_agent_worktree() {
 
 issue_count=0
 cleaned_count=0
+artifact_residue_count=0
+artifact_residue_cleaned=0
 
 current_worktree=""
 current_branch_ref=""
@@ -302,9 +367,47 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   esac
 done < <(git -C "$AGENT_REPO_ROOT" worktree list --porcelain; printf '\n')
 
+clear_stale_resident_worktree_metadata
+
+if [[ -d "$WORKTREE_ROOT" ]]; then
+  while IFS= read -r orphan_dir; do
+    [[ -n "$orphan_dir" ]] || continue
+    if ! artifact_only_worktree_dir "$orphan_dir"; then
+      continue
+    fi
+
+    session_name="$(session_for_worktree "$orphan_dir" "" || true)"
+    active_owner="no"
+    if worktree_has_active_owner "$session_name"; then
+      active_owner="yes"
+    fi
+    active_launch="no"
+    if worktree_has_active_launch "$session_name"; then
+      active_launch="yes"
+    fi
+
+    artifact_residue_count=$((artifact_residue_count + 1))
+    printf 'ARTIFACT_ONLY_WORKTREE=%s\n' "$orphan_dir"
+    printf 'SESSION=%s\n' "${session_name:-<none>}"
+    printf 'ACTIVE_OWNER=%s\n' "$active_owner"
+    printf 'ACTIVE_LAUNCH=%s\n' "$active_launch"
+
+    if [[ "$cleanup" == "true" && "$active_owner" == "no" && "$active_launch" == "no" ]]; then
+      rm -rf "$orphan_dir"
+      artifact_residue_cleaned=$((artifact_residue_cleaned + 1))
+      printf 'CLEANUP=removed\n'
+    else
+      printf 'CLEANUP=skipped\n'
+    fi
+    printf '\n'
+  done < <(find "$WORKTREE_ROOT" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+fi
+
 printf 'LEGACY_AGENT_WORKTREE_COUNT=%s\n' "$issue_count"
 printf 'LEGACY_AGENT_WORKTREE_CLEANED=%s\n' "$cleaned_count"
+printf 'ARTIFACT_ONLY_WORKTREE_COUNT=%s\n' "$artifact_residue_count"
+printf 'ARTIFACT_ONLY_WORKTREE_CLEANED=%s\n' "$artifact_residue_cleaned"
 
-if [[ "$strict" == "true" && "$issue_count" -gt 0 ]]; then
+if [[ "$strict" == "true" && $((issue_count + artifact_residue_count)) -gt 0 ]]; then
   exit 2
 fi
