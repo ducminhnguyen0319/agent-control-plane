@@ -133,7 +133,6 @@ grep -q 'trusted publishing from GitHub Actions' "$ROOT_DIR/references/release-c
 grep -q '\.github/workflows/publish.yml' "$ROOT_DIR/references/release-checklist.md"
 grep -q 'git push origin main --follow-tags' "$ROOT_DIR/references/release-checklist.md"
 grep -q 'npm package shows provenance' "$ROOT_DIR/references/release-checklist.md"
-grep -q 'render-dashboard-demo-media.sh' "$ROOT_DIR/references/release-checklist.md"
 grep -q 'if a public GitHub repo now exists, set or verify the `homepage`,' "$ROOT_DIR/references/release-checklist.md"
 grep -q '`repository`, and `bugs` URLs in `package.json`' "$ROOT_DIR/references/release-checklist.md"
 grep -q 'bash tools/bin/test-smoke.sh' "$ROOT_DIR/references/release-checklist.md"

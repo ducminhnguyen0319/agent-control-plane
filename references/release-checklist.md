@@ -9,8 +9,6 @@ Maintainer checklist for shipping a new public package release of
 - confirm `package.json` version is intentional
 - review `CHANGELOG.md` and prepare release notes from
   `.github/release-template.md`
-- refresh README demo media if the dashboard UI changed:
-  `bash tools/bin/render-dashboard-demo-media.sh`
 - review `README.md`, `SECURITY.md`, `CONTRIBUTING.md`, and `CLA.md` for stale
   links or policy text
 - if a public GitHub repo now exists, set or verify the `homepage`,
