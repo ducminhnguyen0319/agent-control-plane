@@ -2039,6 +2039,7 @@ flow_export_execution_env() {
   local openclaw_model=""
   local openclaw_thinking=""
   local openclaw_timeout=""
+  local openclaw_stall=""
 
   repo_id="$(flow_resolve_repo_id "${config_file}")"
   provider_quota_cooldowns="$(flow_resolve_provider_quota_cooldowns "${config_file}")"
@@ -2071,6 +2072,7 @@ flow_export_execution_env() {
     openclaw_model="$(flow_kv_get "${provider_pool_selection}" "OPENCLAW_MODEL")"
     openclaw_thinking="$(flow_kv_get "${provider_pool_selection}" "OPENCLAW_THINKING")"
     openclaw_timeout="$(flow_kv_get "${provider_pool_selection}" "OPENCLAW_TIMEOUT_SECONDS")"
+    openclaw_stall="$(flow_kv_get "${provider_pool_selection}" "OPENCLAW_STALL_SECONDS")"
   else
     if [[ -n "${explicit_coding_worker}" ]]; then
       active_provider_selection_reason="env-override"
@@ -2087,6 +2089,7 @@ flow_export_execution_env() {
     openclaw_model="$(flow_env_or_config "${config_file}" "ACP_OPENCLAW_MODEL F_LOSNING_OPENCLAW_MODEL" "execution.openclaw.model" "")"
     openclaw_thinking="$(flow_env_or_config "${config_file}" "ACP_OPENCLAW_THINKING F_LOSNING_OPENCLAW_THINKING" "execution.openclaw.thinking" "")"
     openclaw_timeout="$(flow_env_or_config "${config_file}" "ACP_OPENCLAW_TIMEOUT_SECONDS F_LOSNING_OPENCLAW_TIMEOUT_SECONDS" "execution.openclaw.timeout_seconds" "")"
+    openclaw_stall="$(flow_env_or_config "${config_file}" "ACP_OPENCLAW_STALL_SECONDS F_LOSNING_OPENCLAW_STALL_SECONDS" "execution.openclaw.stall_seconds" "")"
   fi
 
   if [[ -n "${coding_worker}" ]]; then
@@ -2166,6 +2169,10 @@ flow_export_execution_env() {
   if [[ -n "${openclaw_timeout}" ]]; then
     export F_LOSNING_OPENCLAW_TIMEOUT_SECONDS="${openclaw_timeout}"
     export ACP_OPENCLAW_TIMEOUT_SECONDS="${openclaw_timeout}"
+  fi
+  if [[ -n "${openclaw_stall}" ]]; then
+    export F_LOSNING_OPENCLAW_STALL_SECONDS="${openclaw_stall}"
+    export ACP_OPENCLAW_STALL_SECONDS="${openclaw_stall}"
   fi
 
   flow_export_github_cli_auth_env "$(flow_resolve_repo_slug "${config_file}")"
