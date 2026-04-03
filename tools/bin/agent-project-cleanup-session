@@ -131,6 +131,24 @@ canonicalize_existing_dir() {
   )
 }
 
+canonicalize_dir_or_parent_join() {
+  local target="${1:-}"
+  local resolved=""
+
+  [[ -n "${target}" ]] || return 1
+
+  resolved="$(canonicalize_existing_dir "${target}" || true)"
+  if [[ -n "${resolved}" ]]; then
+    printf '%s\n' "${resolved}"
+    return 0
+  fi
+
+  (
+    cd "$(dirname "${target}")" 2>/dev/null
+    printf '%s/%s\n' "$(pwd -P)" "$(basename "${target}")"
+  ) || return 1
+}
+
 path_is_within_root() {
   local target="${1:-}"
   local root="${2:-}"
@@ -169,6 +187,8 @@ resident_worktree_protected() {
   local resident_worktree=""
   local resident_realpath=""
   local resolved_resident=""
+  local resident_lane_kind=""
+  local resident_last_status=""
 
   [[ -n "${candidate_path}" && -d "${candidate_path}" ]] || return 1
   resolved_candidate="$(canonicalize_existing_dir "${candidate_path}" || true)"
@@ -181,12 +201,19 @@ resident_worktree_protected() {
     [[ -f "${metadata_file}" ]] || continue
     resident_worktree=""
     resident_realpath=""
+    resident_lane_kind=""
+    resident_last_status=""
     set +u
     set -a
     # shellcheck source=/dev/null
     source "${metadata_file}"
     set +a
     set -u
+    resident_lane_kind="${RESIDENT_LANE_KIND:-}"
+    resident_last_status="${LAST_STATUS:-}"
+    if [[ "${resident_lane_kind}" != "recurring" && "${resident_last_status}" != "running" ]]; then
+      continue
+    fi
     resident_worktree="${WORKTREE_REALPATH:-${WORKTREE:-}}"
     [[ -n "${resident_worktree}" && -d "${resident_worktree}" ]] || continue
     resolved_resident="$(canonicalize_existing_dir "${resident_worktree}" || true)"
@@ -266,6 +293,59 @@ active_resident_run_worktree_protected() {
   done
 
   return 1
+}
+
+clear_resident_worktree_realpath_references() {
+  local removed_path="${1:-}"
+  local resolved_removed=""
+  local resolved_state_root=""
+  local metadata_file=""
+  local resident_realpath=""
+  local tmp_file=""
+  local metadata_worktree_realpath=""
+
+  [[ -n "${removed_path}" ]] || return 0
+
+  resolved_removed="$(canonicalize_dir_or_parent_join "${removed_path}" || true)"
+  [[ -n "${resolved_removed}" ]] || return 0
+
+  resolved_state_root="$(derive_state_root || true)"
+  [[ -n "${resolved_state_root}" && -d "${resolved_state_root}/resident-workers/issues" ]] || return 0
+
+  for metadata_file in "${resolved_state_root}"/resident-workers/issues/*/metadata.env; do
+    [[ -f "${metadata_file}" ]] || continue
+    metadata_worktree_realpath=""
+    set +u
+    set -a
+    # shellcheck source=/dev/null
+    source "${metadata_file}"
+    set +a
+    set -u
+    resident_realpath="${WORKTREE_REALPATH:-${metadata_worktree_realpath:-}}"
+    [[ -n "${resident_realpath}" ]] || continue
+    resident_realpath="$(canonicalize_dir_or_parent_join "${resident_realpath}" || true)"
+    [[ -n "${resident_realpath}" ]] || continue
+    if [[ "${resident_realpath}" != "${resolved_removed}" ]]; then
+      continue
+    fi
+
+    tmp_file="${metadata_file}.tmp.$$"
+    awk '
+      BEGIN { replaced = 0 }
+      /^WORKTREE_REALPATH=/ {
+        print "WORKTREE_REALPATH='\'''\''"
+        replaced = 1
+        next
+      }
+      { print }
+      END {
+        if (replaced == 0) {
+          print "WORKTREE_REALPATH='\'''\''"
+        }
+      }
+    ' "${metadata_file}" >"${tmp_file}"
+    mv "${tmp_file}" "${metadata_file}"
+  done
 }
 
 cleanup_with_branch_tool() {
@@ -353,6 +433,10 @@ if [[ -n "$session" && "$active_tmux_session" != "true" ]]; then
       --session "$session" \
       --remove-file "${remove_file:-}"
   )"
+fi
+
+if [[ "$skip_worktree_cleanup" != "true" && -n "$worktree_path" && ! -d "$worktree_path" ]]; then
+  clear_resident_worktree_realpath_references "$worktree_path"
 fi
 
 if [[ "$cleanup_status" != "0" && -z "$session" ]]; then
