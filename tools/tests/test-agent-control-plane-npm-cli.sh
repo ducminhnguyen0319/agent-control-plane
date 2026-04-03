@@ -15,6 +15,46 @@ fake_bin="${tmpdir}/fake-bin"
 mkdir -p "${platform_home}" "${home_dir}"
 mkdir -p "${fake_bin}"
 
+run_with_timeout() {
+  local timeout_seconds="${1:?timeout required}"
+  shift
+
+  /opt/homebrew/bin/python3 - "$timeout_seconds" "$@" <<'PY'
+import os
+import signal
+import subprocess
+import sys
+
+timeout_seconds = float(sys.argv[1])
+argv = sys.argv[2:]
+
+proc = subprocess.Popen(argv, start_new_session=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+try:
+    stdout, stderr = proc.communicate(timeout=timeout_seconds)
+except subprocess.TimeoutExpired:
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        stdout, stderr = proc.communicate(timeout=2)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        stdout, stderr = proc.communicate()
+    sys.stdout.write(stdout)
+    sys.stderr.write(stderr)
+    sys.exit(124)
+
+sys.stdout.write(stdout)
+sys.stderr.write(stderr)
+sys.exit(proc.returncode)
+PY
+}
+
 cat >"${fake_bin}/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -59,7 +99,7 @@ chmod +x "${fake_bin}/gh" "${fake_bin}/jq" "${fake_bin}/codex"
 help_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
-  node "${CLI_SCRIPT}" help
+  run_with_timeout 30 node "${CLI_SCRIPT}" help
 )"
 
 grep -q '^Usage:$' <<<"${help_output}"
@@ -72,14 +112,14 @@ grep -q '^  remove' <<<"${help_output}"
 version_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
-  node "${CLI_SCRIPT}" version
+  run_with_timeout 30 node "${CLI_SCRIPT}" version
 )"
 
 grep -q "^${PACKAGE_VERSION}$" <<<"${version_output}"
 
 HOME="${home_dir}" \
 AGENT_PLATFORM_HOME="${platform_home}" \
-node "${CLI_SCRIPT}" sync >/dev/null
+run_with_timeout 30 node "${CLI_SCRIPT}" sync >/dev/null
 
 test -f "${platform_home}/runtime-home/skills/openclaw/agent-control-plane/SKILL.md"
 test -f "${platform_home}/runtime-home/tools/bin/flow-runtime-doctor.sh"
@@ -89,7 +129,7 @@ test -f "${platform_home}/runtime-home/skills/openclaw/agent-control-plane/tools
 doctor_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
-  node "${CLI_SCRIPT}" doctor
+  run_with_timeout 30 node "${CLI_SCRIPT}" doctor
 )"
 
 grep -q '^CONTROL_PLANE_NAME=agent-control-plane$' <<<"${doctor_output}"
@@ -98,7 +138,7 @@ grep -q '^SOURCE_READY=yes$' <<<"${doctor_output}"
 init_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
-  node "${CLI_SCRIPT}" init \
+  run_with_timeout 30 node "${CLI_SCRIPT}" init \
     --profile-id alpha \
     --repo-slug example-owner/alpha \
     --allow-missing-repo \
@@ -113,7 +153,7 @@ grep -q "^RUNTIME_HOME=${platform_home}/runtime-home$" <<<"${init_output}"
 profile_smoke_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
-  node "${CLI_SCRIPT}" profile-smoke --profile-id alpha
+  run_with_timeout 30 node "${CLI_SCRIPT}" profile-smoke --profile-id alpha
 )"
 
 grep -q '^PROFILE_ID=alpha$' <<<"${profile_smoke_output}"
@@ -122,7 +162,7 @@ grep -q '^PROFILE_STATUS=ok$' <<<"${profile_smoke_output}"
 runtime_status_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
-  node "${CLI_SCRIPT}" runtime status --profile-id alpha
+  run_with_timeout 30 node "${CLI_SCRIPT}" runtime status --profile-id alpha
 )"
 
 grep -q '^PROFILE_ID=alpha$' <<<"${runtime_status_output}"
@@ -136,7 +176,7 @@ mkdir -p "${runtime_state_root}"
 HOME="${home_dir}" \
 AGENT_PLATFORM_HOME="${platform_home}" \
 ACP_PROJECT_RUNTIME_LAUNCHCTL_BIN="/nonexistent" \
-node "${CLI_SCRIPT}" runtime stop --profile-id alpha --wait-seconds 1 >/dev/null || true
+run_with_timeout 30 node "${CLI_SCRIPT}" runtime stop --profile-id alpha --wait-seconds 1 >/dev/null || true
 
 cat >"${runtime_bootstrap_path}" <<EOF
 #!/usr/bin/env bash
@@ -164,7 +204,7 @@ runtime_start_output="$(
   ACP_PROJECT_RUNTIME_KICK_SCRIPT="${fake_bin}/kick-start-runtime.sh" \
   ACP_PROJECT_RUNTIME_LAUNCHCTL_BIN="/nonexistent" \
   ACP_PROJECT_RUNTIME_START_WAIT_SECONDS=1 \
-  node "${CLI_SCRIPT}" runtime start --profile-id alpha
+  run_with_timeout 30 node "${CLI_SCRIPT}" runtime start --profile-id alpha
 )"
 
 grep -q '^ACTION=start$' <<<"${runtime_start_output}"
@@ -185,12 +225,12 @@ AGENT_PLATFORM_HOME="${platform_home}" \
 ACP_PROJECT_RUNTIME_BOOTSTRAP_SCRIPT="${runtime_bootstrap_path}" \
 ACP_PROJECT_RUNTIME_KICK_SCRIPT="${fake_bin}/kick-start-runtime.sh" \
 ACP_PROJECT_RUNTIME_LAUNCHCTL_BIN="/nonexistent" \
-node "${CLI_SCRIPT}" runtime stop --profile-id alpha --wait-seconds 1 >/dev/null
+run_with_timeout 30 node "${CLI_SCRIPT}" runtime stop --profile-id alpha --wait-seconds 1 >/dev/null
 
 launchd_help="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
-  node "${CLI_SCRIPT}" launchd-install --help
+  run_with_timeout 30 node "${CLI_SCRIPT}" launchd-install --help
 )"
 
 grep -q '^Usage:$' <<<"${launchd_help}"
@@ -198,7 +238,7 @@ grep -q '^Usage:$' <<<"${launchd_help}"
 remove_help="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
-  node "${CLI_SCRIPT}" remove --help
+  run_with_timeout 30 node "${CLI_SCRIPT}" remove --help
 )"
 
 grep -q '^Usage:$' <<<"${remove_help}"
@@ -206,7 +246,7 @@ grep -q '^Usage:$' <<<"${remove_help}"
 setup_help="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
-  node "${CLI_SCRIPT}" setup --help
+  run_with_timeout 30 node "${CLI_SCRIPT}" setup --help
 )"
 
 grep -q -- '--install-missing-deps' <<<"${setup_help}"
@@ -233,7 +273,7 @@ setup_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
   PATH="${fake_bin}:${PATH}" \
-  node "${CLI_SCRIPT}" setup \
+  run_with_timeout 30 node "${CLI_SCRIPT}" setup \
     --non-interactive \
     --repo-root "${setup_repo}" \
     --no-start-runtime \
@@ -274,7 +314,7 @@ setup_custom_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
   PATH="${fake_bin}:${PATH}" \
-  node "${CLI_SCRIPT}" setup \
+  run_with_timeout 30 node "${CLI_SCRIPT}" setup \
     --non-interactive \
     --repo-root "${setup_repo}" \
     --profile-id setup-custom \
@@ -299,7 +339,7 @@ setup_deferred_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
   PATH="${fake_bin}:${PATH}" \
-  node "${CLI_SCRIPT}" setup \
+  run_with_timeout 30 node "${CLI_SCRIPT}" setup \
     --non-interactive \
     --repo-root "${setup_repo}" \
     --profile-id deferred-demo \
@@ -319,7 +359,7 @@ setup_dry_run_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
   PATH="${fake_bin}:${PATH}" \
-  node "${CLI_SCRIPT}" setup \
+  run_with_timeout 30 node "${CLI_SCRIPT}" setup \
     --dry-run \
     --non-interactive \
     --repo-root "${setup_repo}" \
@@ -339,7 +379,7 @@ setup_json_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
   PATH="${fake_bin}:${PATH}" \
-  node "${CLI_SCRIPT}" setup \
+  run_with_timeout 30 node "${CLI_SCRIPT}" setup \
     --json \
     --repo-root "${setup_repo}" \
     --profile-id setup-json \
@@ -363,7 +403,7 @@ setup_deferred_json_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
   PATH="${fake_bin}:${PATH}" \
-  node "${CLI_SCRIPT}" setup \
+  run_with_timeout 30 node "${CLI_SCRIPT}" setup \
     --json \
     --repo-root "${setup_repo}" \
     --profile-id deferred-json \
@@ -385,7 +425,7 @@ setup_dry_run_json_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
   PATH="${fake_bin}:${PATH}" \
-  node "${CLI_SCRIPT}" setup \
+  run_with_timeout 30 node "${CLI_SCRIPT}" setup \
     --json \
     --dry-run \
     --repo-root "${setup_repo}" \
@@ -415,7 +455,7 @@ onboard_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
   PATH="${fake_bin}:${PATH}" \
-  node "${CLI_SCRIPT}" onboard \
+  run_with_timeout 30 node "${CLI_SCRIPT}" onboard \
     --non-interactive \
     --repo-root "${setup_repo}" \
     --profile-id onboard-alias-demo \
@@ -431,7 +471,7 @@ test -f "${platform_home}/control-plane/profiles/onboard-alias-demo/control-plan
 help_onboard_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
-  node "${CLI_SCRIPT}" help
+  run_with_timeout 30 node "${CLI_SCRIPT}" help
 )"
 grep -q 'onboard' <<<"${help_onboard_output}"
 
@@ -441,7 +481,7 @@ openclaw_setup_output="$(
   AGENT_PLATFORM_HOME="${platform_home}" \
   PATH="${fake_bin}:${PATH}" \
   OPENROUTER_API_KEY="" \
-  node "${CLI_SCRIPT}" setup \
+  run_with_timeout 30 node "${CLI_SCRIPT}" setup \
     --non-interactive \
     --repo-root "${setup_repo}" \
     --profile-id openclaw-key-check \
