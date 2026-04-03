@@ -15,9 +15,10 @@ profile_dir="${profile_registry_root}/demo"
 runs_root="${tmpdir}/runtime/demo/runs"
 state_root="${tmpdir}/runtime/demo/state"
 tmux_sessions_file="${tmpdir}/tmux-sessions.txt"
+tmux_kill_log="${tmpdir}/tmux-kill.log"
 fake_bin="${tmpdir}/bin"
 
-mkdir -p "${profile_dir}" "${runs_root}/demo-issue-1" "${state_root}/resident-workers/issues/1" "${fake_bin}"
+mkdir -p "${profile_dir}" "${runs_root}/demo-pr-2" "${state_root}" "${fake_bin}"
 
 cat >"${profile_dir}/control-plane.yaml" <<EOF
 schema_version: "1"
@@ -39,18 +40,19 @@ execution:
   coding_worker: "codex"
 EOF
 
-cat >"${runs_root}/demo-issue-1/run.env" <<'EOF'
-SESSION=demo-issue-1
-TASK_KIND=issue
-TASK_ID=1
+cat >"${runs_root}/demo-pr-2/run.env" <<'EOF'
+SESSION=demo-pr-2
+TASK_KIND=pr
+TASK_ID=2
 EOF
 
-printf 'demo-issue-1\n' >"${tmux_sessions_file}"
+printf 'demo-pr-2\ndemo-pr-3\n' >"${tmux_sessions_file}"
 
 cat >"${fake_bin}/tmux" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 sessions_file="${tmux_sessions_file}"
+kill_log="${tmux_kill_log}"
 cmd="\${1:-}"
 case "\${cmd}" in
   has-session)
@@ -61,11 +63,15 @@ case "\${cmd}" in
     ;;
   list-sessions)
     shift || true
-    if [[ "\${1:-}" == "-F" ]]; then
-      cat "\${sessions_file}"
-    else
-      cat "\${sessions_file}"
-    fi
+    cat "\${sessions_file}"
+    ;;
+  kill-session)
+    shift
+    [[ "\${1:-}" == "-t" ]] || exit 1
+    session="\${2:-}"
+    printf '%s\n' "\${session}" >>"\${kill_log}"
+    grep -Fxv "\${session}" "\${sessions_file}" >"\${sessions_file}.next" || true
+    mv "\${sessions_file}.next" "\${sessions_file}"
     ;;
   *)
     exit 1
@@ -74,13 +80,6 @@ esac
 EOF
 chmod +x "${fake_bin}/tmux"
 
-sleep 60 >/dev/null 2>&1 &
-controller_pid="$!"
-cat >"${state_root}/resident-workers/issues/1/controller.env" <<EOF
-ISSUE_ID=1
-CONTROLLER_PID=${controller_pid}
-EOF
-
 status_output="$(
   ACP_PROFILE_REGISTRY_ROOT="${profile_registry_root}" \
   ACP_PROJECT_RUNTIME_TMUX_BIN="${fake_bin}/tmux" \
@@ -88,12 +87,21 @@ status_output="$(
     bash "${RUNTIMECTL_BIN}" status --profile-id demo
 )"
 
-kill "${controller_pid}" >/dev/null 2>&1 || true
-wait "${controller_pid}" >/dev/null 2>&1 || true
-
-grep -q 'RUNTIME_STATUS=running' <<<"${status_output}"
-grep -q 'HEARTBEAT_PID=$' <<<"${status_output}"
 grep -q 'ACTIVE_TMUX_SESSION_COUNT=1' <<<"${status_output}"
-grep -q 'STALE_TMUX_SESSION_COUNT=0' <<<"${status_output}"
+grep -q 'ACTIVE_TMUX_SESSIONS=demo-pr-2' <<<"${status_output}"
+grep -q 'STALE_TMUX_SESSION_COUNT=1' <<<"${status_output}"
+grep -q 'STALE_TMUX_SESSIONS=demo-pr-3' <<<"${status_output}"
 
-echo "project runtimectl active worker without heartbeat reports running"
+stop_output="$(
+  ACP_PROFILE_REGISTRY_ROOT="${profile_registry_root}" \
+  ACP_PROJECT_RUNTIME_TMUX_BIN="${fake_bin}/tmux" \
+  ACP_PROJECT_RUNTIME_LAUNCHCTL_BIN="/nonexistent" \
+    bash "${RUNTIMECTL_BIN}" stop --profile-id demo
+)"
+
+grep -q 'STOPPED_TMUX_SESSION_COUNT=1' <<<"${stop_output}"
+grep -q 'STOPPED_STALE_TMUX_SESSION_COUNT=1' <<<"${stop_output}"
+grep -q '^demo-pr-2$' "${tmux_kill_log}"
+grep -q '^demo-pr-3$' "${tmux_kill_log}"
+
+echo "project runtimectl ignores stale tmux session with missing run dir test passed"

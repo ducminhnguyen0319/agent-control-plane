@@ -77,6 +77,14 @@ case "\${cmd}" in
     session="\${2:-}"
     grep -Fxq "\${session}" "\${sessions_file}"
     ;;
+  list-sessions)
+    shift || true
+    if [[ "\${1:-}" == "-F" ]]; then
+      cat "\${sessions_file}"
+    else
+      cat "\${sessions_file}"
+    fi
+    ;;
   kill-session)
     shift
     [[ "\${1:-}" == "-t" ]] || exit 1
@@ -137,6 +145,7 @@ status_output="$(
 grep -q 'RUNTIME_STATUS=running' <<<"${status_output}"
 grep -q 'CONTROLLER_COUNT=1' <<<"${status_output}"
 grep -q 'ACTIVE_TMUX_SESSION_COUNT=2' <<<"${status_output}"
+grep -q 'STALE_TMUX_SESSION_COUNT=0' <<<"${status_output}"
 
 stop_output="$(
   ACP_PROFILE_REGISTRY_ROOT="${profile_registry_root}" \
@@ -149,6 +158,7 @@ stop_output="$(
 grep -q 'ACTION=stop' <<<"${stop_output}"
 grep -q 'RUNTIME_STATUS=stopped' <<<"${stop_output}"
 grep -q 'STOPPED_TMUX_SESSION_COUNT=2' <<<"${stop_output}"
+grep -q 'STOPPED_STALE_TMUX_SESSION_COUNT=0' <<<"${stop_output}"
 grep -q 'STOPPED_PID_COUNT=3' <<<"${stop_output}"
 
 ! kill -0 "${heartbeat_pid}" 2>/dev/null

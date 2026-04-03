@@ -218,14 +218,53 @@ collect_run_sessions() {
   done < <(find "${RUNS_ROOT}" -mindepth 2 -maxdepth 2 -type f -name run.env 2>/dev/null | sort -u)
 }
 
-collect_active_tmux_sessions() {
+list_tmux_sessions() {
+  [[ -n "${TMUX_BIN}" ]] || return 0
+  "${TMUX_BIN}" list-sessions -F '#S' 2>/dev/null || true
+}
+
+collect_profile_tmux_sessions() {
+  local issue_prefix=""
+  local pr_prefix=""
   local session=""
+
+  issue_prefix="$(flow_resolve_issue_session_prefix "${CONFIG_YAML}")"
+  pr_prefix="$(flow_resolve_pr_session_prefix "${CONFIG_YAML}")"
+
   while IFS= read -r session; do
     [[ -n "${session}" ]] || continue
-    if tmux_session_exists "${session}"; then
+    case "${session}" in
+      "${issue_prefix}"*|"${pr_prefix}"*)
+        printf '%s\n' "${session}"
+        ;;
+    esac
+  done < <(list_tmux_sessions)
+}
+
+collect_active_tmux_sessions() {
+  local known_sessions=""
+  local session=""
+  known_sessions="$(collect_run_sessions | sort -u)"
+
+  while IFS= read -r session; do
+    [[ -n "${session}" ]] || continue
+    if tmux_session_exists "${session}" && grep -Fxq "${session}" <<<"${known_sessions}"; then
       printf '%s\n' "${session}"
     fi
-  done < <(collect_run_sessions)
+  done < <(collect_profile_tmux_sessions)
+}
+
+collect_stale_tmux_sessions() {
+  local known_sessions=""
+  local session=""
+  known_sessions="$(collect_run_sessions | sort -u)"
+
+  while IFS= read -r session; do
+    [[ -n "${session}" ]] || continue
+    if tmux_session_exists "${session}" && ! grep -Fxq "${session}" <<<"${known_sessions}"; then
+      printf '%s\n' "${session}"
+    fi
+  done < <(collect_profile_tmux_sessions)
 }
 
 collect_repo_shared_loop_pids() {
@@ -336,10 +375,12 @@ print_status() {
   local supervisor=""
   local controller_pids=""
   local active_sessions=""
+  local stale_sessions=""
   local pending_pids=""
   local runtime_status="stopped"
   local controller_count="0"
   local active_session_count="0"
+  local stale_session_count="0"
   local pending_count="0"
   local launchd_state=""
   local runtime_sync_status=""
@@ -352,10 +393,12 @@ print_status() {
   heartbeat_parent="$(heartbeat_parent_pid)"
   controller_pids="$(collect_controller_pids | sort -u)"
   active_sessions="$(collect_active_tmux_sessions | sort -u)"
+  stale_sessions="$(collect_stale_tmux_sessions | sort -u)"
   pending_pids="$(collect_pending_launch_pids | sort -u)"
 
   [[ -n "${controller_pids}" ]] && controller_count="$(printf '%s\n' "${controller_pids}" | awk 'NF {c+=1} END {print c+0}')"
   [[ -n "${active_sessions}" ]] && active_session_count="$(printf '%s\n' "${active_sessions}" | awk 'NF {c+=1} END {print c+0}')"
+  [[ -n "${stale_sessions}" ]] && stale_session_count="$(printf '%s\n' "${stale_sessions}" | awk 'NF {c+=1} END {print c+0}')"
   [[ -n "${pending_pids}" ]] && pending_count="$(printf '%s\n' "${pending_pids}" | awk 'NF {c+=1} END {print c+0}')"
 
   if [[ -n "${heartbeat}" || -n "${shared_loop}" || -n "${supervisor}" || "${controller_count}" != "0" || "${active_session_count}" != "0" ]]; then
@@ -385,9 +428,11 @@ print_status() {
   printf 'SUPERVISOR_PID=%s\n' "${supervisor}"
   printf 'CONTROLLER_COUNT=%s\n' "${controller_count}"
   printf 'ACTIVE_TMUX_SESSION_COUNT=%s\n' "${active_session_count}"
+  printf 'STALE_TMUX_SESSION_COUNT=%s\n' "${stale_session_count}"
   printf 'PENDING_LAUNCH_COUNT=%s\n' "${pending_count}"
   printf 'CONTROLLER_PIDS=%s\n' "$(printf '%s\n' "${controller_pids}" | join_by_comma)"
   printf 'ACTIVE_TMUX_SESSIONS=%s\n' "$(printf '%s\n' "${active_sessions}" | join_by_comma)"
+  printf 'STALE_TMUX_SESSIONS=%s\n' "$(printf '%s\n' "${stale_sessions}" | join_by_comma)"
   printf 'PENDING_LAUNCH_PIDS=%s\n' "$(printf '%s\n' "${pending_pids}" | join_by_comma)"
   printf 'SYNC_STAMP_FILE=%s\n' "${SYNC_STAMP_FILE}"
   printf 'RUNTIME_SYNC_STATUS=%s\n' "${runtime_sync_status}"
@@ -452,12 +497,18 @@ clear_running_labels_after_stop() {
   fi
 
   issue_json="$(flow_github_issue_list_json "${REPO_SLUG}" open 100 2>/dev/null || printf '[]\n')"
+  if [[ "${issue_json}" == "[]" ]]; then
+    issue_json="$(gh issue list -R "${REPO_SLUG}" --state open --limit 100 --json number,labels 2>/dev/null || printf '[]\n')"
+  fi
   while IFS= read -r number; do
     [[ -n "${number}" ]] || continue
     bash "${UPDATE_LABELS_SCRIPT}" --repo-slug "${REPO_SLUG}" --number "${number}" --remove agent-running >/dev/null 2>&1 || true
   done < <(jq -r '.[] | select(any(.labels[]?; .name == "agent-running")) | .number' <<<"${issue_json}" 2>/dev/null || true)
 
   pr_json="$(flow_github_pr_list_json "${REPO_SLUG}" open 100 2>/dev/null || printf '[]\n')"
+  if [[ "${pr_json}" == "[]" ]]; then
+    pr_json="$(gh pr list -R "${REPO_SLUG}" --state open --limit 100 --json number,labels 2>/dev/null || printf '[]\n')"
+  fi
   while IFS= read -r number; do
     [[ -n "${number}" ]] || continue
     bash "${UPDATE_LABELS_SCRIPT}" --repo-slug "${REPO_SLUG}" --number "${number}" --remove agent-running >/dev/null 2>&1 || true
@@ -466,6 +517,7 @@ clear_running_labels_after_stop() {
 
 stop_runtime() {
   local -a tmux_sessions=()
+  local -a stale_tmux_sessions=()
   local -a pid_targets=()
   local session=""
   local pid=""
@@ -475,6 +527,11 @@ stop_runtime() {
     [[ -n "${session}" ]] || continue
     tmux_sessions+=("${session}")
   done < <(collect_active_tmux_sessions | sort -u)
+
+  while IFS= read -r session; do
+    [[ -n "${session}" ]] || continue
+    stale_tmux_sessions+=("${session}")
+  done < <(collect_stale_tmux_sessions | sort -u)
 
   while IFS= read -r pid; do
     [[ -n "${pid}" ]] || continue
@@ -501,6 +558,9 @@ stop_runtime() {
     for session in "${tmux_sessions[@]+"${tmux_sessions[@]}"}"; do
       "${TMUX_BIN}" kill-session -t "${session}" >/dev/null 2>&1 || true
     done
+    for session in "${stale_tmux_sessions[@]+"${stale_tmux_sessions[@]}"}"; do
+      "${TMUX_BIN}" kill-session -t "${session}" >/dev/null 2>&1 || true
+    done
   fi
 
   terminate_pid_list TERM "${pid_targets[@]+"${pid_targets[@]}"}"
@@ -513,8 +573,10 @@ stop_runtime() {
   printf 'LAUNCHD_STOPPED=%s\n' "${launchd_stopped}"
   printf 'STOPPED_PID_COUNT=%s\n' "$(printf '%s\n' "${pid_targets[@]+"${pid_targets[@]}"}" | awk 'NF {c+=1} END {print c+0}')"
   printf 'STOPPED_TMUX_SESSION_COUNT=%s\n' "$(printf '%s\n' "${tmux_sessions[@]+"${tmux_sessions[@]}"}" | awk 'NF {c+=1} END {print c+0}')"
+  printf 'STOPPED_STALE_TMUX_SESSION_COUNT=%s\n' "$(printf '%s\n' "${stale_tmux_sessions[@]+"${stale_tmux_sessions[@]}"}" | awk 'NF {c+=1} END {print c+0}')"
   printf 'STOPPED_PIDS=%s\n' "$(printf '%s\n' "${pid_targets[@]+"${pid_targets[@]}"}" | join_by_comma)"
   printf 'STOPPED_TMUX_SESSIONS=%s\n' "$(printf '%s\n' "${tmux_sessions[@]+"${tmux_sessions[@]}"}" | join_by_comma)"
+  printf 'STOPPED_STALE_TMUX_SESSIONS=%s\n' "$(printf '%s\n' "${stale_tmux_sessions[@]+"${stale_tmux_sessions[@]}"}" | join_by_comma)"
 }
 
 start_runtime() {
