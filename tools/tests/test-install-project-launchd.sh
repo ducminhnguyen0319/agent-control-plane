@@ -68,6 +68,7 @@ EOF
 chmod +x "$supervisor_script"
 
 output="$(
+  ACP_PROJECT_RUNTIME_CODING_WORKER="openclaw" \
   ACP_PROJECT_RUNTIME_HOME_DIR="$home_dir" \
   ACP_PROJECT_RUNTIME_SOURCE_HOME="$source_home" \
   ACP_PROJECT_RUNTIME_RUNTIME_HOME="$runtime_home" \
@@ -99,6 +100,7 @@ grep -q "^export ACP_PROJECT_RUNTIME_RUNTIME_HOME='$runtime_home'$" "$wrapper_pa
 grep -q "^export ACP_PROJECT_RUNTIME_PROFILE_ID='demo'$" "$wrapper_path"
 grep -q "^export ACP_PROJECT_RUNTIME_ENV_FILE='$profile_dir/runtime.env'$" "$wrapper_path"
 grep -q "^export ACP_PROFILE_REGISTRY_ROOT='$profile_registry_root'$" "$wrapper_path"
+grep -q "^export ACP_CODING_WORKER='openclaw'$" "$wrapper_path"
 grep -q "exec bash '$supervisor_script' --bootstrap-script '$bootstrap_script' --pid-file '$tmpdir/runtime/demo/state/runtime-supervisor.pid' --delay-seconds '3' --interval-seconds '20'$" "$wrapper_path"
 
 grep -q "<string>$label</string>" "$plist_path"
@@ -106,5 +108,58 @@ grep -q "<string>$wrapper_path</string>" "$plist_path"
 grep -q "<string>$log_dir/agent-project-demo.stderr.log</string>" "$plist_path"
 grep -q "<string>$log_dir/agent-project-demo.stdout.log</string>" "$plist_path"
 grep -q '<key>KeepAlive</key>' "$plist_path"
+
+default_home_dir="$tmpdir/default-home"
+default_workspace_dir="$default_home_dir/.agent-runtime/control-plane/workspace"
+default_launch_agents_dir="$default_home_dir/Library/LaunchAgents"
+default_log_dir="$default_home_dir/.agent-runtime/logs"
+default_runtime_home="$default_home_dir/.agent-runtime/runtime-home"
+default_profile_registry_root="$default_home_dir/.agent-runtime/control-plane/profiles"
+default_profile_dir="$default_profile_registry_root/default-demo"
+default_label="ai.agent.project.default-demo"
+
+mkdir -p "$default_workspace_dir" "$default_launch_agents_dir" "$default_log_dir" "$default_runtime_home" "$default_profile_dir"
+
+cat >"$default_profile_dir/control-plane.yaml" <<EOF
+schema_version: "1"
+id: "default-demo"
+repo:
+  slug: "example/default-demo"
+  root: "$tmpdir/default-repo"
+  default_branch: "main"
+runtime:
+  orchestrator_agent_root: "$tmpdir/runtime/default-demo"
+  worktree_root: "$tmpdir/default-worktrees"
+  agent_repo_root: "$tmpdir/default-repo"
+  runs_root: "$tmpdir/runtime/default-demo/runs"
+  state_root: "$tmpdir/runtime/default-demo/state"
+  history_root: "$tmpdir/runtime/default-demo/history"
+  retained_repo_root: "$tmpdir/default-repo"
+  vscode_workspace_file: "$tmpdir/default-demo.code-workspace"
+execution:
+  coding_worker: "openclaw"
+  openclaw:
+    model: "primary/model"
+    thinking: "adaptive"
+    timeout_seconds: 900
+EOF
+
+default_output="$(
+  ACP_PROJECT_RUNTIME_HOME_DIR="$default_home_dir" \
+  ACP_PROJECT_RUNTIME_RUNTIME_HOME="$default_runtime_home" \
+  ACP_PROJECT_RUNTIME_WORKSPACE_DIR="$default_workspace_dir" \
+  ACP_PROJECT_RUNTIME_PROFILE_REGISTRY_ROOT="$default_profile_registry_root" \
+  ACP_PROJECT_RUNTIME_LAUNCH_AGENTS_DIR="$default_launch_agents_dir" \
+  ACP_PROJECT_RUNTIME_LOG_DIR="$default_log_dir" \
+  ACP_PROJECT_RUNTIME_SYNC_SCRIPT="$sync_script" \
+  ACP_PROJECT_RUNTIME_BOOTSTRAP_SCRIPT="$bootstrap_script" \
+  ACP_PROJECT_RUNTIME_SUPERVISOR_SCRIPT="$supervisor_script" \
+  ACP_PROJECT_RUNTIME_SKIP_LAUNCHCTL=1 \
+  bash "$INSTALL_BIN" --profile-id default-demo --label "$default_label"
+)"
+
+default_wrapper_path="$default_workspace_dir/bin/agent-project-default-demo-launchd.sh"
+grep -q '^LAUNCHD_INSTALL_STATUS=skipped-launchctl$' <<<"$default_output"
+grep -q "^export ACP_PROJECT_RUNTIME_SOURCE_HOME='$FLOW_ROOT'$" "$default_wrapper_path"
 
 echo "install project launchd test passed"

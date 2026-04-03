@@ -223,6 +223,11 @@ resolve_shared_agent_home() {
     flow_root="$(resolve_flow_skill_dir "${BASH_SOURCE[1]:-${BASH_SOURCE[0]}}")"
   fi
 
+  if flow_is_skill_root "${flow_root}"; then
+    flow_print_dir "${flow_root}"
+    return 0
+  fi
+
   flow_print_dir "${flow_root}/../../.."
 }
 

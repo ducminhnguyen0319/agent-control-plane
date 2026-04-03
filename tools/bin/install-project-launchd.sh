@@ -112,7 +112,14 @@ fi
 PROFILE_ID="$(flow_resolve_adapter_id "${CONFIG_YAML}")"
 profile_slug="$(printf '%s' "${PROFILE_ID}" | tr -c 'A-Za-z0-9._-' '-')"
 HOME_DIR="${ACP_PROJECT_RUNTIME_HOME_DIR:-${HOME:-}}"
-SOURCE_HOME="${ACP_PROJECT_RUNTIME_SOURCE_HOME:-$(cd "${FLOW_SKILL_DIR}/../../.." && pwd)}"
+SOURCE_HOME="${ACP_PROJECT_RUNTIME_SOURCE_HOME:-}"
+if [[ -z "${SOURCE_HOME}" ]]; then
+  if flow_is_skill_root "${FLOW_SKILL_DIR}"; then
+    SOURCE_HOME="${FLOW_SKILL_DIR}"
+  else
+    SOURCE_HOME="$(cd "${FLOW_SKILL_DIR}/../../.." && pwd)"
+  fi
+fi
 RUNTIME_HOME="${ACP_PROJECT_RUNTIME_RUNTIME_HOME:-${HOME_DIR}/.agent-runtime/runtime-home}"
 WORKSPACE_DIR="${ACP_PROJECT_RUNTIME_WORKSPACE_DIR:-${HOME_DIR}/.agent-runtime/control-plane/workspace}"
 PROFILE_REGISTRY_ROOT="${ACP_PROJECT_RUNTIME_PROFILE_REGISTRY_ROOT:-${ACP_PROFILE_REGISTRY_ROOT:-${HOME_DIR}/.agent-runtime/control-plane/profiles}}"
@@ -120,6 +127,7 @@ LAUNCH_AGENTS_DIR="${ACP_PROJECT_RUNTIME_LAUNCH_AGENTS_DIR:-${HOME_DIR}/Library/
 LOG_DIR="${ACP_PROJECT_RUNTIME_LOG_DIR:-${HOME_DIR}/.agent-runtime/logs}"
 LABEL="${label_override:-${ACP_PROJECT_RUNTIME_LAUNCHD_LABEL:-ai.agent.project.${profile_slug}}}"
 BASE_PATH="$(build_launchd_base_path)"
+CODING_WORKER_OVERRIDE="${ACP_PROJECT_RUNTIME_CODING_WORKER:-${ACP_CODING_WORKER:-${F_LOSNING_CODING_WORKER:-}}}"
 SYNC_SCRIPT="${ACP_PROJECT_RUNTIME_SYNC_SCRIPT:-${FLOW_SKILL_DIR}/tools/bin/sync-shared-agent-home.sh}"
 BOOTSTRAP_SCRIPT="${ACP_PROJECT_RUNTIME_BOOTSTRAP_SCRIPT:-${FLOW_SKILL_DIR}/tools/bin/project-launchd-bootstrap.sh}"
 SUPERVISOR_SCRIPT="${ACP_PROJECT_RUNTIME_SUPERVISOR_SCRIPT:-${FLOW_SKILL_DIR}/tools/bin/project-runtime-supervisor.sh}"
@@ -152,6 +160,15 @@ export AGENT_PROJECT_ID='${PROFILE_ID}'
 export ACP_PROJECT_RUNTIME_PATH='${BASE_PATH}'
 export ACP_PROJECT_RUNTIME_SYNC_SCRIPT='${SYNC_SCRIPT}'
 export ACP_PROFILE_REGISTRY_ROOT='${PROFILE_REGISTRY_ROOT}'
+EOF
+
+if [[ -n "${CODING_WORKER_OVERRIDE}" ]]; then
+  cat >>"${WRAPPER_PATH}" <<EOF
+export ACP_CODING_WORKER='${CODING_WORKER_OVERRIDE}'
+EOF
+fi
+
+cat >>"${WRAPPER_PATH}" <<EOF
 exec bash '${SUPERVISOR_SCRIPT}' --bootstrap-script '${BOOTSTRAP_SCRIPT}' --pid-file '${SUPERVISOR_PID_FILE}' --delay-seconds '${delay_seconds}' --interval-seconds '${interval_seconds}'
 EOF
 chmod +x "${WRAPPER_PATH}"
