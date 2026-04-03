@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-project-catch-up-issue-pr-links --repo-slug <owner/repo> --state-root <path> --hook-file <path> [--limit <n>]
+
+Clear stale issue retry state when an issue already has a linked PR comment and
+that PR still exists (open, closed, or merged).
+EOF
+}
+
+repo_slug=""
+state_root=""
+hook_file=""
+limit="100"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo-slug) repo_slug="${2:-}"; shift 2 ;;
+    --state-root) state_root="${2:-}"; shift 2 ;;
+    --hook-file) hook_file="${2:-}"; shift 2 ;;
+    --limit) limit="${2:-}"; shift 2 ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$repo_slug" || -z "$state_root" || -z "$hook_file" ]]; then
+  usage >&2
+  exit 1
+fi
+
+if [[ ! -f "$hook_file" ]]; then
+  echo "missing hook file: $hook_file" >&2
+  exit 1
+fi
+
+# shellcheck source=/dev/null
+source "$hook_file"
+
+if ! declare -F issue_clear_retry >/dev/null 2>&1; then
+  issue_clear_retry() { :; }
+fi
+
+ledger_dir="${state_root}/linked-pr-issue-catchup"
+retry_dir="${state_root}/retries/issues"
+mkdir -p "$ledger_dir" "$retry_dir"
+
+extract_latest_linked_pr() {
+  local issue_json="${1:-}"
+  ISSUE_JSON="$issue_json" python3 - <<'PY'
+import json
+import os
+import re
+
+issue = json.loads(os.environ.get("ISSUE_JSON", "{}") or "{}")
+latest = ""
+latest_at = ""
+for comment in issue.get("comments", []) or []:
+    body = comment.get("body") or ""
+    match = None
+    for candidate in re.finditer(r"Opened PR #(\d+)", body):
+        match = candidate
+    if not match:
+        continue
+    created = comment.get("createdAt") or ""
+    pr_number = match.group(1)
+    if created >= latest_at:
+        latest_at = created
+        latest = pr_number
+
+print(latest)
+PY
+}
+
+pr_exists() {
+  local pr_number="${1:?pr number required}"
+  local pr_json=""
+  pr_json="$(flow_github_pr_view_json "$repo_slug" "$pr_number" 2>/dev/null || true)"
+  [[ -n "$pr_json" && "$pr_json" != "{}" ]]
+}
+
+for retry_file in "$retry_dir"/*.env; do
+  [[ -f "$retry_file" ]] || continue
+  issue_id="$(basename "${retry_file%.env}")"
+  [[ -n "$issue_id" ]] || continue
+
+  retry_reason="$(awk -F= '/^LAST_REASON=/{print $2; exit}' "$retry_file" 2>/dev/null | tr -d '\r' || true)"
+  if [[ "$retry_reason" != "host-publish-failed" ]]; then
+    continue
+  fi
+
+  ledger_file="${ledger_dir}/${issue_id}.env"
+  if [[ -f "$ledger_file" ]]; then
+    continue
+  fi
+
+  issue_json="$(flow_github_issue_view_json "$repo_slug" "$issue_id" 2>/dev/null || true)"
+  [[ -n "$issue_json" && "$issue_json" != "{}" ]] || continue
+
+  linked_pr="$(extract_latest_linked_pr "$issue_json")"
+  [[ -n "$linked_pr" ]] || continue
+  if ! pr_exists "$linked_pr"; then
+    continue
+  fi
+
+  ISSUE_ID="$issue_id" issue_clear_retry || true
+
+  {
+    printf 'ISSUE_ID=%s\n' "$issue_id"
+    printf 'LINKED_PR=%s\n' "$linked_pr"
+    printf 'PROCESSED_AT=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  } >"$ledger_file"
+
+  printf 'CATCHUP_LINKED_PR_ISSUE=%s\n' "$issue_id"
+done

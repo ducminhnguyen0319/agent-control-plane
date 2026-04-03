@@ -57,6 +57,12 @@ set -euo pipefail
 printf 'catchup-ran\n'
 EOF
 
+cat >"$flow_root/tools/bin/agent-project-catch-up-issue-pr-links" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'issue-link-catchup-ran\n'
+EOF
+
 cat >"$flow_root/hooks/heartbeat-hooks.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -101,6 +107,7 @@ chmod +x \
   "$flow_root/tools/bin/audit-agent-worktrees.sh" \
   "$flow_root/tools/bin/agent-project-heartbeat-loop" \
   "$flow_root/tools/bin/agent-project-catch-up-merged-prs" \
+  "$flow_root/tools/bin/agent-project-catch-up-issue-pr-links" \
   "$flow_root/hooks/heartbeat-hooks.sh" \
   "$shared_home/skills/openclaw/codex-quota-manager/scripts/auto-switch.sh" \
   "$bin_dir/tmux" \
@@ -130,7 +137,9 @@ if grep -q 'codex-quota-should-not-run' "$log_file"; then
 fi
 grep -q 'shared heartbeat loop end status=0' "$log_file"
 grep -q 'merged-pr catchup end status=0' "$log_file"
+grep -q 'linked-pr issue catchup end status=0' "$log_file"
 grep -q 'heartbeat-loop-ran' "$log_file"
 grep -q 'catchup-ran' "$log_file"
+grep -q 'issue-link-catchup-ran' "$log_file"
 
 echo "heartbeat-safe-auto no-tmux-session test passed"

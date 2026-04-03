@@ -591,3 +591,22 @@ else
   fi
   printf '[%s] merged-pr catchup end status=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "${catchup_status}"
 fi
+
+printf '[%s] linked-pr issue catchup start\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+if run_with_timeout "${CATCHUP_TIMEOUT_SECONDS}" \
+  env \
+    ACP_RUNS_ROOT="$RUNS_ROOT" \
+    F_LOSNING_RUNS_ROOT="$RUNS_ROOT" \
+    bash "${FLOW_TOOLS_DIR}/agent-project-catch-up-issue-pr-links" \
+      --repo-slug "$REPO_SLUG" \
+      --state-root "$STATE_ROOT" \
+      --hook-file "$HOOK_FILE" \
+      --limit 100; then
+  printf '[%s] linked-pr issue catchup end status=0\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+else
+  linked_issue_catchup_status=$?
+  if [[ "${linked_issue_catchup_status}" -eq 124 ]]; then
+    printf 'LINKED_ISSUE_CATCHUP_TIMEOUT=yes\n'
+  fi
+  printf '[%s] linked-pr issue catchup end status=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "${linked_issue_catchup_status}"
+fi
