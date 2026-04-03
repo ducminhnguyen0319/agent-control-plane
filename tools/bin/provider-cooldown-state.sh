@@ -65,8 +65,8 @@ resolve_backend() {
     return 0
   fi
 
-  if [[ -n "${ACP_ACTIVE_PROVIDER_BACKEND:-${F_LOSNING_ACTIVE_PROVIDER_BACKEND:-}}" ]]; then
-    printf '%s\n' "${ACP_ACTIVE_PROVIDER_BACKEND:-${F_LOSNING_ACTIVE_PROVIDER_BACKEND:-}}"
+  if [[ -n "${ACP_ACTIVE_PROVIDER_BACKEND:-}" ]]; then
+    printf '%s\n' "${ACP_ACTIVE_PROVIDER_BACKEND:-}"
     return 0
   fi
 
@@ -79,7 +79,7 @@ resolve_backend() {
 }
 
 resolve_codex_label() {
-  local configured_label="${ACP_ACTIVE_PROVIDER_LABEL:-${F_LOSNING_ACTIVE_PROVIDER_LABEL:-}}"
+  local configured_label="${ACP_ACTIVE_PROVIDER_LABEL:-}"
   local codex_quota_bin=""
   local active_label=""
 
@@ -88,8 +88,8 @@ resolve_codex_label() {
     return 0
   fi
 
-  if [[ -n "${ACP_CODEX_QUOTA_LABEL:-${F_LOSNING_CODEX_QUOTA_LABEL:-}}" ]]; then
-    printf '%s\n' "${ACP_CODEX_QUOTA_LABEL:-${F_LOSNING_CODEX_QUOTA_LABEL:-}}"
+  if [[ -n "${ACP_CODEX_QUOTA_LABEL:-}" ]]; then
+    printf '%s\n' "${ACP_CODEX_QUOTA_LABEL:-}"
     return 0
   fi
 
@@ -108,7 +108,7 @@ resolve_codex_label() {
 resolve_model() {
   local resolved_backend="${1:?backend required}"
   local raw_model="${2:-}"
-  local active_provider_model="${ACP_ACTIVE_PROVIDER_MODEL:-${F_LOSNING_ACTIVE_PROVIDER_MODEL:-}}"
+  local active_provider_model="${ACP_ACTIVE_PROVIDER_MODEL:-}"
 
   if [[ -n "${raw_model}" ]]; then
     printf '%s\n' "${raw_model}"
@@ -121,8 +121,8 @@ resolve_model() {
         printf '%s\n' "${OPENCLAW_MODEL}"
       elif [[ -n "${active_provider_model}" ]]; then
         printf '%s\n' "${active_provider_model}"
-      elif [[ -n "${ACP_OPENCLAW_MODEL:-${F_LOSNING_OPENCLAW_MODEL:-}}" ]]; then
-        printf '%s\n' "${ACP_OPENCLAW_MODEL:-${F_LOSNING_OPENCLAW_MODEL:-}}"
+      elif [[ -n "${ACP_OPENCLAW_MODEL:-}" ]]; then
+        printf '%s\n' "${ACP_OPENCLAW_MODEL:-}"
       else
         flow_config_get "${CONFIG_YAML}" "execution.openclaw.model"
       fi
@@ -132,8 +132,8 @@ resolve_model() {
         printf '%s\n' "${CLAUDE_MODEL}"
       elif [[ -n "${active_provider_model}" ]]; then
         printf '%s\n' "${active_provider_model}"
-      elif [[ -n "${ACP_CLAUDE_MODEL:-${F_LOSNING_CLAUDE_MODEL:-}}" ]]; then
-        printf '%s\n' "${ACP_CLAUDE_MODEL:-${F_LOSNING_CLAUDE_MODEL:-}}"
+      elif [[ -n "${ACP_CLAUDE_MODEL:-}" ]]; then
+        printf '%s\n' "${ACP_CLAUDE_MODEL:-}"
       else
         flow_config_get "${CONFIG_YAML}" "execution.claude.model"
       fi
@@ -143,8 +143,8 @@ resolve_model() {
         printf '%s\n' "${CODEX_PROFILE_SAFE}"
       elif [[ -n "${active_provider_model}" ]]; then
         printf '%s\n' "${active_provider_model}"
-      elif [[ -n "${ACP_CODEX_PROFILE_SAFE:-${F_LOSNING_CODEX_PROFILE_SAFE:-}}" ]]; then
-        printf '%s\n' "${ACP_CODEX_PROFILE_SAFE:-${F_LOSNING_CODEX_PROFILE_SAFE:-}}"
+      elif [[ -n "${ACP_CODEX_PROFILE_SAFE:-}" ]]; then
+        printf '%s\n' "${ACP_CODEX_PROFILE_SAFE:-}"
       else
         flow_config_get "${CONFIG_YAML}" "execution.safe_profile"
       fi

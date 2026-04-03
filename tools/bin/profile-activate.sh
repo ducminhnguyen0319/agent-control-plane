@@ -57,7 +57,7 @@ WORKTREE_ROOT="$(flow_resolve_worktree_root "${CONFIG_YAML}")"
 RUNS_ROOT="$(flow_resolve_runs_root "${CONFIG_YAML}")"
 STATE_ROOT="$(flow_resolve_state_root "${CONFIG_YAML}")"
 CODING_WORKER="${ACP_CODING_WORKER:-codex}"
-ACTIVE_PROVIDER_POOL_NAME="${ACP_ACTIVE_PROVIDER_POOL_NAME:-${F_LOSNING_ACTIVE_PROVIDER_POOL_NAME:-}}"
+ACTIVE_PROVIDER_POOL_NAME="${ACP_ACTIVE_PROVIDER_POOL_NAME:-}"
 
 if [[ "${exports_only}" == "1" ]]; then
   printf 'export ACP_PROJECT_ID=%q
