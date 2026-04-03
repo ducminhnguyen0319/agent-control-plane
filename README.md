@@ -8,11 +8,12 @@
   <a href="https://github.com/sponsors/ducminhnguyen0319"><img alt="GitHub Sponsors" src="https://img.shields.io/badge/sponsor-GitHub%20Sponsors-ea4aaa?style=flat-square&logo=githubsponsors&logoColor=white"></a>
   <a href="https://socket.dev/npm/package/agent-control-plane"><img alt="Socket" src="https://img.shields.io/badge/Socket-79-f5a623?style=flat-square"></a>
 </p>
-`agent-control-plane` helps a repo keep coding agents running reliably without
-constant human babysitting.
+`agent-control-plane` (ACP) keeps your coding agents running reliably without
+you having to stare at them all day.
 
 It is the operator layer for coding agents that need to keep running after the
-novelty wears off.
+novelty wears off — and the adults-in-the-room that stop them from going
+completely off the rails.
 
 License: `MIT`
 
@@ -24,20 +25,65 @@ Architecture: [references/architecture.md](./references/architecture.md)
 
 Commands: [references/commands.md](./references/commands.md)
 
-It turns a GitHub repo into a managed runtime with a repeatable setup, a stable
-place for state, a real status command, and a dashboard you can glance at
-without spelunking through temp folders, worktrees, or half-remembered `tmux`
-sessions.
+## The Big Idea
 
-ACP does not try to be the coding agent itself. It makes the surrounding system
-less fragile: profile setup, runtime start and stop, heartbeat scheduling,
+Here is the dirty secret nobody in the AI hype cycle wants to admit: **the free
+models are not that dumb.** They are just chaotic. Left alone to manage their
+own execution loop, retry logic, GitHub labels, and publish pipeline, they will
+reliably discover creative new ways to do absolutely nothing useful at 3am while
+you sleep. Give them a tight operating harness and a clear job description,
+however, and suddenly that "not smart enough" free model is grinding through
+your issue backlog like a junior developer who is weirdly enthusiastic about
+reading CI logs.
+
+That is what ACP does. It turns a GitHub repo into a managed runtime: a
+repeatable setup, a stable home for state, a heartbeat that keeps agents
+scheduled and supervised, and a dashboard you can actually glance at without
+spelunking through temp folders, worktrees, or half-remembered `tmux` sessions.
+
+ACP does not try to be the coding agent. It makes the surrounding system less
+fragile: profile setup, runtime start and stop, heartbeat scheduling,
 reconcile-owned outcomes, background execution, and operator visibility under
-`~/.agent-runtime`.
+`~/.agent-runtime`. The agent writes the code. ACP writes the boring
+infrastructure that keeps the agent from losing its own work.
 
-The promise is intentionally boring in the best possible way: your agents stay
-busy, your runtime stays understandable, and the repo keeps moving even when
-you are not sitting there manually babysitting every loop, retry, or publish
-decision.
+### Free models: economical to a fault
+
+If you are using ACP for research, the economics are almost embarrassing.
+Running `openrouter/qwen3.6-plus:free` continuously across multiple repos costs
+roughly what a large oat milk latte costs — per month, not per hour. ACP handles
+the quota cooldowns, stall detection, provider failover, and retry backoff that
+make free-tier models actually useful in a production-shaped loop instead of a
+toy demo. For researchers who want to study agent behavior, measure output
+quality, or iterate on prompting strategies at scale: you can run hundreds of
+sessions for what you would otherwise spend on a single GPT-4 afternoon.
+
+The free model is not brilliant. ACP makes it relentless.
+
+### Smarter models: powerful, but let us be honest
+
+Yes, ACP also works great with Claude Sonnet, OpenAI Codex, and other
+higher-capability backends. They produce better code, handle harder tasks, and
+generally understand the first time what the free model needed three attempts
+and a blocker comment to figure out.
+
+But here is the thing about powerful AI agents running autonomously against your
+GitHub repo: they are, in a very real sense, a slow-burning fuse. An agent with
+broad permissions, no supervision, and no circuit breakers will eventually push
+something broken, auto-merge a PR it should not have touched, burn through a
+monthly API budget in a long weekend, or enter a retry loop that only stops when
+the credit card does.
+
+ACP is the person standing next to the fuse. It enforces launch limits,
+reconciles outcomes before touching GitHub, validates before it publishes, and
+respects cooldowns instead of hammering a provider at full throttle. The agent
+gets to be smart and fast. ACP makes sure "smart and fast" does not also mean
+"unattended and irreversible."
+
+Think of it this way: you would not hand a brilliant but impulsive junior
+developer the repository admin key and leave for a two-week vacation. Same
+principle applies here. ACP is the on-call rotation for your AI workforce —
+quiet when things go well, essential when they do not.
 
 ## Why people use it
 
@@ -46,12 +92,15 @@ fragile, improvised, or tied to one lucky terminal session.
 
 - replace human babysitting with boring runtime ownership: supervisor,
   heartbeat, reconcile, and status tooling
+- squeeze real productivity out of free-tier models through proper scheduling,
+  retry logic, and provider failover — not just by throwing a bigger model at it
 - one profile per repo, so every project has a clear runtime identity
 - start, stop, restart, and status commands that behave like operator tooling
 - dashboard visibility instead of hunting through `tmux` panes and temp folders
 - smoke checks before you trust the runtime on real work
 - optional macOS autostart so a reboot does not reset your flow
 - room for multiple worker backends without changing how you operate the repo
+- spending limits that are enforced by architecture, not just by hope
 
 ACP is a good fit when your pain is not "the agent cannot code" but "the setup
 around the agent is too easy to break."
@@ -62,19 +111,22 @@ Teams and solo builders usually reach for ACP when one of these starts to feel
 familiar:
 
 - you want issue-driven or PR-driven agent work to keep running in the
-  background, but still be inspectable
+  background, but still be inspectable and recoverable
 - you are juggling more than one repo and want each one to have a clean,
   separate runtime identity
-- you want to swap or compare worker backends without rebuilding your runtime
-  habits every time
+- you want to compare worker backends — free vs paid, open-weight vs API — on
+  real workloads without rebuilding your runtime habits every time
 - you want one command to tell you whether automation is healthy instead of
   inferring it from stale branches, dangling sessions, or mystery files
+- you are doing research on agent behavior, output quality, or prompt strategy
+  and need a reproducible, cost-controlled execution harness
 - you want a dashboard and smoke checks before you trust the setup on real work
 - you want your local machine to behave more like a reliable operator box and
   less like a pile of shell history
 
 If you have ever thought "the agent part basically works, but the runtime
-around it is messy," this tool is aimed directly at that problem.
+around it is messy" — or "I would trust this agent more if it had a supervisor"
+— this tool is aimed directly at that problem.
 
 ## Roadmap
 
