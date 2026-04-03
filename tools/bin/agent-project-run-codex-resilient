@@ -618,6 +618,22 @@ classify_failure_reason() {
   fi
 }
 
+failure_chunk_indicates_startup_stall() {
+  local chunk="${1:-}"
+  local recent_chunk
+
+  recent_chunk="$(tail -n 120 <<<"$chunk")"
+  grep -q '"type":"thread.started"' <<<"$recent_chunk" || return 1
+  grep -q '"type":"turn.started"' <<<"$recent_chunk" || return 1
+  if grep -Eq '"type":"item\.(started|completed)"' <<<"$recent_chunk"; then
+    return 1
+  fi
+  if grep -q '"type":"turn.completed"' <<<"$recent_chunk"; then
+    return 1
+  fi
+  return 0
+}
+
 resume_prompt() {
   cat <<EOF
 The previous Codex exec turn in this same thread was interrupted because the host refreshed Codex authentication after a quota or auth failure.
@@ -729,7 +745,7 @@ run_resume_exec() {
 }
 
 attempt_run() {
-  local reason auth_before_switch quota_label_before_switch quota_switch_signature_before_switch quota_switch_result shell_flags_before_quota_switch
+  local reason auth_before_switch quota_label_before_switch quota_switch_signature_before_switch quota_switch_result shell_flags_before_quota_switch failure_chunk startup_stall
 
   attempt=$((attempt + 1))
   last_quota_switch_status=""
@@ -750,8 +766,15 @@ attempt_run() {
     return 0
   fi
 
-  reason="$(classify_failure_reason "$(new_output_since "$last_attempt_start_size")")"
+  failure_chunk="$(new_output_since "$last_attempt_start_size")"
+  reason="$(classify_failure_reason "$failure_chunk")"
   last_failure_reason="${reason:-worker-exit-failed}"
+  startup_stall="no"
+  if [[ "$last_failure_reason" == "no-codex-output-before-stall-threshold" || "$last_failure_reason" == "no-codex-progress-before-stall-threshold" ]]; then
+    if failure_chunk_indicates_startup_stall "$failure_chunk"; then
+      startup_stall="yes"
+    fi
+  fi
 
   case "$last_failure_reason" in
     usage-limit|auth-failure|auth-401|account-banned)
@@ -795,6 +818,38 @@ attempt_run() {
 
       resume_count=$((resume_count + 1))
       return 2
+      ;;
+    no-codex-output-before-stall-threshold|no-codex-progress-before-stall-threshold)
+      if [[ "$startup_stall" == "yes" && $quota_autoswitch_attempt_count -lt $max_quota_autoswitch_attempts ]]; then
+        auth_before_switch="$(auth_fingerprint)"
+        quota_label_before_switch="$last_attempt_start_quota_label"
+        quota_switch_signature_before_switch="$(quota_switch_signature)"
+        last_auth_fingerprint="$auth_before_switch"
+        write_state "switching-account" "$last_failure_reason"
+        log_runner "startup-stall detected before first Codex tool activity; attempting Codex account rotation"
+        shell_flags_before_quota_switch="$-"
+        set +e
+        run_quota_autoswitch
+        quota_switch_result=$?
+        case "$shell_flags_before_quota_switch" in
+          *e*) set -e ;;
+          *) set +e ;;
+        esac
+        if [[ "$quota_switch_result" == "0" ]]; then
+          thread_id=""
+          auth_wait_started_at=""
+          write_state "running" ""
+          return 2
+        fi
+        if [[ "$quota_switch_result" == "10" ]]; then
+          log_runner "startup-stall rotation deferred until ${last_quota_next_retry_at:-unknown}"
+          last_failure_reason="quota-switch-deferred"
+          write_state "failed" "$last_failure_reason"
+          return 1
+        fi
+      fi
+      write_state "failed" "$last_failure_reason"
+      return 1
       ;;
     *)
       write_state "failed" "$last_failure_reason"
