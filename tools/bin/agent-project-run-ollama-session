@@ -185,6 +185,11 @@ export ACP_RUN_DIR=${sandbox_run_dir_q}
 export ACP_HOST_RUN_DIR=${artifact_dir_q}
 export ACP_RESULT_FILE=${sandbox_run_dir_q}/result.env
 export ACP_RETAINED_REPO_ROOT=${retained_repo_root_q}
+export ACP_WORKTREE=${worktree_q}
+export ACP_PROMPT_FILE=${prompt_q}
+export ACP_OLLAMA_MODEL=${ollama_model_q}
+export ACP_OLLAMA_BASE_URL=${ollama_base_url_q}
+export ACP_OLLAMA_TIMEOUT_SECONDS=${ollama_timeout_q}
 export F_LOSNING_SESSION=${session_q}
 export F_LOSNING_RUN_DIR=${sandbox_run_dir_q}
 export F_LOSNING_HOST_RUN_DIR=${artifact_dir_q}
@@ -219,6 +224,16 @@ EOF
     collect_copy_snippet+=$'\n'
   done
 fi
+
+# Always collect result.env from sandbox to artifact_dir
+collect_copy_snippet+=$(
+  cat <<EOF
+if [[ -f ${sandbox_run_dir_q}/result.env ]]; then
+  cp ${sandbox_run_dir_q}/result.env ${artifact_dir_q}/result.env
+fi
+EOF
+)
+collect_copy_snippet+=$'\n'
 
 reconcile_snippet=""
 if [[ -n "$reconcile_command" ]]; then
@@ -477,12 +492,46 @@ async function main() {
 
     messages.push(msg);
 
-    if (msg.content) {
-      process.stdout.write(\`[agent] \${msg.content}\n\`);
+    // Some models (e.g. qwen2.5-coder:7b) return tool calls as JSON text
+    // in content instead of the tool_calls array — normalise both formats.
+    let toolCalls = msg.tool_calls || [];
+    if (toolCalls.length === 0 && msg.content) {
+      const text = String(msg.content).trim();
+      const extracted = [];
+      // Extract all top-level JSON objects from the text (handles multiple objects)
+      let pos = 0;
+      while (pos < text.length) {
+        const start = text.indexOf('{', pos);
+        if (start === -1) break;
+        let depth = 0;
+        let end = -1;
+        for (let i = start; i < text.length; i++) {
+          if (text[i] === '{') depth++;
+          else if (text[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
+        }
+        if (end === -1) break;
+        try {
+          const obj = JSON.parse(text.slice(start, end + 1));
+          if (obj.name && obj.arguments !== undefined) {
+            extracted.push({ function: { name: obj.name, arguments: obj.arguments } });
+          }
+        } catch {}
+        pos = end + 1;
+      }
+      // Also try top-level array format
+      if (extracted.length === 0 && text.startsWith('[')) {
+        try {
+          const arr = JSON.parse(text);
+          if (Array.isArray(arr) && arr[0]?.name) {
+            arr.forEach((c) => extracted.push({ function: { name: c.name, arguments: c.arguments } }));
+          }
+        } catch {}
+      }
+      if (extracted.length > 0) toolCalls = extracted;
     }
 
-    const toolCalls = msg.tool_calls || [];
     if (toolCalls.length === 0) {
+      if (msg.content) process.stdout.write(\`[agent] \${msg.content}\n\`);
       // No tool calls — model finished without task_complete
       taskDone = true;
       summary = msg.content || '(no summary)';
