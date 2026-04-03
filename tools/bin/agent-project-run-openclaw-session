@@ -115,6 +115,7 @@ result_file="${artifact_dir}/result.env"
 runner_state_file="${artifact_dir}/runner.env"
 sandbox_artifact_dir="${worktree%/}/${sandbox_subdir}"
 sandbox_run_dir="${worktree%/}/${sandbox_subdir}/${session}"
+retained_repo_root="${ACP_RETAINED_REPO_ROOT:-${F_LOSNING_RETAINED_REPO_ROOT:-}}"
 started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 openclaw_bin="$(command -v openclaw)"
 default_openclaw_agent_id="$(
@@ -154,6 +155,7 @@ printf -v runner_state_q '%q' "$runner_state_file"
 printf -v branch_q '%q' "$branch_name"
 printf -v sandbox_artifact_dir_q '%q' "$sandbox_artifact_dir"
 printf -v sandbox_run_dir_q '%q' "$sandbox_run_dir"
+printf -v retained_repo_root_q '%q' "$retained_repo_root"
 printf -v adapter_id_q '%q' "$adapter_id"
 printf -v started_at_q '%q' "$started_at"
 printf -v openclaw_bin_q '%q' "$openclaw_bin"
@@ -230,18 +232,21 @@ export AGENT_PROJECT_RUN_DIR=${sandbox_run_dir_q}
 export AGENT_PROJECT_HOST_RUN_DIR=${artifact_dir_q}
 export AGENT_PROJECT_RESULT_FILE=${sandbox_run_dir_q}/result.env
 export AGENT_PROJECT_OPENCLAW_BIN=${openclaw_bin_q}
+export AGENT_PROJECT_RETAINED_REPO_ROOT=${retained_repo_root_q}
 export ACP_SESSION=${session_q}
 export ACP_RUN_DIR=${sandbox_run_dir_q}
 export ACP_HOST_RUN_DIR=${artifact_dir_q}
 export ACP_RESULT_FILE=${sandbox_run_dir_q}/result.env
 export ACP_OPENCLAW_BIN=${openclaw_bin_q}
 export ACP_OPENCLAW_SESSION_ID=${openclaw_session_id_q}
+export ACP_RETAINED_REPO_ROOT=${retained_repo_root_q}
 export F_LOSNING_SESSION=${session_q}
 export F_LOSNING_RUN_DIR=${sandbox_run_dir_q}
 export F_LOSNING_HOST_RUN_DIR=${artifact_dir_q}
 export F_LOSNING_RESULT_FILE=${sandbox_run_dir_q}/result.env
 export F_LOSNING_OPENCLAW_BIN=${openclaw_bin_q}
 export F_LOSNING_OPENCLAW_SESSION_ID=${openclaw_session_id_q}
+export F_LOSNING_RETAINED_REPO_ROOT=${retained_repo_root_q}
 export OPENCLAW_STATE_DIR=${openclaw_state_dir_q}
 export OPENCLAW_CONFIG_PATH=${openclaw_config_path_q}
 EOF
@@ -294,6 +299,7 @@ runner_state_file=${runner_state_q}
 output_file=${output_q}
 sandbox_artifact_dir=${sandbox_artifact_dir_q}
 sandbox_run_dir=${sandbox_run_dir_q}
+retained_repo_root=${retained_repo_root_q}
 artifact_dir=${artifact_dir_q}
 run_dir=${artifact_dir_q}
 task_kind=${task_kind_q}
@@ -551,6 +557,45 @@ recover_literal_runtime_artifacts() {
   done
 
   [[ "\${recovered}" == "yes" ]] && return 0
+  return 0
+}
+
+recover_retained_repo_artifact_leaks() {
+  local retained_worktree_root=""
+  local leaked_run_dir=""
+  local worktree_name=""
+  local session_name=""
+  local artifact_name=""
+  local recovered="no"
+
+  [[ -n "\${retained_repo_root}" ]] || return 0
+  worktree_name="\$(basename "\${worktree}")"
+  session_name="\${AGENT_PROJECT_SESSION:-}"
+  [[ -n "\${session_name}" ]] || return 0
+  retained_worktree_root="\${retained_repo_root%/}/worktrees"
+  leaked_run_dir="\${retained_worktree_root}/\${worktree_name}/.openclaw-artifacts/\${session_name}"
+
+  if [[ ! -d "\${leaked_run_dir}" || "\${leaked_run_dir}" == "\${sandbox_run_dir}" ]]; then
+    return 0
+  fi
+
+  for artifact_name in result.env verification.jsonl issue-comment.md pr-comment.md; do
+    if [[ -f "\${leaked_run_dir}/\${artifact_name}" ]]; then
+      cp "\${leaked_run_dir}/\${artifact_name}" "\${sandbox_run_dir}/\${artifact_name}" 2>/dev/null || true
+      cp "\${leaked_run_dir}/\${artifact_name}" "\${artifact_dir}/\${artifact_name}" 2>/dev/null || true
+      recovered="yes"
+    fi
+  done
+
+  rm -rf "\${leaked_run_dir}" 2>/dev/null || true
+  rmdir "\${retained_worktree_root}/\${worktree_name}/.openclaw-artifacts" 2>/dev/null || true
+  rmdir "\${retained_worktree_root}/\${worktree_name}" 2>/dev/null || true
+  rmdir "\${retained_worktree_root}" 2>/dev/null || true
+
+  if [[ "\${recovered}" == "yes" ]]; then
+    printf '[openclaw] recovered retained-repo artifact leak: %s\n' "\${leaked_run_dir}" >>"\${output_file}" 2>/dev/null || true
+  fi
+
   return 0
 }
 
@@ -1217,6 +1262,7 @@ while true; do
   break
 done
 recover_literal_runtime_artifacts
+recover_retained_repo_artifact_leaks
 infer_result_from_output
 synthesize_comment_artifact_from_output
 if [[ "\${status}" -eq 0 ]]; then

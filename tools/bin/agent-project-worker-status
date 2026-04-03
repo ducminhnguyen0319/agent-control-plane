@@ -44,6 +44,36 @@ runner_state=""
 thread_id=""
 last_exit_code=""
 
+failure_reason_from_output() {
+  [[ -f "$output_file" ]] || return 1
+
+  if rg -qi "You've hit your usage limit|You have reached your Codex usage limits|visit https://chatgpt.com/codex/settings/usage|Upgrade to Pro|rate limit exceeded|quota exceeded|usage cap (reached|exceeded)|usage quota (reached|exceeded)" "$output_file"; then
+    printf 'usage-limit\n'
+    return 0
+  fi
+
+  if rg -qi 'stale-run no-codex-output-before-stall-threshold|no-codex-output-before-stall-threshold' "$output_file"; then
+    printf 'no-codex-output-before-stall-threshold\n'
+    return 0
+  fi
+
+  if rg -qi 'stale-run no-codex-progress-before-stall-threshold|no-codex-progress-before-stall-threshold' "$output_file"; then
+    printf 'no-codex-progress-before-stall-threshold\n'
+    return 0
+  fi
+
+  # Recover Codex startup stalls when the wrapper was archived before it could
+  # flush a terminal runner.env state. This is intentionally narrow: the log
+  # must show a turn started, but no tool activity or turn completion.
+  if rg -q '"type":"turn.started"' "$output_file" \
+    && ! rg -q '"type":"item.started"|"type":"item.completed"|"type":"turn.completed"' "$output_file"; then
+    printf 'no-codex-progress-before-stall-threshold\n'
+    return 0
+  fi
+
+  return 1
+}
+
 if tmux has-session -t "$session" 2>/dev/null; then
   status="RUNNING"
 fi
@@ -84,6 +114,13 @@ if [[ "$status" == "UNKNOWN" && -f "$output_file" ]]; then
     else
       status="FAILED"
     fi
+  fi
+fi
+
+if [[ "$status" == "UNKNOWN" && -z "$failure_reason" ]]; then
+  failure_reason="$(failure_reason_from_output || true)"
+  if [[ -n "$failure_reason" ]]; then
+    status="FAILED"
   fi
 fi
 

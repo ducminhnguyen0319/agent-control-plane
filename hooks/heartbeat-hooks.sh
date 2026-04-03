@@ -445,9 +445,9 @@ heartbeat_mark_issue_running() {
   local issue_id="${1:?issue id required}"
   local is_heavy="${2:-no}"
   if [[ "$is_heavy" == "yes" ]]; then
-    bash "${FLOW_TOOLS_DIR}/agent-github-update-labels" --repo-slug "$REPO_SLUG" --number "$issue_id" --remove agent-ready --remove agent-blocked --add agent-running --add agent-e2e-heavy >/dev/null
+    bash "${FLOW_TOOLS_DIR}/agent-github-update-labels" --repo-slug "$REPO_SLUG" --number "$issue_id" --remove agent-ready --remove agent-blocked --add agent-running --add agent-e2e-heavy >/dev/null || true
   else
-    bash "${FLOW_TOOLS_DIR}/agent-github-update-labels" --repo-slug "$REPO_SLUG" --number "$issue_id" --remove agent-ready --remove agent-blocked --add agent-running >/dev/null
+    bash "${FLOW_TOOLS_DIR}/agent-github-update-labels" --repo-slug "$REPO_SLUG" --number "$issue_id" --remove agent-ready --remove agent-blocked --add agent-running >/dev/null || true
   fi
 }
 
