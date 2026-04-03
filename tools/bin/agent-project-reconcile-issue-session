@@ -998,6 +998,17 @@ if (explicitFailureReason) {
 } else if (/^# Blocker: Provider quota is currently exhausted$/im.test(body)) {
   reason = 'provider-quota-limit';
 } else if (
+  /blocked on external network access/i.test(body) &&
+  (/What I ran:/i.test(body) ||
+    /`pnpm audit`/i.test(body) ||
+    /`gh issue view`/i.test(body)) &&
+  (/failed with `ENOTFOUND`/i.test(body) ||
+    /Exact failure:/i.test(body) ||
+    /registry\.npmjs\.org/i.test(body) ||
+    /api\.github\.com/i.test(body))
+) {
+  reason = 'worker-preflight-network-blocked';
+} else if (
   /blocked on external network access/i.test(body) ||
   /could not perform a safe offline bump/i.test(body) ||
   /failed to reach `api\.github\.com`/i.test(body) ||

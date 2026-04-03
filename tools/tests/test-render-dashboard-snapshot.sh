@@ -168,6 +168,15 @@ OUTCOME=blocked
 ACTION=requested-changes-or-blocked
 EOF
 
+cat >"$history_dir/issue-comment.md" <<'EOF'
+Blocked on external network access for the dependency-audit slice in issue #613.
+
+What I ran:
+- `pnpm audit`
+
+Exact failure: `request to https://registry.npmjs.org/-/npm/v1/security/audits failed, reason: getaddrinfo ENOTFOUND registry.npmjs.org`
+EOF
+
 snapshot="$(ACP_PROFILE_REGISTRY_ROOT="$profile_registry_root" python3 "$SNAPSHOT_BIN" --pretty)"
 
 grep -q '"profile_count": 1' <<<"$snapshot"
@@ -188,9 +197,12 @@ grep -q '"recent_history_runs": 1' <<<"$snapshot"
 grep -q '"session": "demo-pr-9"' <<<"$snapshot"
 grep -q '"pr_number": "9"' <<<"$snapshot"
 grep -q '"last_reason": "github-api-rate-limit"' <<<"$snapshot"
-grep -q '"alert_count": 1' <<<"$snapshot"
+grep -q '"alert_count": 2' <<<"$snapshot"
 grep -q '"kind": "github-core-rate-limit"' <<<"$snapshot"
 grep -q '"title": "GitHub core API rate limit blocks host actions"' <<<"$snapshot"
 grep -q '"reset_at": "2026-04-02 09:20:43 CEST"' <<<"$snapshot"
+grep -q '"kind": "worker-preflight-network-blocked"' <<<"$snapshot"
+grep -q '"title": "Worker preflight blocked by network"' <<<"$snapshot"
+grep -q 'Verify from the host if the same command succeeds' <<<"$snapshot"
 
 echo "render dashboard snapshot test passed"

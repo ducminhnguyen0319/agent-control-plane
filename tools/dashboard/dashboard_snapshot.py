@@ -200,6 +200,11 @@ GITHUB_RATE_LIMIT_PATTERNS = [
     ),
 ]
 
+WORKER_PREFLIGHT_NETWORK_BLOCKED_PATTERN = re.compile(
+    r"Blocked on external network access.*?What I ran:\s*-\s*`(?P<command>[^`]+)`.*?Exact failure:\s*`(?P<failure>[^`]+)`",
+    re.IGNORECASE | re.DOTALL,
+)
+
 
 def summarize_whitespace(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
@@ -240,6 +245,52 @@ def extract_github_rate_limit_alert(run_dir: Path, run: dict[str, Any]) -> dict[
                 "source_file": str(path),
             }
     return None
+
+
+def extract_worker_preflight_network_blocked_alert(run_dir: Path, run: dict[str, Any]) -> dict[str, Any] | None:
+    candidate_files = [
+        run_dir / "issue-comment.md",
+        run_dir / "pr-comment.md",
+    ]
+    for path in candidate_files:
+        text = read_tail_text(path)
+        if not text:
+            continue
+        match = WORKER_PREFLIGHT_NETWORK_BLOCKED_PATTERN.search(text)
+        if not match:
+            continue
+        command = summarize_whitespace(match.group("command"))
+        failure = summarize_whitespace(match.group("failure"))
+        message = f"Worker preflight `{command or 'unknown command'}` failed before implementation."
+        if failure:
+            message = f"{message} {failure}"
+        message = f"{message} Verify from the host if the same command succeeds; worker and host environment can diverge."
+        return {
+            "id": f"worker-preflight-network-blocked:{run.get('session', '')}:{command}:{failure}",
+            "kind": "worker-preflight-network-blocked",
+            "severity": "warn",
+            "title": "Worker preflight blocked by network",
+            "message": message,
+            "session": run.get("session", ""),
+            "task_kind": run.get("task_kind", ""),
+            "task_id": run.get("task_id", ""),
+            "reset_at": "",
+            "updated_at": run.get("updated_at", "") or file_mtime_iso(path),
+            "source_file": str(path),
+        }
+    return None
+
+
+def extract_run_alerts(run_dir: Path, run: dict[str, Any]) -> list[dict[str, Any]]:
+    alerts: list[dict[str, Any]] = []
+    for extractor in (
+        extract_github_rate_limit_alert,
+        extract_worker_preflight_network_blocked_alert,
+    ):
+        alert = extractor(run_dir, run)
+        if alert:
+            alerts.append(alert)
+    return alerts
 
 
 def collect_runs(runs_root: Path) -> list[dict[str, Any]]:
@@ -296,8 +347,7 @@ def collect_runs(runs_root: Path) -> list[dict[str, Any]]:
             "provider_pool_name": run_env.get("ACTIVE_PROVIDER_POOL_NAME", ""),
             "run_dir": str(run_dir),
         }
-        alert = extract_github_rate_limit_alert(run_dir, item)
-        item["alerts"] = [alert] if alert else []
+        item["alerts"] = extract_run_alerts(run_dir, item)
         runs.append(item)
     return runs
 
@@ -351,8 +401,7 @@ def collect_recent_history(history_root: Path, limit: int = 8) -> list[dict[str,
             "run_dir": str(run_dir),
             "archived": True,
         }
-        alert = extract_github_rate_limit_alert(run_dir, item)
-        item["alerts"] = [alert] if alert else []
+        item["alerts"] = extract_run_alerts(run_dir, item)
         items.append(item)
         seen_sessions.add(session)
         if len(items) >= limit:

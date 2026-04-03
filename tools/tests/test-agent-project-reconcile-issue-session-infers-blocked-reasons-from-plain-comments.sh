@@ -15,7 +15,7 @@ repo_root="$tmpdir/repo"
 bin_dir="$tmpdir/bin"
 
 mkdir -p "$shared_bin" "$runs_root/fl-issue-901" "$runs_root/fl-issue-902" "$runs_root/fl-issue-903" "$history_root" "$repo_root" "$bin_dir"
-mkdir -p "$runs_root/fl-issue-904" "$runs_root/fl-issue-905"
+mkdir -p "$runs_root/fl-issue-904" "$runs_root/fl-issue-905" "$runs_root/fl-issue-906"
 git -C "$repo_root" init -b main >/dev/null 2>&1
 
 cat >"$runs_root/fl-issue-901/run.env" <<'EOF'
@@ -129,6 +129,28 @@ Blocker
   - `pnpm --filter @f-losning/api exec ts-node -r tsconfig-paths/register test/performance/run-attendance-check-in-monitoring-cycle.ts`
 - The run fails with local socket connection errors (`AggregateError`, and earlier Redis attempts failed with `connect EPERM 127.0.0.1:6379`).
 - Because the worker cannot reach the local Postgres/Redis services, I could not produce a truthful endpoint-latency baseline for this cycle.
+EOF
+
+cat >"$runs_root/fl-issue-906/run.env" <<'EOF'
+ISSUE_ID=906
+SESSION=fl-issue-906
+WORKTREE=/tmp/mock-issue-906
+EOF
+
+cat >"$runs_root/fl-issue-906/result.env" <<'EOF'
+OUTCOME=blocked
+ACTION=host-comment-blocker
+EOF
+
+cat >"$runs_root/fl-issue-906/issue-comment.md" <<'EOF'
+Blocked on external network access while refreshing upstream dependency metadata.
+
+What I completed this cycle:
+- checked the targeted manifest scope locally
+
+Additional notes:
+- the worker failed to reach `api.github.com`
+- no dependency changes were attempted
 EOF
 
 cat >"$shared_bin/agent-project-worker-status" <<EOF
@@ -248,20 +270,36 @@ output_905="$(
     --hook-file "$tmpdir/hooks.sh"
 )"
 
+output_906="$(
+  PATH="$bin_dir:$PATH" \
+  SHARED_AGENT_HOME="$shared_home" \
+  TEST_RETRY_REASONS_FILE="$tmpdir/retry-reasons.txt" \
+  bash "$SCRIPT" \
+    --session fl-issue-906 \
+    --repo-slug example/repo \
+    --repo-root "$repo_root" \
+    --runs-root "$runs_root" \
+    --history-root "$history_root" \
+    --hook-file "$tmpdir/hooks.sh"
+)"
+
 grep -q '^STATUS=SUCCEEDED$' <<<"$output_901"
 grep -q '^FAILURE_REASON=verification-guard-blocked$' <<<"$output_901"
 grep -q '^STATUS=SUCCEEDED$' <<<"$output_902"
-grep -q '^FAILURE_REASON=external-network-access-blocked$' <<<"$output_902"
+grep -q '^FAILURE_REASON=worker-preflight-network-blocked$' <<<"$output_902"
 grep -q '^STATUS=SUCCEEDED$' <<<"$output_903"
 grep -q '^FAILURE_REASON=localization-guard-blocked$' <<<"$output_903"
 grep -q '^STATUS=SUCCEEDED$' <<<"$output_904"
 grep -q '^FAILURE_REASON=verification-guard-blocked$' <<<"$output_904"
 grep -q '^STATUS=SUCCEEDED$' <<<"$output_905"
 grep -q '^FAILURE_REASON=worker-environment-blocked$' <<<"$output_905"
+grep -q '^STATUS=SUCCEEDED$' <<<"$output_906"
+grep -q '^FAILURE_REASON=external-network-access-blocked$' <<<"$output_906"
 grep -q '^901=verification-guard-blocked$' "$tmpdir/retry-reasons.txt"
-grep -q '^902=external-network-access-blocked$' "$tmpdir/retry-reasons.txt"
+grep -q '^902=worker-preflight-network-blocked$' "$tmpdir/retry-reasons.txt"
 grep -q '^903=localization-guard-blocked$' "$tmpdir/retry-reasons.txt"
 grep -q '^904=verification-guard-blocked$' "$tmpdir/retry-reasons.txt"
 grep -q '^905=worker-environment-blocked$' "$tmpdir/retry-reasons.txt"
+grep -q '^906=external-network-access-blocked$' "$tmpdir/retry-reasons.txt"
 
 echo "issue reconcile infers blocked reasons from plain comments test passed"
