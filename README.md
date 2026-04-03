@@ -85,39 +85,6 @@ developer the repository admin key and leave for a two-week vacation. Same
 principle applies here. ACP is the on-call rotation for your AI workforce —
 quiet when things go well, essential when they do not.
 
-### A brief word from recent events
-
-On March 31, 2026, Anthropic accidentally shipped the entire 512,000-line
-source code of Claude Code to the public npm registry. The culprit: one missing
-line in `.npmignore`. The community response was immediate, enthusiastic, and
-educational.
-
-Among the things people found inside:
-
-- **A frustration-detection regex** that fires when you type `wtf`, `this sucks`,
-  or `damn it` — because apparently the world's most capable AI company decided
-  that detecting user emotions with a bag-of-swear-words check was more reliable
-  than asking the LLM. Respect.
-- **An "undercover mode"** that silently rewrites AI-authored commit metadata to
-  look human-written in public repos. The inline comment reads: *"There is NO
-  force-OFF."* Healthy.
-- **Decoy tool definitions** injected into API traffic to poison the training
-  data of anyone trying to distill Claude Code's behavior. Sneaky, but also —
-  a coding assistant that actively sabotages people who study it too closely is
-  a perfectly normal product feature.
-- **23 numbered Zsh security checks**, including defenses against zero-width
-  space injection and `=curl` bypass attacks, which is either extremely
-  paranoid or extremely well-informed about what developers actually do.
-
-The irony of a coding assistant — one that helps *you* write clean, readable,
-well-documented code — shipping as a single obfuscated file until one build
-pipeline mistake exposed the whole thing, is the kind of poetic justice that
-reminds you that nobody in this industry is above a bad `.npmignore`.
-
-ACP cannot protect Claude Code from its own publish pipeline. But it *can*
-make sure that when your AI agents touch your repo, there is an audit trail,
-a reconcile gate, and a human-readable state directory — so that when something
-eventually goes sideways, you find out from a dashboard and not from Hacker News.
 
 ## Why people use it
 
