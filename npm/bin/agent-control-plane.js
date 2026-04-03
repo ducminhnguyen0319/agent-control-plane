@@ -590,6 +590,9 @@ function detectPackageManager() {
   if (commandExists("pacman")) {
     return { name: "pacman" };
   }
+  if (commandExists("zypper")) {
+    return { name: "zypper" };
+  }
   return null;
 }
 
@@ -679,6 +682,9 @@ function buildDependencyInstallPlan(missingTools) {
       break;
     case "pacman":
       commands.push([...prefix, "pacman", "-Sy", "--noconfirm", ...packages]);
+      break;
+    case "zypper":
+      commands.push([...prefix, "zypper", "install", "-y", ...packages]);
       break;
     default:
       return null;
