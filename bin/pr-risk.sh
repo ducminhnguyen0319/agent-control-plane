@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../tools/bin/flow-config-lib.sh"
 
 PR_NUMBER="${1:?usage: pr-risk.sh PR_NUMBER}"
+[[ "${PR_NUMBER}" =~ ^[1-9][0-9]*$ ]] || { printf 'pr-risk: PR_NUMBER must be a positive integer, got: %s\n' "${PR_NUMBER}" >&2; exit 1; }
 CONFIG_YAML="$(resolve_flow_config_yaml "${BASH_SOURCE[0]}")"
 MANAGED_PR_PREFIXES_JSON="$(flow_managed_pr_prefixes_json "${CONFIG_YAML}")"
 MANAGED_PR_ISSUE_CAPTURE_REGEX="$(flow_managed_issue_branch_regex "${CONFIG_YAML}")"
@@ -37,7 +38,8 @@ gh_api_json_matching_or_fallback() {
   printf '%s\n' "${fallback}"
 }
 
-PR_JSON="$(gh pr view "$PR_NUMBER" -R "$REPO_SLUG" --json number,title,url,body,isDraft,headRefName,headRefOid,baseRefName,labels,files,mergeStateStatus,reviewDecision,reviewRequests,statusCheckRollup,comments)"
+PR_JSON="$(gh pr view "$PR_NUMBER" -R "$REPO_SLUG" --json number,title,url,body,isDraft,headRefName,headRefOid,baseRefName,labels,files,mergeStateStatus,reviewDecision,reviewRequests,statusCheckRollup,comments 2>/dev/null)" \
+  || { printf 'pr-risk: gh pr view failed for PR %s (repo: %s)\n' "$PR_NUMBER" "$REPO_SLUG" >&2; exit 1; }
 PR_HEAD_SHA="$(jq -r '.headRefOid // ""' <<<"$PR_JSON")"
 PR_HEAD_COMMITTED_AT=""
 if [[ -n "${PR_HEAD_SHA}" ]]; then
@@ -51,9 +53,24 @@ fi
 
 PR_JSON="$PR_JSON" PR_HEAD_SHA="$PR_HEAD_SHA" PR_HEAD_COMMITTED_AT="$PR_HEAD_COMMITTED_AT" REVIEW_COMMENTS_JSON="$REVIEW_COMMENTS_JSON" CHECK_RUNS_JSON="$CHECK_RUNS_JSON" PR_LANE_OVERRIDE="${PR_LANE_OVERRIDE:-}" MANAGED_PR_PREFIXES_JSON="$MANAGED_PR_PREFIXES_JSON" MANAGED_PR_ISSUE_CAPTURE_REGEX="$MANAGED_PR_ISSUE_CAPTURE_REGEX" ALLOW_INFRA_CI_BYPASS="$ALLOW_INFRA_CI_BYPASS" LOCAL_FIRST_PR_POLICY="$LOCAL_FIRST_PR_POLICY" node <<'EOF'
 const { execFileSync } = require('node:child_process');
-const data = JSON.parse(process.env.PR_JSON);
-const reviewComments = JSON.parse(process.env.REVIEW_COMMENTS_JSON || '[]');
-const checkRunsPayload = JSON.parse(process.env.CHECK_RUNS_JSON || '{"check_runs":[]}');
+let data;
+try {
+  data = JSON.parse(process.env.PR_JSON);
+} catch (err) {
+  process.stderr.write(`pr-risk: failed to parse PR_JSON: ${err.message}\n`);
+  process.stdout.write(JSON.stringify({ agentLane: 'ignore', error: `parse-error: ${err.message}` }));
+  process.exit(0);
+}
+let reviewComments, checkRunsPayload;
+try {
+  reviewComments = JSON.parse(process.env.REVIEW_COMMENTS_JSON || '[]');
+  checkRunsPayload = JSON.parse(process.env.CHECK_RUNS_JSON || '{"check_runs":[]}');
+} catch (err) {
+  process.stderr.write(`pr-risk: failed to parse auxiliary JSON env: ${err.message}\n`);
+  reviewComments = [];
+  checkRunsPayload = { check_runs: [] };
+}
+try {
 const checkRuns = checkRunsPayload.check_runs || [];
 const files = (data.files || []).map((file) => file.path);
 const labelNames = (data.labels || []).map((label) => label.name);
@@ -573,4 +590,9 @@ const result = {
 };
 
 process.stdout.write(JSON.stringify(result));
+} catch (err) {
+  process.stderr.write(`pr-risk: unexpected error: ${err.message}\n${err.stack || ''}\n`);
+  process.stdout.write(JSON.stringify({ agentLane: 'ignore', error: `runtime-error: ${err.message}` }));
+  process.exit(1);
+}
 EOF
