@@ -50,8 +50,10 @@ status_output="$(
     bash "${RUNTIMECTL_BIN}" status --profile-id demo
 )"
 
-grep -q 'RUNTIME_STATUS=running' <<<"${status_output}"
+grep -q 'RUNTIME_STATUS=partial' <<<"${status_output}"
 grep -q "SUPERVISOR_PID=${supervisor_pid}" <<<"${status_output}"
+
+echo "${status_output}" | grep -q 'ACTIVE_TMUX_SESSION_COUNT=0'
 
 kill "${supervisor_pid}" >/dev/null 2>&1 || true
 wait "${supervisor_pid}" >/dev/null 2>&1 || true

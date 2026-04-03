@@ -168,13 +168,15 @@ join_by_comma() {
 runtime_started() {
   local heartbeat=""
   local shared_loop=""
-  local supervisor=""
+  local active_sessions=""
+  local pending_pids=""
 
   heartbeat="$(heartbeat_pid)"
   shared_loop="$(shared_loop_pid)"
-  supervisor="$(supervisor_pid)"
+  active_sessions="$(collect_active_tmux_sessions | sort -u)"
+  pending_pids="$(collect_pending_launch_pids | sort -u)"
 
-  [[ -n "${heartbeat}" || -n "${shared_loop}" || -n "${supervisor}" ]]
+  [[ -n "${heartbeat}" || -n "${shared_loop}" || -n "${active_sessions}" || -n "${pending_pids}" ]]
 }
 
 wait_for_runtime_start() {
@@ -412,10 +414,10 @@ print_status() {
   [[ -n "${stale_sessions}" ]] && stale_session_count="$(printf '%s\n' "${stale_sessions}" | awk 'NF {c+=1} END {print c+0}')"
   [[ -n "${pending_pids}" ]] && pending_count="$(printf '%s\n' "${pending_pids}" | awk 'NF {c+=1} END {print c+0}')"
 
-  if [[ -n "${heartbeat}" || -n "${shared_loop}" || -n "${supervisor}" || "${controller_count}" != "0" || "${active_session_count}" != "0" ]]; then
+  if [[ -n "${heartbeat}" || -n "${shared_loop}" || "${active_session_count}" != "0" ]]; then
     runtime_status="running"
   fi
-  if [[ -z "${heartbeat}" && -z "${supervisor}" && "${active_session_count}" == "0" && ( -n "${shared_loop}" || "${controller_count}" != "0" ) ]]; then
+  if [[ "${runtime_status}" != "running" && ( -n "${supervisor}" || "${controller_count}" != "0" || "${pending_count}" != "0" || "${stale_session_count}" != "0" ) ]]; then
     runtime_status="partial"
   fi
 
