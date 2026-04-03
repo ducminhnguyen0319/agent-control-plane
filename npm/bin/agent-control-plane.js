@@ -1355,6 +1355,9 @@ function printSetupDryRunPlan(context, config, plan) {
     console.log(`  command preview: ${plan.workerInstallPlan.commands.map(formatCommand).join(" && ")}`);
   }
   console.log(`- GitHub auth step: ${plan.githubAuthAction.status}${plan.githubAuthAction.reason ? ` (${plan.githubAuthAction.reason})` : ""}`);
+  if (plan.githubAuthAction.status !== "not-needed") {
+    console.log(`  command preview: gh auth login`);
+  }
   console.log(`- runtime start: ${plan.runtimeStartAction.status}${plan.runtimeStartAction.reason ? ` (${plan.runtimeStartAction.reason})` : ""}`);
   if (process.platform === "darwin") {
     console.log(`- launchd install: ${plan.launchdAction.status}${plan.launchdAction.reason ? ` (${plan.launchdAction.reason})` : ""}`);
