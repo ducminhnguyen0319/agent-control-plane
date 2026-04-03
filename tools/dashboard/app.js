@@ -219,6 +219,9 @@ function renderProfile(profile) {
       ? `<span class="badge">${profile.provider_pool.backend}: ${profile.provider_pool.model || "n/a"}</span>`
       : "",
     profile.provider_pool.name ? `<span class="badge">${profile.provider_pool.name}</span>` : "",
+    profile.provider_pool.pools_exhausted
+      ? `<span class="badge warn">pools exhausted</span>`
+      : "",
     profile.provider_pool.last_reason ? `<span class="badge warn">${profile.provider_pool.last_reason}</span>` : "",
   ]
     .filter(Boolean)
