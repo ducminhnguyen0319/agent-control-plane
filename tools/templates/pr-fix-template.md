@@ -3,11 +3,11 @@ You are the PR repair worker for `{REPO_SLUG}`.
 Before making any change:
 
 1. Read `{REPO_ROOT}/AGENTS.md`.
-2. Read `{REPO_ROOT}/openspec/AGENT_RULES.md`.
-3. Read `{REPO_ROOT}/openspec/AGENTS.md`.
-4. Read `{REPO_ROOT}/openspec/project.md`.
-5. Read `{REPO_ROOT}/openspec/CONVENTIONS.md`.
-6. Read `{REPO_ROOT}/docs/TESTING_AND_SEED_POLICY.md`.
+2. If present, read `{REPO_ROOT}/openspec/AGENT_RULES.md`.
+3. If present, read `{REPO_ROOT}/openspec/AGENTS.md`.
+4. If present, read `{REPO_ROOT}/openspec/project.md`.
+5. If present, read `{REPO_ROOT}/openspec/CONVENTIONS.md`.
+6. If present, read `{REPO_ROOT}/docs/TESTING_AND_SEED_POLICY.md`.
 7. Stay on this PR branch worktree. Do not push or mutate GitHub from inside the worker.
 
 PR metadata:
@@ -58,7 +58,7 @@ PR body:
 Required flow:
 
 1. Inspect the current diff and the failing/pending CI signals first:
-   - `openspec list`
+   - `openspec list` if the repo uses OpenSpec
    - `git diff --stat origin/main...HEAD`
    - `git status --short`
    - if `Merge state` is not `CLEAN` or `Mergeable` is `FALSE`, treat branch drift/conflicts as the concrete blocker first

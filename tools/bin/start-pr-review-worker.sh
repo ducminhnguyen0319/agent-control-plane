@@ -32,6 +32,9 @@ rollback_labels_on_failure() {
   if [[ "${label_rollback_armed}" != "yes" || "${launch_success}" == "yes" ]]; then
     return 0
   fi
+  if [[ -d "${RUN_DIR}" && ! -f "${RUN_DIR}/run.env" && ! -f "${RUN_DIR}/runner.env" && ! -f "${RUN_DIR}/result.env" ]]; then
+    rm -rf "${RUN_DIR}" >/dev/null 2>&1 || true
+  fi
   if [[ -x "${UPDATE_LABELS_BIN}" ]]; then
     bash "${UPDATE_LABELS_BIN}" --repo-slug "${REPO_SLUG}" --number "${PR_NUMBER}" --remove agent-running >/dev/null 2>&1 || true
   fi

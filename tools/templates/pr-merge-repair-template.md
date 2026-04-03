@@ -3,11 +3,11 @@ You are the PR merge-repair worker for `{REPO_SLUG}`.
 Before making any change:
 
 1. Read `{REPO_ROOT}/AGENTS.md`.
-2. Read `{REPO_ROOT}/openspec/AGENT_RULES.md`.
-3. Read `{REPO_ROOT}/openspec/AGENTS.md`.
-4. Read `{REPO_ROOT}/openspec/project.md`.
-5. Read `{REPO_ROOT}/openspec/CONVENTIONS.md`.
-6. Read `{REPO_ROOT}/docs/TESTING_AND_SEED_POLICY.md`.
+2. If present, read `{REPO_ROOT}/openspec/AGENT_RULES.md`.
+3. If present, read `{REPO_ROOT}/openspec/AGENTS.md`.
+4. If present, read `{REPO_ROOT}/openspec/project.md`.
+5. If present, read `{REPO_ROOT}/openspec/CONVENTIONS.md`.
+6. If present, read `{REPO_ROOT}/docs/TESTING_AND_SEED_POLICY.md`.
 7. Stay on this PR branch worktree. Do not push or mutate GitHub from inside the worker.
 
 PR metadata:
@@ -53,7 +53,7 @@ Required flow:
    - do not run `git fetch`, `git pull`, `git merge`, `git rebase`, `git commit`, `git push`, or any command that writes Git metadata
    - do not abort or restart the prepared merge state
 3. Inspect only the concrete branch-repair state you were given:
-   - `openspec list`
+   - `openspec list` if the repo uses OpenSpec
    - `git status --short`
    - `git diff --check`
    - `git diff --name-only --diff-filter=U`
