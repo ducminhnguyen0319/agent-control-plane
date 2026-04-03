@@ -727,7 +727,7 @@ async function maybeInstallMissingDependencies(options, prereq) {
   if (!plan) {
     console.log("\nACP found missing core dependencies but cannot install them automatically on this machine.");
     console.log(`- missing tools: ${prereq.missingRequired.join(", ")}`);
-    console.log("- supported auto-install package managers today: brew, apt-get, dnf, yum, pacman");
+    console.log("- supported auto-install package managers today: brew, apt-get, dnf, yum, pacman, zypper");
     return {
       status: "unavailable",
       reason: "no-supported-package-manager",
