@@ -361,7 +361,7 @@ print_status() {
   if [[ -n "${heartbeat}" || -n "${shared_loop}" || -n "${supervisor}" || "${controller_count}" != "0" || "${active_session_count}" != "0" ]]; then
     runtime_status="running"
   fi
-  if [[ -z "${heartbeat}" && -z "${supervisor}" && ( -n "${shared_loop}" || "${controller_count}" != "0" || "${active_session_count}" != "0" ) ]]; then
+  if [[ -z "${heartbeat}" && -z "${supervisor}" && "${active_session_count}" == "0" && ( -n "${shared_loop}" || "${controller_count}" != "0" ) ]]; then
     runtime_status="partial"
   fi
 
