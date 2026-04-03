@@ -18,8 +18,14 @@ mkdir -p "${fake_bin}"
 run_with_timeout() {
   local timeout_seconds="${1:?timeout required}"
   shift
+  local python_bin
+  python_bin="$(command -v python3 || true)"
+  if [[ -z "${python_bin}" ]]; then
+    echo "python3 is required for run_with_timeout" >&2
+    return 127
+  fi
 
-  /opt/homebrew/bin/python3 - "$timeout_seconds" "$@" <<'PY'
+  "${python_bin}" - "$timeout_seconds" "$@" <<'PY'
 import os
 import signal
 import subprocess
