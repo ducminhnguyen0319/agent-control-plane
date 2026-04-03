@@ -64,6 +64,9 @@ RESIDENT_OPENCLAW_CONFIG_PATH="${ACP_RESIDENT_OPENCLAW_CONFIG_PATH:-${F_LOSNING_
 OPENCLAW_MODEL="${OPENCLAW_MODEL:-${ACP_OPENCLAW_MODEL:-${F_LOSNING_OPENCLAW_MODEL:-openrouter/qwen/qwen3.6-plus-preview:free}}}"
 OPENCLAW_THINKING="${OPENCLAW_THINKING:-${ACP_OPENCLAW_THINKING:-${F_LOSNING_OPENCLAW_THINKING:-low}}}"
 OPENCLAW_TIMEOUT_SECONDS="${OPENCLAW_TIMEOUT_SECONDS:-${ACP_OPENCLAW_TIMEOUT_SECONDS:-${F_LOSNING_OPENCLAW_TIMEOUT_SECONDS:-900}}}"
+OLLAMA_MODEL="${ACP_OLLAMA_MODEL:-${F_LOSNING_OLLAMA_MODEL:-qwen2.5-coder:7b}}"
+OLLAMA_BASE_URL="${ACP_OLLAMA_BASE_URL:-${F_LOSNING_OLLAMA_BASE_URL:-http://localhost:11434}}"
+OLLAMA_TIMEOUT_SECONDS="${ACP_OLLAMA_TIMEOUT_SECONDS:-${F_LOSNING_OLLAMA_TIMEOUT_SECONDS:-900}}"
 printf -v SESSION_Q '%q' "$SESSION"
 printf -v CONFIG_YAML_Q '%q' "$CONFIG_YAML"
 printf -v ADAPTER_ID_Q '%q' "$ADAPTER_ID"
@@ -223,6 +226,14 @@ case "$CODING_WORKER" in
     ;;
   kilo)
     bash "${FLOW_TOOLS_DIR}/agent-project-run-kilo-session" "${ARGS[@]}"
+    ;;
+  ollama)
+    ARGS+=(
+      --ollama-model "${OLLAMA_MODEL}"
+      --ollama-base-url "${OLLAMA_BASE_URL}"
+      --ollama-timeout-seconds "${OLLAMA_TIMEOUT_SECONDS}"
+    )
+    bash "${FLOW_TOOLS_DIR}/agent-project-run-ollama-session" "${ARGS[@]}"
     ;;
   *)
     echo "unsupported coding worker: ${CODING_WORKER}" >&2

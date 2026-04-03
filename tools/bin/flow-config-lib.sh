@@ -1699,6 +1699,27 @@ flow_provider_pool_openclaw_timeout_seconds() {
   flow_provider_pool_value "${config_file}" "${pool_name}" "openclaw.timeout_seconds"
 }
 
+flow_provider_pool_ollama_model() {
+  local config_file="${1:?config file required}"
+  local pool_name="${2:?pool name required}"
+
+  flow_provider_pool_value "${config_file}" "${pool_name}" "ollama.model"
+}
+
+flow_provider_pool_ollama_base_url() {
+  local config_file="${1:?config file required}"
+  local pool_name="${2:?pool name required}"
+
+  flow_provider_pool_value "${config_file}" "${pool_name}" "ollama.base_url"
+}
+
+flow_provider_pool_ollama_timeout_seconds() {
+  local config_file="${1:?config file required}"
+  local pool_name="${2:?pool name required}"
+
+  flow_provider_pool_value "${config_file}" "${pool_name}" "ollama.timeout_seconds"
+}
+
 flow_sanitize_provider_key() {
   local raw_key="${1:?raw key required}"
 
@@ -1722,6 +1743,9 @@ flow_provider_pool_model_identity() {
       ;;
     openclaw)
       flow_provider_pool_openclaw_model "${config_file}" "${pool_name}"
+      ;;
+    ollama)
+      flow_provider_pool_ollama_model "${config_file}" "${pool_name}"
       ;;
     *)
       printf '\n'
@@ -1756,6 +1780,9 @@ flow_provider_pool_state_get() {
   local openclaw_model=""
   local openclaw_thinking=""
   local openclaw_timeout_seconds=""
+  local ollama_model=""
+  local ollama_base_url=""
+  local ollama_timeout_seconds=""
 
   backend="$(flow_provider_pool_backend "${config_file}" "${pool_name}")"
   safe_profile="$(flow_provider_pool_safe_profile "${config_file}" "${pool_name}")"
@@ -1769,6 +1796,9 @@ flow_provider_pool_state_get() {
   openclaw_model="$(flow_provider_pool_openclaw_model "${config_file}" "${pool_name}")"
   openclaw_thinking="$(flow_provider_pool_openclaw_thinking "${config_file}" "${pool_name}")"
   openclaw_timeout_seconds="$(flow_provider_pool_openclaw_timeout_seconds "${config_file}" "${pool_name}")"
+  ollama_model="$(flow_provider_pool_ollama_model "${config_file}" "${pool_name}")"
+  ollama_base_url="$(flow_provider_pool_ollama_base_url "${config_file}" "${pool_name}")"
+  ollama_timeout_seconds="$(flow_provider_pool_ollama_timeout_seconds "${config_file}" "${pool_name}")"
   model="$(flow_provider_pool_model_identity "${config_file}" "${pool_name}")"
 
   case "${backend}" in
@@ -1780,6 +1810,9 @@ flow_provider_pool_state_get() {
       ;;
     openclaw)
       [[ -n "${openclaw_model}" && -n "${openclaw_thinking}" && -n "${openclaw_timeout_seconds}" ]] || valid="no"
+      ;;
+    ollama)
+      [[ -n "${ollama_model}" ]] || valid="no"
       ;;
     *)
       valid="no"
@@ -1833,6 +1866,9 @@ flow_provider_pool_state_get() {
   printf 'OPENCLAW_MODEL=%s\n' "${openclaw_model}"
   printf 'OPENCLAW_THINKING=%s\n' "${openclaw_thinking}"
   printf 'OPENCLAW_TIMEOUT_SECONDS=%s\n' "${openclaw_timeout_seconds}"
+  printf 'OLLAMA_MODEL=%s\n' "${ollama_model}"
+  printf 'OLLAMA_BASE_URL=%s\n' "${ollama_base_url}"
+  printf 'OLLAMA_TIMEOUT_SECONDS=%s\n' "${ollama_timeout_seconds}"
 }
 
 flow_selected_provider_pool_env() {
@@ -2040,6 +2076,9 @@ flow_export_execution_env() {
   local openclaw_thinking=""
   local openclaw_timeout=""
   local openclaw_stall=""
+  local ollama_model=""
+  local ollama_base_url=""
+  local ollama_timeout=""
 
   repo_id="$(flow_resolve_repo_id "${config_file}")"
   provider_quota_cooldowns="$(flow_resolve_provider_quota_cooldowns "${config_file}")"
@@ -2073,6 +2112,9 @@ flow_export_execution_env() {
     openclaw_thinking="$(flow_kv_get "${provider_pool_selection}" "OPENCLAW_THINKING")"
     openclaw_timeout="$(flow_kv_get "${provider_pool_selection}" "OPENCLAW_TIMEOUT_SECONDS")"
     openclaw_stall="$(flow_kv_get "${provider_pool_selection}" "OPENCLAW_STALL_SECONDS")"
+    ollama_model="$(flow_kv_get "${provider_pool_selection}" "OLLAMA_MODEL")"
+    ollama_base_url="$(flow_kv_get "${provider_pool_selection}" "OLLAMA_BASE_URL")"
+    ollama_timeout="$(flow_kv_get "${provider_pool_selection}" "OLLAMA_TIMEOUT_SECONDS")"
   else
     if [[ -n "${explicit_coding_worker}" ]]; then
       active_provider_selection_reason="env-override"
@@ -2090,6 +2132,9 @@ flow_export_execution_env() {
     openclaw_thinking="$(flow_env_or_config "${config_file}" "ACP_OPENCLAW_THINKING F_LOSNING_OPENCLAW_THINKING" "execution.openclaw.thinking" "")"
     openclaw_timeout="$(flow_env_or_config "${config_file}" "ACP_OPENCLAW_TIMEOUT_SECONDS F_LOSNING_OPENCLAW_TIMEOUT_SECONDS" "execution.openclaw.timeout_seconds" "")"
     openclaw_stall="$(flow_env_or_config "${config_file}" "ACP_OPENCLAW_STALL_SECONDS F_LOSNING_OPENCLAW_STALL_SECONDS" "execution.openclaw.stall_seconds" "")"
+    ollama_model="$(flow_env_or_config "${config_file}" "ACP_OLLAMA_MODEL F_LOSNING_OLLAMA_MODEL" "execution.ollama.model" "")"
+    ollama_base_url="$(flow_env_or_config "${config_file}" "ACP_OLLAMA_BASE_URL F_LOSNING_OLLAMA_BASE_URL" "execution.ollama.base_url" "")"
+    ollama_timeout="$(flow_env_or_config "${config_file}" "ACP_OLLAMA_TIMEOUT_SECONDS F_LOSNING_OLLAMA_TIMEOUT_SECONDS" "execution.ollama.timeout_seconds" "")"
   fi
 
   if [[ -n "${coding_worker}" ]]; then
@@ -2172,6 +2217,18 @@ flow_export_execution_env() {
   if [[ -n "${openclaw_stall}" ]]; then
     export F_LOSNING_OPENCLAW_STALL_SECONDS="${openclaw_stall}"
     export ACP_OPENCLAW_STALL_SECONDS="${openclaw_stall}"
+  fi
+  if [[ -n "${ollama_model}" ]]; then
+    export F_LOSNING_OLLAMA_MODEL="${ollama_model}"
+    export ACP_OLLAMA_MODEL="${ollama_model}"
+  fi
+  if [[ -n "${ollama_base_url}" ]]; then
+    export F_LOSNING_OLLAMA_BASE_URL="${ollama_base_url}"
+    export ACP_OLLAMA_BASE_URL="${ollama_base_url}"
+  fi
+  if [[ -n "${ollama_timeout}" ]]; then
+    export F_LOSNING_OLLAMA_TIMEOUT_SECONDS="${ollama_timeout}"
+    export ACP_OLLAMA_TIMEOUT_SECONDS="${ollama_timeout}"
   fi
 
   flow_export_github_cli_auth_env "$(flow_resolve_repo_slug "${config_file}")"

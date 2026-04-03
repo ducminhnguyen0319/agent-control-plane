@@ -1,0 +1,549 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-project-run-ollama-session --mode safe|bypass --session <id> --worktree <path> --prompt-file <path> --runs-root <path> --adapter-id <id> --task-kind <kind> --task-id <id> [options]
+
+Launch an Ollama local model worker inside tmux for a project adapter and
+persist the standard run artifacts. Requires Ollama running at the configured
+base URL with the specified model pulled.
+
+Options:
+  --env-prefix <prefix>              Export prefixed runtime/context env vars inside the worker
+  --context <KEY=VALUE>              Extra metadata written to run.env and exported to the worker
+  --collect-file <name>              Copy worker artifact file into the host run dir after execution
+  --reconcile-command <cmd>          Host-side command queued after the worker exits
+  --sandbox-subdir <name>            Subdir under the worktree for worker artifacts (default: .ollama-artifacts)
+  --ollama-model <id>                Ollama model name (default: qwen2.5-coder:7b)
+  --ollama-base-url <url>            Ollama API base URL (default: http://localhost:11434)
+  --ollama-timeout-seconds <secs>    Max wall-clock time for the agent run (default: 900)
+  --help                             Show this help
+EOF
+}
+
+mode=""
+session=""
+worktree=""
+prompt_file=""
+runs_root=""
+adapter_id=""
+task_kind=""
+task_id=""
+env_prefix=""
+sandbox_subdir=".ollama-artifacts"
+reconcile_command=""
+ollama_model="${ACP_OLLAMA_MODEL:-${F_LOSNING_OLLAMA_MODEL:-qwen2.5-coder:7b}}"
+ollama_base_url="${ACP_OLLAMA_BASE_URL:-${F_LOSNING_OLLAMA_BASE_URL:-http://localhost:11434}}"
+ollama_timeout_seconds="${ACP_OLLAMA_TIMEOUT_SECONDS:-${F_LOSNING_OLLAMA_TIMEOUT_SECONDS:-900}}"
+declare -a context_items=()
+declare -a collect_files=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --mode) mode="${2:-}"; shift 2 ;;
+    --session) session="${2:-}"; shift 2 ;;
+    --worktree) worktree="${2:-}"; shift 2 ;;
+    --prompt-file) prompt_file="${2:-}"; shift 2 ;;
+    --runs-root) runs_root="${2:-}"; shift 2 ;;
+    --adapter-id) adapter_id="${2:-}"; shift 2 ;;
+    --task-kind) task_kind="${2:-}"; shift 2 ;;
+    --task-id) task_id="${2:-}"; shift 2 ;;
+    --env-prefix) env_prefix="${2:-}"; shift 2 ;;
+    --context) context_items+=("${2:-}"); shift 2 ;;
+    --collect-file) collect_files+=("${2:-}"); shift 2 ;;
+    --reconcile-command) reconcile_command="${2:-}"; shift 2 ;;
+    --sandbox-subdir) sandbox_subdir="${2:-}"; shift 2 ;;
+    --ollama-model) ollama_model="${2:-}"; shift 2 ;;
+    --ollama-base-url) ollama_base_url="${2:-}"; shift 2 ;;
+    --ollama-timeout-seconds) ollama_timeout_seconds="${2:-}"; shift 2 ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$mode" || -z "$session" || -z "$worktree" || -z "$prompt_file" || -z "$runs_root" || -z "$adapter_id" || -z "$task_kind" || -z "$task_id" ]]; then
+  usage >&2
+  exit 1
+fi
+
+case "$mode" in
+  safe|bypass) ;;
+  *)
+    echo "--mode must be safe or bypass" >&2
+    exit 1
+    ;;
+esac
+
+case "$ollama_timeout_seconds" in
+  ''|*[!0-9]*) echo "--ollama-timeout-seconds must be numeric" >&2; exit 1 ;;
+esac
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "agent-project-run-ollama-session: node is required but not found in PATH" >&2
+  exit 1
+fi
+
+artifact_dir="${runs_root}/${session}"
+output_file="${artifact_dir}/${session}.log"
+inner_script="${artifact_dir}/${session}.sh"
+meta_file="${artifact_dir}/run.env"
+result_file="${artifact_dir}/result.env"
+runner_state_file="${artifact_dir}/runner.env"
+sandbox_artifact_dir="${worktree%/}/${sandbox_subdir}"
+sandbox_run_dir="${worktree%/}/${sandbox_subdir}/${session}"
+retained_repo_root="${ACP_RETAINED_REPO_ROOT:-${F_LOSNING_RETAINED_REPO_ROOT:-}}"
+started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+mkdir -p "$artifact_dir"
+mkdir -p "$sandbox_run_dir"
+
+if tmux has-session -t "$session" 2>/dev/null; then
+  echo "tmux session already exists: $session" >&2
+  exit 1
+fi
+
+branch_name="$(git -C "$worktree" branch --show-current 2>/dev/null || true)"
+
+printf -v session_q '%q' "$session"
+printf -v task_kind_q '%q' "$task_kind"
+printf -v task_id_q '%q' "$task_id"
+printf -v mode_q '%q' "$mode"
+printf -v worktree_q '%q' "$worktree"
+printf -v prompt_q '%q' "$prompt_file"
+printf -v output_q '%q' "$output_file"
+printf -v artifact_dir_q '%q' "$artifact_dir"
+printf -v script_q '%q' "$inner_script"
+printf -v result_q '%q' "$result_file"
+printf -v meta_file_q '%q' "$meta_file"
+printf -v runner_state_q '%q' "$runner_state_file"
+printf -v branch_q '%q' "$branch_name"
+printf -v sandbox_artifact_dir_q '%q' "$sandbox_artifact_dir"
+printf -v sandbox_run_dir_q '%q' "$sandbox_run_dir"
+printf -v retained_repo_root_q '%q' "$retained_repo_root"
+printf -v adapter_id_q '%q' "$adapter_id"
+printf -v started_at_q '%q' "$started_at"
+printf -v ollama_model_q '%q' "$ollama_model"
+printf -v ollama_base_url_q '%q' "$ollama_base_url"
+printf -v ollama_timeout_q '%q' "$ollama_timeout_seconds"
+
+{
+  printf 'TASK_KIND=%s\n' "$task_kind_q"
+  printf 'TASK_ID=%s\n' "$task_id_q"
+  printf 'SESSION=%s\n' "$session_q"
+  printf 'MODE=%s\n' "$mode_q"
+  printf 'WORKTREE=%s\n' "$worktree_q"
+  printf 'PROMPT_FILE=%s\n' "$prompt_q"
+  printf 'OUTPUT_FILE=%s\n' "$output_q"
+  printf 'SCRIPT=%s\n' "$script_q"
+  printf 'BRANCH=%s\n' "$branch_q"
+  printf 'RESULT_FILE=%s\n' "$result_q"
+  printf 'RUNNER_STATE_FILE=%s\n' "$runner_state_q"
+  printf 'SANDBOX_RUN_DIR=%s\n' "$sandbox_run_dir_q"
+  printf 'ADAPTER_ID=%s\n' "$adapter_id_q"
+  printf 'STARTED_AT=%s\n' "$started_at_q"
+  printf 'OLLAMA_MODEL=%s\n' "$ollama_model_q"
+  printf 'OLLAMA_BASE_URL=%s\n' "$ollama_base_url_q"
+  printf 'OLLAMA_TIMEOUT_SECONDS=%s\n' "$ollama_timeout_q"
+} >"$meta_file"
+
+context_exports=""
+if ((${#context_items[@]} > 0)); then
+  for item in "${context_items[@]}"; do
+    if [[ "$item" != *=* ]]; then
+      echo "--context must use KEY=VALUE syntax: $item" >&2
+      exit 1
+    fi
+    key="${item%%=*}"
+    value="${item#*=}"
+    if [[ ! "$key" =~ ^[A-Z0-9_]+$ ]]; then
+      echo "Invalid context key: $key" >&2
+      exit 1
+    fi
+    printf -v value_q '%q' "$value"
+    printf '%s=%s\n' "$key" "$value_q" >>"$meta_file"
+    if [[ -n "$env_prefix" ]]; then
+      context_exports+="export ${env_prefix}${key}=${value_q}"$'\n'
+    fi
+    context_exports+="export ACP_${key}=${value_q}"$'\n'
+    if [[ "$env_prefix" != "F_LOSNING_" ]]; then
+      context_exports+="export F_LOSNING_${key}=${value_q}"$'\n'
+    fi
+  done
+fi
+
+runtime_exports=$(
+  cat <<EOF
+export AGENT_PROJECT_SESSION=${session_q}
+export AGENT_PROJECT_RUN_DIR=${sandbox_run_dir_q}
+export AGENT_PROJECT_HOST_RUN_DIR=${artifact_dir_q}
+export AGENT_PROJECT_RESULT_FILE=${sandbox_run_dir_q}/result.env
+export AGENT_PROJECT_RETAINED_REPO_ROOT=${retained_repo_root_q}
+export ACP_SESSION=${session_q}
+export ACP_RUN_DIR=${sandbox_run_dir_q}
+export ACP_HOST_RUN_DIR=${artifact_dir_q}
+export ACP_RESULT_FILE=${sandbox_run_dir_q}/result.env
+export ACP_RETAINED_REPO_ROOT=${retained_repo_root_q}
+export F_LOSNING_SESSION=${session_q}
+export F_LOSNING_RUN_DIR=${sandbox_run_dir_q}
+export F_LOSNING_HOST_RUN_DIR=${artifact_dir_q}
+export F_LOSNING_RESULT_FILE=${sandbox_run_dir_q}/result.env
+export F_LOSNING_RETAINED_REPO_ROOT=${retained_repo_root_q}
+EOF
+)
+
+if [[ -n "$env_prefix" ]]; then
+  runtime_exports+=$'\n'
+  runtime_exports+=$(cat <<EOF
+export ${env_prefix}SESSION=${session_q}
+export ${env_prefix}RUN_DIR=${sandbox_run_dir_q}
+export ${env_prefix}HOST_RUN_DIR=${artifact_dir_q}
+export ${env_prefix}RESULT_FILE=${sandbox_run_dir_q}/result.env
+EOF
+)
+fi
+
+collect_copy_snippet=""
+if ((${#collect_files[@]} > 0)); then
+  for artifact_name in "${collect_files[@]}"; do
+    [[ -z "$artifact_name" ]] && continue
+    printf -v artifact_q '%q' "$artifact_name"
+    collect_copy_snippet+=$(
+      cat <<EOF
+if [[ -f ${sandbox_run_dir_q}/${artifact_q} ]]; then
+  cp ${sandbox_run_dir_q}/${artifact_q} ${artifact_dir_q}/${artifact_q}
+fi
+EOF
+    )
+    collect_copy_snippet+=$'\n'
+  done
+fi
+
+reconcile_snippet=""
+if [[ -n "$reconcile_command" ]]; then
+  printf -v delayed_reconcile_q '%q' "export ACP_EXPECTED_RUN_STARTED_AT=${started_at_q}; export F_LOSNING_EXPECTED_RUN_STARTED_AT=${started_at_q}; while tmux has-session -t ${session_q} 2>/dev/null; do sleep 1; done; sleep 2; $reconcile_command"
+  reconcile_snippet="nohup bash -lc ${delayed_reconcile_q} >> ${output_q} 2>&1 </dev/null &"
+fi
+
+cat >"$inner_script" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+${runtime_exports}
+${context_exports}cd ${worktree_q}
+
+runner_state_file=${runner_state_q}
+output_file=${output_q}
+sandbox_artifact_dir=${sandbox_artifact_dir_q}
+sandbox_run_dir=${sandbox_run_dir_q}
+retained_repo_root=${retained_repo_root_q}
+artifact_dir=${artifact_dir_q}
+run_dir=${artifact_dir_q}
+task_kind=${task_kind_q}
+worktree=${worktree_q}
+prompt_file_path=${prompt_q}
+ollama_model=${ollama_model_q}
+ollama_base_url=${ollama_base_url_q}
+ollama_timeout=${ollama_timeout_q}
+
+write_state() {
+  local runner_state="\${1:?runner state required}"
+  local last_exit_code="\${2:-}"
+  local failure_reason="\${3:-}"
+  local updated_at tmp_file
+
+  updated_at="\$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  tmp_file="\${runner_state_file}.tmp.\$\$"
+  {
+    printf 'RUNNER_STATE=%q\n' "\${runner_state}"
+    printf 'ATTEMPT=1\n'
+    printf 'RESUME_COUNT=0\n'
+    printf 'LAST_EXIT_CODE=%q\n' "\${last_exit_code}"
+    printf 'LAST_FAILURE_REASON=%q\n' "\${failure_reason}"
+    printf 'LAST_TRIGGER_REASON=%q\n' ''
+    printf 'AUTH_WAIT_STARTED_AT=%q\n' ''
+    printf 'UPDATED_AT=%q\n' "\${updated_at}"
+  } >"\${tmp_file}"
+  mv "\${tmp_file}" "\${runner_state_file}"
+}
+
+record_final_git_state() {
+  local final_head final_branch tmp_file
+
+  final_head="\$(git -C ${worktree_q} rev-parse HEAD 2>/dev/null || true)"
+  final_branch="\$(git -C ${worktree_q} branch --show-current 2>/dev/null || true)"
+  tmp_file=${meta_file_q}.tmp.final.$$
+  grep -vE '^(FINAL_HEAD|FINAL_BRANCH)=' ${meta_file_q} >"\${tmp_file}" 2>/dev/null || true
+  {
+    printf 'FINAL_HEAD=%q\n' "\${final_head}"
+    printf 'FINAL_BRANCH=%q\n' "\${final_branch}"
+  } >>"\${tmp_file}"
+  mv "\${tmp_file}" ${meta_file_q}
+}
+
+write_state "running" "" ""
+mkdir -p "\${sandbox_run_dir}"
+
+exit_code=0
+failure_reason=""
+
+node - <<'AGENT_EOF'
+const fs = require('node:fs');
+const path = require('node:path');
+const { execSync } = require('node:child_process');
+
+const worktree = process.env.ACP_WORKTREE || process.cwd();
+const runDir = process.env.ACP_RUN_DIR || process.env.AGENT_PROJECT_RUN_DIR;
+const promptFilePath = process.env.ACP_PROMPT_FILE;
+const ollamaBaseUrl = (process.env.ACP_OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '');
+const ollamaModel = process.env.ACP_OLLAMA_MODEL || 'qwen2.5-coder:7b';
+const ollamaTimeoutMs = Number(process.env.ACP_OLLAMA_TIMEOUT_SECONDS || '900') * 1000;
+const resultFile = process.env.ACP_RESULT_FILE;
+const maxIterations = 30;
+
+function writeResult(status, reason) {
+  if (!resultFile) return;
+  const content = [
+    \`STATUS=\${status}\`,
+    reason ? \`FAILURE_REASON=\${reason}\` : '',
+  ].filter(Boolean).join('\n') + '\n';
+  fs.writeFileSync(resultFile, content);
+}
+
+async function ollamaChat(messages, tools) {
+  const body = JSON.stringify({
+    model: ollamaModel,
+    messages,
+    tools: tools || undefined,
+    stream: false,
+  });
+
+  const url = new URL('/api/chat', ollamaBaseUrl);
+  const { default: https } = await import(url.protocol === 'https:' ? 'node:https' : 'node:http');
+
+  return new Promise((resolve, reject) => {
+    const deadline = setTimeout(() => reject(new Error('ollama request timed out')), Math.min(ollamaTimeoutMs, 120_000));
+    const req = https.request(
+      { hostname: url.hostname, port: url.port || (url.protocol === 'https:' ? 443 : 80), path: url.pathname, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          clearTimeout(deadline);
+          try { resolve(JSON.parse(data)); } catch (e) { reject(new Error(\`failed to parse ollama response: \${e.message}\`)); }
+        });
+      }
+    );
+    req.on('error', (e) => { clearTimeout(deadline); reject(e); });
+    req.write(body);
+    req.end();
+  });
+}
+
+const tools = [
+  {
+    type: 'function',
+    function: {
+      name: 'read_file',
+      description: 'Read the contents of a file in the worktree.',
+      parameters: {
+        type: 'object',
+        properties: { path: { type: 'string', description: 'File path relative to worktree root.' } },
+        required: ['path'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'write_file',
+      description: 'Write or overwrite a file in the worktree with the given content.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'File path relative to worktree root.' },
+          content: { type: 'string', description: 'Full content to write.' },
+        },
+        required: ['path', 'content'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'run_command',
+      description: 'Run a shell command in the worktree directory. Use for git, tests, or inspecting state.',
+      parameters: {
+        type: 'object',
+        properties: { command: { type: 'string', description: 'Shell command to execute.' } },
+        required: ['command'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_directory',
+      description: 'List files and directories at the given path.',
+      parameters: {
+        type: 'object',
+        properties: { path: { type: 'string', description: 'Directory path relative to worktree root. Defaults to root.' } },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'task_complete',
+      description: 'Signal that the task is done. Provide a summary of what was accomplished.',
+      parameters: {
+        type: 'object',
+        properties: { summary: { type: 'string', description: 'Summary of changes made.' } },
+        required: ['summary'],
+      },
+    },
+  },
+];
+
+function executeTool(name, args) {
+  try {
+    if (name === 'read_file') {
+      const abs = path.resolve(worktree, args.path);
+      if (!abs.startsWith(worktree + path.sep) && abs !== worktree) throw new Error('path outside worktree');
+      return fs.readFileSync(abs, 'utf8');
+    }
+    if (name === 'write_file') {
+      const abs = path.resolve(worktree, args.path);
+      if (!abs.startsWith(worktree + path.sep) && abs !== worktree) throw new Error('path outside worktree');
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, args.content, 'utf8');
+      return \`wrote \${args.path}\`;
+    }
+    if (name === 'run_command') {
+      const out = execSync(args.command, { cwd: worktree, timeout: 60_000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      return out || '(no output)';
+    }
+    if (name === 'list_directory') {
+      const abs = path.resolve(worktree, args.path || '.');
+      if (!abs.startsWith(worktree + path.sep) && abs !== worktree) throw new Error('path outside worktree');
+      return fs.readdirSync(abs).join('\n');
+    }
+    if (name === 'task_complete') {
+      return '__TASK_COMPLETE__';
+    }
+    return \`unknown tool: \${name}\`;
+  } catch (err) {
+    return \`error: \${err.message}\`;
+  }
+}
+
+async function main() {
+  const prompt = promptFilePath ? fs.readFileSync(promptFilePath, 'utf8') : '';
+  const messages = [
+    {
+      role: 'system',
+      content: 'You are an autonomous coding agent. You have access to tools to read/write files and run commands in the repository. Complete the task described by the user. When done, call task_complete with a summary.',
+    },
+    { role: 'user', content: prompt },
+  ];
+
+  const deadline = Date.now() + ollamaTimeoutMs;
+  let taskDone = false;
+  let summary = '';
+
+  for (let i = 0; i < maxIterations; i++) {
+    if (Date.now() > deadline) {
+      writeResult('failure', 'timeout');
+      process.stderr.write('ollama agent: timeout reached\n');
+      process.exit(1);
+    }
+
+    let response;
+    try {
+      response = await ollamaChat(messages, tools);
+    } catch (err) {
+      writeResult('failure', \`ollama-api-error: \${err.message}\`);
+      process.stderr.write(\`ollama agent: API error: \${err.message}\n\`);
+      process.exit(1);
+    }
+
+    const msg = response?.message;
+    if (!msg) {
+      writeResult('failure', 'empty-response');
+      process.stderr.write('ollama agent: empty response from model\n');
+      process.exit(1);
+    }
+
+    messages.push(msg);
+
+    if (msg.content) {
+      process.stdout.write(\`[agent] \${msg.content}\n\`);
+    }
+
+    const toolCalls = msg.tool_calls || [];
+    if (toolCalls.length === 0) {
+      // No tool calls — model finished without task_complete
+      taskDone = true;
+      summary = msg.content || '(no summary)';
+      break;
+    }
+
+    for (const call of toolCalls) {
+      const name = call?.function?.name || '';
+      const args = call?.function?.arguments || {};
+      const parsedArgs = typeof args === 'string' ? JSON.parse(args) : args;
+      process.stdout.write(\`[tool] \${name}(\${JSON.stringify(parsedArgs)})\n\`);
+      const result = executeTool(name, parsedArgs);
+      if (result === '__TASK_COMPLETE__') {
+        taskDone = true;
+        summary = parsedArgs.summary || '(task complete)';
+      }
+      messages.push({ role: 'tool', content: String(result), name });
+    }
+
+    if (taskDone) break;
+  }
+
+  // Write issue-comment.md with summary
+  if (runDir && summary) {
+    fs.mkdirSync(runDir, { recursive: true });
+    fs.writeFileSync(path.join(runDir, 'issue-comment.md'), \`## Ollama Agent Summary\n\n\${summary}\n\`);
+  }
+
+  writeResult('success', '');
+  process.stdout.write('[agent] task complete\n');
+}
+
+main().catch((err) => {
+  process.stderr.write(\`ollama agent: unhandled error: \${err.message}\n\`);
+  writeResult('failure', \`unhandled-error: \${err.message}\`);
+  process.exit(1);
+});
+AGENT_EOF
+exit_code=\$?
+
+if [[ \${exit_code} -ne 0 ]]; then
+  failure_reason="agent-exit-\${exit_code}"
+  write_state "failed" "\${exit_code}" "\${failure_reason}"
+  if [[ ! -f "\${sandbox_run_dir}/result.env" ]]; then
+    printf 'STATUS=failure\nFAILURE_REASON=%s\n' "\${failure_reason}" >"\${sandbox_run_dir}/result.env"
+  fi
+else
+  write_state "completed" "0" ""
+  if [[ ! -f "\${sandbox_run_dir}/result.env" ]]; then
+    printf 'STATUS=success\n' >"\${sandbox_run_dir}/result.env"
+  fi
+fi
+
+record_final_git_state
+${collect_copy_snippet}
+EOF
+
+chmod +x "$inner_script"
+
+${reconcile_snippet}
+
+tmux new-session -d -s "$session" \
+  "bash ${script_q} 2>&1 | tee ${output_q}; tmux wait-for -S ${session_q}-done" \; \
+  wait-for "${session}-done"
