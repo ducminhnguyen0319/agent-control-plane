@@ -54,8 +54,9 @@ for hook_name in "${optional_hooks[@]}"; do
   fi
 done
 
-ledger_dir="${state_root}/merged-pr-catchup"
-mkdir -p "$ledger_dir"
+merged_ledger_dir="${state_root}/merged-pr-catchup"
+closed_ledger_dir="${state_root}/closed-pr-catchup"
+mkdir -p "$merged_ledger_dir" "$closed_ledger_dir"
 
 get_pr_risk_json() {
   local pr_number="${1:?pr number required}"
@@ -92,13 +93,88 @@ close_issue_if_needed() {
   fi
 }
 
+process_terminal_pr() {
+  local pr_number="${1:?pr number required}"
+  local linked_issue_id="${2:-}"
+  local merged_at="${3:-}"
+  local processed_state="${4:?processed state required}"
+  local ledger_dir=""
+  local ledger_file=""
+
+  case "$processed_state" in
+    merged) ledger_dir="$merged_ledger_dir" ;;
+    closed) ledger_dir="$closed_ledger_dir" ;;
+    *)
+      echo "unsupported terminal PR state: ${processed_state}" >&2
+      return 1
+      ;;
+  esac
+
+  ledger_file="${ledger_dir}/${pr_number}.env"
+  if [[ -f "$ledger_file" ]]; then
+    return 0
+  fi
+
+  PR_NUMBER="$pr_number" pr_clear_retry || true
+  if [[ "$processed_state" == "merged" ]]; then
+    close_issue_if_needed "$pr_number" "$linked_issue_id"
+    if ! PR_NUMBER="$pr_number" pr_after_merged "$pr_number"; then
+      printf 'CATCHUP_FAILED_PR=%s\n' "$pr_number" >&2
+      return 1
+    fi
+  else
+    if ! PR_NUMBER="$pr_number" pr_after_closed "$pr_number"; then
+      printf 'CATCHUP_FAILED_CLOSED_PR=%s\n' "$pr_number" >&2
+      return 1
+    fi
+  fi
+
+  if ! PR_NUMBER="$pr_number" pr_cleanup_merged_residue "$pr_number"; then
+    printf 'CATCHUP_FAILED_RESIDUE=%s\n' "$pr_number" >&2
+    return 1
+  fi
+
+  {
+    printf 'PR_NUMBER=%s\n' "$pr_number"
+    printf 'ISSUE_ID=%s\n' "$linked_issue_id"
+    printf 'PR_STATE=%s\n' "$processed_state"
+    printf 'MERGED_AT=%s\n' "$merged_at"
+    printf 'PROCESSED_AT=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  } >"$ledger_file"
+
+  if [[ "$processed_state" == "merged" ]]; then
+    printf 'CATCHUP_MERGED_PR=%s\n' "$pr_number"
+  else
+    printf 'CATCHUP_CLOSED_PR=%s\n' "$pr_number"
+  fi
+}
+
 merged_prs_json="$(flow_github_pr_list_json "$repo_slug" merged "$limit")"
+closed_prs_json="$(flow_github_pr_list_json "$repo_slug" closed "$limit")"
 
 while IFS= read -r pr_number; do
   [[ -n "$pr_number" ]] || continue
 
-  ledger_file="${ledger_dir}/${pr_number}.env"
-  if [[ -f "$ledger_file" ]]; then
+  risk_json="$(get_pr_risk_json "$pr_number" 2>/dev/null || true)"
+  if [[ -z "$risk_json" ]]; then
+    continue
+  fi
+
+  is_managed="$(jq -r '.isManagedByAgent // .isAgentBranch // false' <<<"$risk_json" 2>/dev/null || printf 'false\n')"
+  if [[ "$is_managed" != "true" ]]; then
+    continue
+  fi
+
+  linked_issue_id="$(jq -r '.linkedIssueId // empty' <<<"$risk_json" 2>/dev/null || true)"
+  merged_at="$(jq -r --arg pr "$pr_number" 'map(select((.number | tostring) == $pr)) | .[0].mergedAt // ""' <<<"$merged_prs_json")"
+  process_terminal_pr "$pr_number" "$linked_issue_id" "$merged_at" merged || true
+done < <(jq -r 'sort_by(.mergedAt) | reverse | .[].number' <<<"$merged_prs_json")
+
+while IFS= read -r pr_number; do
+  [[ -n "$pr_number" ]] || continue
+
+  merged_at="$(jq -r --arg pr "$pr_number" 'map(select((.number | tostring) == $pr)) | .[0].mergedAt // ""' <<<"$closed_prs_json")"
+  if [[ -n "$merged_at" ]]; then
     continue
   fi
 
@@ -113,25 +189,5 @@ while IFS= read -r pr_number; do
   fi
 
   linked_issue_id="$(jq -r '.linkedIssueId // empty' <<<"$risk_json" 2>/dev/null || true)"
-  merged_at="$(jq -r --arg pr "$pr_number" 'map(select((.number | tostring) == $pr)) | .[0].mergedAt // ""' <<<"$merged_prs_json")"
-
-  PR_NUMBER="$pr_number" pr_clear_retry || true
-  close_issue_if_needed "$pr_number" "$linked_issue_id"
-  if ! PR_NUMBER="$pr_number" pr_after_merged "$pr_number"; then
-    printf 'CATCHUP_FAILED_PR=%s\n' "$pr_number" >&2
-    continue
-  fi
-  if ! PR_NUMBER="$pr_number" pr_cleanup_merged_residue "$pr_number"; then
-    printf 'CATCHUP_FAILED_RESIDUE=%s\n' "$pr_number" >&2
-    continue
-  fi
-
-  {
-    printf 'PR_NUMBER=%s\n' "$pr_number"
-    printf 'ISSUE_ID=%s\n' "$linked_issue_id"
-    printf 'MERGED_AT=%s\n' "$merged_at"
-    printf 'PROCESSED_AT=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-  } >"$ledger_file"
-
-  printf 'CATCHUP_MERGED_PR=%s\n' "$pr_number"
-done < <(jq -r 'sort_by(.mergedAt) | reverse | .[].number' <<<"$merged_prs_json")
+  process_terminal_pr "$pr_number" "$linked_issue_id" "" closed || true
+done < <(jq -r 'sort_by(.createdAt) | reverse | .[].number' <<<"$closed_prs_json")
