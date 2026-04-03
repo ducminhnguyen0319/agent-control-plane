@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-project-catch-up-scheduled-issue-retries --repo-slug <owner/repo> --state-root <path> --hook-file <path> [--limit <n>]
+
+Clear stale retry state for recurring scheduled reporting issues once GitHub
+already reflects the latest terminal status via labels and the issue is not
+currently running.
+EOF
+}
+
+repo_slug=""
+state_root=""
+hook_file=""
+limit="100"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo-slug) repo_slug="${2:-}"; shift 2 ;;
+    --state-root) state_root="${2:-}"; shift 2 ;;
+    --hook-file) hook_file="${2:-}"; shift 2 ;;
+    --limit) limit="${2:-}"; shift 2 ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$repo_slug" || -z "$state_root" || -z "$hook_file" ]]; then
+  usage >&2
+  exit 1
+fi
+
+if [[ ! -f "$hook_file" ]]; then
+  echo "missing hook file: $hook_file" >&2
+  exit 1
+fi
+
+# shellcheck source=/dev/null
+source "$hook_file"
+
+if ! declare -F issue_clear_retry >/dev/null 2>&1; then
+  issue_clear_retry() { :; }
+fi
+
+ledger_dir="${state_root}/scheduled-issue-retry-catchup"
+retry_dir="${state_root}/retries/issues"
+mkdir -p "$ledger_dir" "$retry_dir"
+
+issue_has_terminal_scheduled_status() {
+  local issue_json="${1:-}"
+  ISSUE_JSON="$issue_json" python3 - <<'PY'
+import json
+import os
+import re
+import sys
+
+issue = json.loads(os.environ.get("ISSUE_JSON", "{}") or "{}")
+state = (issue.get("state") or "").upper()
+labels = {str(item.get("name") or "") for item in (issue.get("labels") or [])}
+body = issue.get("body") or ""
+
+has_schedule = bool(re.search(r'^\s*(?:Agent schedule|Schedule|Cadence)\s*:\s*(?:every\s+)?\d+\s*[mhd]\s*$', body, re.I | re.M))
+if not has_schedule and "agent-scheduled" not in labels:
+    sys.exit(1)
+
+if state != "OPEN":
+    sys.exit(1)
+
+if "agent-running" in labels:
+    sys.exit(1)
+
+terminal_status_labels = {
+    "health-ok",
+    "health-not-ok",
+    "checks-ok",
+    "checks-not-ok",
+    "smoke-ok",
+    "smoke-not-ok",
+}
+if not (labels & terminal_status_labels):
+    sys.exit(1)
+
+sys.exit(0)
+PY
+}
+
+processed=0
+for retry_file in "$retry_dir"/*.env; do
+  [[ -f "$retry_file" ]] || continue
+  if [[ "$processed" -ge "$limit" ]]; then
+    break
+  fi
+
+  issue_id="$(basename "${retry_file%.env}")"
+  [[ -n "$issue_id" ]] || continue
+
+  ledger_file="${ledger_dir}/${issue_id}.env"
+  if [[ -f "$ledger_file" ]]; then
+    continue
+  fi
+
+  issue_json="$(flow_github_issue_view_json "$repo_slug" "$issue_id" 2>/dev/null || true)"
+  [[ -n "$issue_json" && "$issue_json" != "{}" ]] || continue
+
+  if ! issue_has_terminal_scheduled_status "$issue_json"; then
+    continue
+  fi
+
+  retry_reason="$(awk -F= '/^LAST_REASON=/{print $2; exit}' "$retry_file" 2>/dev/null | tr -d '\r' || true)"
+  ISSUE_ID="$issue_id" issue_clear_retry || true
+
+  {
+    printf 'ISSUE_ID=%s\n' "$issue_id"
+    printf 'LAST_REASON=%s\n' "$retry_reason"
+    printf 'PROCESSED_AT=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  } >"$ledger_file"
+
+  printf 'CATCHUP_SCHEDULED_ISSUE=%s\n' "$issue_id"
+  processed=$((processed + 1))
+done

@@ -610,3 +610,22 @@ else
   fi
   printf '[%s] linked-pr issue catchup end status=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "${linked_issue_catchup_status}"
 fi
+
+printf '[%s] scheduled-issue retry catchup start\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+if run_with_timeout "${CATCHUP_TIMEOUT_SECONDS}" \
+  env \
+    ACP_RUNS_ROOT="$RUNS_ROOT" \
+    F_LOSNING_RUNS_ROOT="$RUNS_ROOT" \
+    bash "${FLOW_TOOLS_DIR}/agent-project-catch-up-scheduled-issue-retries" \
+      --repo-slug "$REPO_SLUG" \
+      --state-root "$STATE_ROOT" \
+      --hook-file "$HOOK_FILE" \
+      --limit 100; then
+  printf '[%s] scheduled-issue retry catchup end status=0\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+else
+  scheduled_issue_catchup_status=$?
+  if [[ "${scheduled_issue_catchup_status}" -eq 124 ]]; then
+    printf 'SCHEDULED_ISSUE_CATCHUP_TIMEOUT=yes\n'
+  fi
+  printf '[%s] scheduled-issue retry catchup end status=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "${scheduled_issue_catchup_status}"
+fi
