@@ -70,8 +70,8 @@ resolve_backend() {
     return 0
   fi
 
-  if [[ -n "${ACP_CODING_WORKER:-${F_LOSNING_CODING_WORKER:-}}" ]]; then
-    printf '%s\n' "${ACP_CODING_WORKER:-${F_LOSNING_CODING_WORKER:-}}"
+  if [[ -n "${ACP_CODING_WORKER:-}" ]]; then
+    printf '%s\n' "${ACP_CODING_WORKER:-}"
     return 0
   fi
 

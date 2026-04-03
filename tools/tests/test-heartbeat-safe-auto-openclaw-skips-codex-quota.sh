@@ -111,7 +111,7 @@ chmod +x \
 PATH="$bin_dir:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin" \
 SHARED_AGENT_HOME="$shared_home" \
 ACP_PROFILE_REGISTRY_ROOT="$profile_home" \
-F_LOSNING_CODING_WORKER="openclaw" \
+ACP_CODING_WORKER="openclaw" \
 F_LOSNING_AGENT_ROOT="$agent_root" \
 F_LOSNING_RUNS_ROOT="$agent_root/runs" \
 F_LOSNING_STATE_ROOT="$agent_root/state" \

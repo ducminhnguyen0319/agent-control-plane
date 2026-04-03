@@ -23,7 +23,7 @@ AGENT_PR_PREFIXES_JSON="$(flow_managed_pr_prefixes_json "${CONFIG_YAML}")"
 AGENT_PR_ISSUE_CAPTURE_REGEX="$(flow_managed_issue_branch_regex "${CONFIG_YAML}")"
 AGENT_PR_HANDOFF_LABEL="${AGENT_PR_HANDOFF_LABEL:-agent-handoff}"
 AGENT_EXCLUSIVE_LABEL="${AGENT_EXCLUSIVE_LABEL:-agent-exclusive}"
-CODING_WORKER="${ACP_CODING_WORKER:-${F_LOSNING_CODING_WORKER:-codex}}"
+CODING_WORKER="${ACP_CODING_WORKER:-codex}"
 HEARTBEAT_ISSUE_JSON_CACHE_DIR="${TMPDIR:-/tmp}/heartbeat-issue-json.$$"
 
 heartbeat_issue_retry_state_file() {

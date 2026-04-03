@@ -2044,7 +2044,7 @@ flow_export_execution_env() {
   repo_id="$(flow_resolve_repo_id "${config_file}")"
   provider_quota_cooldowns="$(flow_resolve_provider_quota_cooldowns "${config_file}")"
   provider_pool_order="$(flow_resolve_provider_pool_order "${config_file}")"
-  explicit_coding_worker="${ACP_CODING_WORKER:-${F_LOSNING_CODING_WORKER:-}}"
+  explicit_coding_worker="${ACP_CODING_WORKER:-}"
   if [[ -z "${explicit_coding_worker}" && -n "${provider_pool_order}" ]]; then
     provider_pool_selection="$(flow_selected_provider_pool_env "${config_file}" || true)"
   fi
@@ -2077,7 +2077,7 @@ flow_export_execution_env() {
     if [[ -n "${explicit_coding_worker}" ]]; then
       active_provider_selection_reason="env-override"
     fi
-    coding_worker="$(flow_env_or_config "${config_file}" "ACP_CODING_WORKER F_LOSNING_CODING_WORKER" "execution.coding_worker" "")"
+    coding_worker="$(flow_env_or_config "${config_file}" "ACP_CODING_WORKER" "execution.coding_worker" "")"
     safe_profile="$(flow_env_or_config "${config_file}" "ACP_CODEX_PROFILE_SAFE F_LOSNING_CODEX_PROFILE_SAFE" "execution.safe_profile" "")"
     bypass_profile="$(flow_env_or_config "${config_file}" "ACP_CODEX_PROFILE_BYPASS F_LOSNING_CODEX_PROFILE_BYPASS" "execution.bypass_profile" "")"
     claude_model="$(flow_env_or_config "${config_file}" "ACP_CLAUDE_MODEL F_LOSNING_CLAUDE_MODEL" "execution.claude.model" "")"
@@ -2093,7 +2093,6 @@ flow_export_execution_env() {
   fi
 
   if [[ -n "${coding_worker}" ]]; then
-    export F_LOSNING_CODING_WORKER="${coding_worker}"
     export ACP_CODING_WORKER="${coding_worker}"
   fi
   if [[ -n "${repo_id}" ]]; then

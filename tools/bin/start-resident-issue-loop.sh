@@ -29,7 +29,7 @@ PENDING_LAUNCH_DIR="${ACP_PENDING_LAUNCH_DIR:-${F_LOSNING_PENDING_LAUNCH_DIR:-${
 SCHEDULED_STATE_DIR="${STATE_ROOT}/scheduled-issues"
 CONTROLLER_FILE="$(flow_resident_issue_controller_file "${CONFIG_YAML}" "${ISSUE_ID}")"
 RESIDENT_META_FILE="$(flow_resident_issue_meta_file "${CONFIG_YAML}" "${ISSUE_ID}")"
-CODING_WORKER="${ACP_CODING_WORKER:-${F_LOSNING_CODING_WORKER:-codex}}"
+CODING_WORKER="${ACP_CODING_WORKER:-codex}"
 MAX_IMMEDIATE_CYCLES="$(flow_resident_issue_controller_max_immediate_cycles "${CONFIG_YAML}")"
 POLL_SECONDS="$(flow_resident_issue_controller_poll_seconds "${CONFIG_YAML}")"
 IDLE_TIMEOUT_SECONDS="$(flow_resident_issue_controller_idle_timeout_seconds "${CONFIG_YAML}")"
@@ -192,7 +192,7 @@ issue_id_is_scheduled() {
 
 controller_refresh_execution_context() {
   unset \
-    ACP_CODING_WORKER F_LOSNING_CODING_WORKER \
+    ACP_CODING_WORKER \
     ACP_CODEX_PROFILE_SAFE F_LOSNING_CODEX_PROFILE_SAFE \
     ACP_CODEX_PROFILE_BYPASS F_LOSNING_CODEX_PROFILE_BYPASS \
     ACP_CLAUDE_MODEL F_LOSNING_CLAUDE_MODEL \
@@ -216,7 +216,7 @@ controller_refresh_execution_context() {
     ACP_PROVIDER_POOL_LAST_REASON F_LOSNING_PROVIDER_POOL_LAST_REASON
   flow_export_execution_env "${CONFIG_YAML}"
   flow_export_project_env_aliases
-  CODING_WORKER="${ACP_CODING_WORKER:-${F_LOSNING_CODING_WORKER:-codex}}"
+  CODING_WORKER="${ACP_CODING_WORKER:-codex}"
   controller_capture_active_provider_context
 }
 
@@ -544,7 +544,7 @@ controller_provider_state() {
 
   provider_state="$(
     env \
-      -u ACP_CODING_WORKER -u F_LOSNING_CODING_WORKER \
+      -u ACP_CODING_WORKER \
       -u ACP_CODEX_PROFILE_SAFE -u F_LOSNING_CODEX_PROFILE_SAFE \
       -u ACP_CODEX_PROFILE_BYPASS -u F_LOSNING_CODEX_PROFILE_BYPASS \
       -u ACP_CLAUDE_MODEL -u F_LOSNING_CLAUDE_MODEL \
