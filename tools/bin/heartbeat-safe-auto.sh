@@ -17,6 +17,8 @@ flow_export_execution_env "${CONFIG_YAML}"
 AGENT_ROOT="$(flow_resolve_agent_root "${CONFIG_YAML}")"
 RUNS_ROOT="$(flow_resolve_runs_root "${CONFIG_YAML}")"
 STATE_ROOT="$(flow_resolve_state_root "${CONFIG_YAML}")"
+HISTORY_ROOT="$(flow_resolve_history_root "${CONFIG_YAML}")"
+WORKTREE_ROOT="$(flow_resolve_worktree_root "${CONFIG_YAML}")"
 MEMORY_DIR="${ACP_MEMORY_DIR:-${F_LOSNING_MEMORY_DIR:-${AGENT_CONTROL_PLANE_WORKSPACE:-$HOME/.agent-runtime/control-plane/workspace}/memory}}"
 REPO_SLUG="$(flow_resolve_repo_slug "${CONFIG_YAML}")"
 MAX_CONCURRENT_WORKERS="${ACP_MAX_CONCURRENT_WORKERS:-${F_LOSNING_MAX_CONCURRENT_WORKERS:-20}}"
@@ -70,6 +72,8 @@ SHARED_LOOP_PID_FILE="${STATE_ROOT}/shared-heartbeat-loop.pid"
 SHARED_LOOP_STATUS_FILE="${STATE_ROOT}/shared-heartbeat-loop.env"
 QUOTA_LOCK_DIR="${STATE_ROOT}/quota-preflight.lock"
 QUOTA_PID_FILE="${QUOTA_LOCK_DIR}/pid"
+
+mkdir -p "${AGENT_ROOT}" "${RUNS_ROOT}" "${STATE_ROOT}" "${HISTORY_ROOT}" "${WORKTREE_ROOT}" "${MEMORY_DIR}"
 
 acquire_lock() {
   mkdir -p "${STATE_ROOT}"
