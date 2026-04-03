@@ -1474,6 +1474,23 @@ async function maybeRunFinalSetupFixups(options, scopedContext, config, currentS
     console.log(`- ${issue}`);
   }
 
+  // Always show actionable hints so operators know what to fix,
+  // even when running non-interactively (--yes / --json / CI).
+  if (!currentState.prereq.coreToolsOk) {
+    const missing = currentState.prereq.missingRequired.join(", ");
+    console.log(`  Fix: install missing core tools (${missing})`);
+  }
+  if (!currentState.prereq.workerAvailable) {
+    const worker = currentState.prereq.workerCommand;
+    if (worker === "codex") console.log("  Fix: npm install -g @openai/codex && codex login");
+    else if (worker === "openclaw") console.log("  Fix: npm install -g openclaw && openclaw setup");
+    else if (worker === "claude") console.log("  Fix: npm install -g @anthropic-ai/claude-code && claude auth login");
+    else console.log(`  Fix: install ${worker} and add it to PATH`);
+  }
+  if (!currentState.prereq.ghAuthOk) {
+    console.log("  Fix: run gh auth login");
+  }
+
   if (!options.interactive) {
     return {
       status: "skipped",
