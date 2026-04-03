@@ -123,6 +123,35 @@ PR_FILES_TEXT="$(jq -r '.files[] | "- " + .' <<<"$RISK_JSON")"
 PR_REPO_ROOT="$(flow_resolve_repo_root "${CONFIG_YAML}")"
 PR_DEPENDENCY_SOURCE_ROOT="${ACP_DEPENDENCY_SOURCE_ROOT:-${F_LOSNING_DEPENDENCY_SOURCE_ROOT:-$PR_REPO_ROOT}}"
 
+render_pr_context_reads_text() {
+  local repo_root="${1:?repo root required}"
+  local -a candidate_paths=(
+    "${repo_root}/AGENTS.md"
+    "${repo_root}/openspec/AGENT_RULES.md"
+    "${repo_root}/openspec/AGENTS.md"
+    "${repo_root}/openspec/project.md"
+    "${repo_root}/openspec/CONVENTIONS.md"
+    "${repo_root}/docs/TESTING_AND_SEED_POLICY.md"
+  )
+  local -a existing_paths=()
+  local candidate_path=""
+
+  for candidate_path in "${candidate_paths[@]}"; do
+    if [[ -f "${candidate_path}" ]]; then
+      existing_paths+=("${candidate_path}")
+    fi
+  done
+
+  if [[ "${#existing_paths[@]}" -eq 0 ]]; then
+    printf '%s\n' '- No repo-specific context files were found under the expected AGENTS/OpenSpec/testing-doc locations; rely on the current diff and nearby source.'
+    return 0
+  fi
+
+  printf '%s\n' "${existing_paths[@]}" | sed 's/^/- `/' | sed 's/$/`/'
+}
+
+PR_CONTEXT_READS_TEXT="$(render_pr_context_reads_text "${PR_REPO_ROOT}")"
+
 case "$PR_AGENT_LANE" in
   double-check-1)
     PR_REVIEW_STAGE_TEXT="Independent agent double-check 1 of 2. A clean pass should advance this PR to the second review pass, not merge it yet."
@@ -157,6 +186,7 @@ PR_CHECKS_BYPASSED="$PR_CHECKS_BYPASSED" \
 PR_MERGE_STATE_STATUS="$PR_MERGE_STATE_STATUS" \
 PR_CHECKS_TEXT="$PR_CHECKS_TEXT" \
 PR_FILES_TEXT="$PR_FILES_TEXT" \
+PR_CONTEXT_READS_TEXT="$PR_CONTEXT_READS_TEXT" \
 PR_REPO_ROOT="$PR_REPO_ROOT" \
 PR_DEPENDENCY_SOURCE_ROOT="$PR_DEPENDENCY_SOURCE_ROOT" \
 REPO_SLUG="$REPO_SLUG" \
@@ -183,6 +213,7 @@ const replacements = {
   '{PR_MERGE_STATE_STATUS}': process.env.PR_MERGE_STATE_STATUS || '',
   '{PR_CHECKS_TEXT}': process.env.PR_CHECKS_TEXT || '',
   '{PR_FILES_TEXT}': process.env.PR_FILES_TEXT || '',
+  '{PR_CONTEXT_READS_TEXT}': process.env.PR_CONTEXT_READS_TEXT || '',
   '{REPO_ROOT}': process.env.PR_REPO_ROOT || '',
   '{DEPENDENCY_SOURCE_ROOT}': process.env.PR_DEPENDENCY_SOURCE_ROOT || '',
 };

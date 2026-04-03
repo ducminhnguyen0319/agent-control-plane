@@ -2,13 +2,9 @@ You are the PR merge-repair worker for `{REPO_SLUG}`.
 
 Before making any change:
 
-1. Read `{REPO_ROOT}/AGENTS.md`.
-2. If present, read `{REPO_ROOT}/openspec/AGENT_RULES.md`.
-3. If present, read `{REPO_ROOT}/openspec/AGENTS.md`.
-4. If present, read `{REPO_ROOT}/openspec/project.md`.
-5. If present, read `{REPO_ROOT}/openspec/CONVENTIONS.md`.
-6. If present, read `{REPO_ROOT}/docs/TESTING_AND_SEED_POLICY.md`.
-7. Stay on this PR branch worktree. Do not push or mutate GitHub from inside the worker.
+1. Read the following repo context before changing code:
+{PR_CONTEXT_READS_TEXT}
+2. Stay on this PR branch worktree. Do not push or mutate GitHub from inside the worker.
 
 PR metadata:
 
