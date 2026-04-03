@@ -207,7 +207,10 @@ sync_tree_rsync() {
   local target_dir="${2:?target dir required}"
   [[ -d "${source_dir}" ]] || return 0
   mkdir -p "${target_dir}"
-  rsync -a --delete --exclude='.git/' "${source_dir}/" "${target_dir}/"
+  if rsync -a --delete --exclude='.git/' "${source_dir}/" "${target_dir}/"; then
+    return 0
+  fi
+  sync_tree_copy_mode "${source_dir}" "${target_dir}"
 }
 
 reset_runtime_skill_targets() {

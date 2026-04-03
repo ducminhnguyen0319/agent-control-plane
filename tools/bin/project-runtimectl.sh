@@ -197,6 +197,13 @@ sync_stamp_value() {
     | sed -e "s/^'//" -e "s/'$//"
 }
 
+shared_loop_status_value() {
+  local key="${1:?key required}"
+  local file="${STATE_ROOT}/shared-heartbeat-loop.env"
+  [[ -f "${file}" ]] || return 1
+  awk -F= -v target="${key}" '$1 == target {print $2; exit}' "${file}" 2>/dev/null
+}
+
 tmux_session_exists() {
   local session="${1:-}"
   [[ -n "${TMUX_BIN}" && -n "${session}" ]] || return 1
@@ -386,6 +393,10 @@ print_status() {
   local runtime_sync_status=""
   local runtime_sync_updated_at=""
   local runtime_sync_fingerprint=""
+  local shared_loop_state=""
+  local shared_loop_last_status=""
+  local shared_loop_started_at=""
+  local shared_loop_updated_at=""
 
   heartbeat="$(heartbeat_pid)"
   shared_loop="$(shared_loop_pid)"
@@ -412,6 +423,10 @@ print_status() {
   runtime_sync_status="$(sync_stamp_value "SYNC_STATUS" || true)"
   runtime_sync_updated_at="$(sync_stamp_value "UPDATED_AT" || true)"
   runtime_sync_fingerprint="$(sync_stamp_value "SOURCE_FINGERPRINT" || true)"
+  shared_loop_state="$(shared_loop_status_value "STATE" || true)"
+  shared_loop_last_status="$(shared_loop_status_value "STATUS" || true)"
+  shared_loop_started_at="$(shared_loop_status_value "STARTED_AT" || true)"
+  shared_loop_updated_at="$(shared_loop_status_value "UPDATED_AT" || true)"
 
   printf 'PROFILE_ID=%s\n' "${PROFILE_ID}"
   printf 'CONFIG_YAML=%s\n' "${CONFIG_YAML}"
@@ -425,6 +440,10 @@ print_status() {
   printf 'HEARTBEAT_PID=%s\n' "${heartbeat}"
   printf 'HEARTBEAT_PARENT_PID=%s\n' "${heartbeat_parent}"
   printf 'SHARED_LOOP_PID=%s\n' "${shared_loop}"
+  printf 'SHARED_LOOP_STATE=%s\n' "${shared_loop_state}"
+  printf 'SHARED_LOOP_LAST_STATUS=%s\n' "${shared_loop_last_status}"
+  printf 'SHARED_LOOP_STARTED_AT=%s\n' "${shared_loop_started_at}"
+  printf 'SHARED_LOOP_UPDATED_AT=%s\n' "${shared_loop_updated_at}"
   printf 'SUPERVISOR_PID=%s\n' "${supervisor}"
   printf 'CONTROLLER_COUNT=%s\n' "${controller_count}"
   printf 'ACTIVE_TMUX_SESSION_COUNT=%s\n' "${active_session_count}"

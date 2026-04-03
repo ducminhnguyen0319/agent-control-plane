@@ -67,6 +67,7 @@ AGENT_WORKTREE_AUDIT_TIMEOUT_SECONDS="${ACP_AGENT_WORKTREE_AUDIT_TIMEOUT_SECONDS
 LOCK_DIR="${STATE_ROOT}/heartbeat-loop.lock"
 PID_FILE="${LOCK_DIR}/pid"
 SHARED_LOOP_PID_FILE="${STATE_ROOT}/shared-heartbeat-loop.pid"
+SHARED_LOOP_STATUS_FILE="${STATE_ROOT}/shared-heartbeat-loop.env"
 QUOTA_LOCK_DIR="${STATE_ROOT}/quota-preflight.lock"
 QUOTA_PID_FILE="${QUOTA_LOCK_DIR}/pid"
 
@@ -122,6 +123,29 @@ acquire_quota_lock() {
 
 release_quota_lock() {
   rm -rf "${QUOTA_LOCK_DIR}"
+}
+
+write_shared_loop_status() {
+  local state="${1:-}"
+  local status="${2:-}"
+  local timestamp=""
+  local tmp_file=""
+
+  timestamp="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  mkdir -p "${STATE_ROOT}"
+  tmp_file="$(mktemp)"
+  if [[ -f "${SHARED_LOOP_STATUS_FILE}" ]]; then
+    grep -Ev '^(STATE|STATUS|STARTED_AT|UPDATED_AT)=' "${SHARED_LOOP_STATUS_FILE}" >"${tmp_file}" || true
+  fi
+  printf 'STATE=%s\n' "${state}" >>"${tmp_file}"
+  if [[ -n "${status}" ]]; then
+    printf 'STATUS=%s\n' "${status}" >>"${tmp_file}"
+  fi
+  if [[ "${state}" == "running" ]]; then
+    printf 'STARTED_AT=%s\n' "${timestamp}" >>"${tmp_file}"
+  fi
+  printf 'UPDATED_AT=%s\n' "${timestamp}" >>"${tmp_file}"
+  mv "${tmp_file}" "${SHARED_LOOP_STATUS_FILE}"
 }
 
 run_with_timeout() {
@@ -530,6 +554,7 @@ fi
 derive_dynamic_limits
 
 printf '[%s] shared heartbeat loop start\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+write_shared_loop_status "running" ""
   if ACP_TIMEOUT_CHILD_PID_FILE="${SHARED_LOOP_PID_FILE}" \
   F_LOSNING_TIMEOUT_CHILD_PID_FILE="${SHARED_LOOP_PID_FILE}" \
   run_with_timeout "${HEARTBEAT_LOOP_TIMEOUT_SECONDS}" \
@@ -563,9 +588,11 @@ printf '[%s] shared heartbeat loop start\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
       --heavy-running-label "E2E_ISSUE" \
       --heavy-deferred-key "E2E_DEFERRED" \
       --heavy-deferred-message "E2E-heavy issues remain queued until the single e2e slot is free."; then
+  write_shared_loop_status "idle" "0"
   printf '[%s] shared heartbeat loop end status=0\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 else
   loop_status=$?
+  write_shared_loop_status "idle" "${loop_status}"
   if [[ "${loop_status}" -eq 124 ]]; then
     printf 'HEARTBEAT_LOOP_TIMEOUT=yes\n'
   fi
