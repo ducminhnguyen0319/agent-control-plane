@@ -553,6 +553,31 @@ classify_pr_blocked_runtime_reason() {
     return 0
   fi
 
+  if [[ -f "$session_log_file" ]] && grep -Eiq 'no-codex-output-before-stall-threshold|no-codex-progress-before-stall-threshold' "$session_log_file" 2>/dev/null; then
+    printf 'codex-stalled\n'
+    return 0
+  fi
+
+  if [[ -f "$session_log_file" ]] && grep -Eiq 'no-agent-output-before-stall-threshold|no-agent-progress-before-stall-threshold' "$session_log_file" 2>/dev/null; then
+    printf 'agent-stalled\n'
+    return 0
+  fi
+
+  if [[ -f "$session_log_file" ]] && grep -Eiq 'provider-quota-limit|quota.*exhausted|rate.limit.*exceeded' "$session_log_file" 2>/dev/null; then
+    printf 'provider-quota-limit\n'
+    return 0
+  fi
+
+  if [[ -f "$pr_comment_file" ]] && grep -Eiq 'no-codex-output-before-stall-threshold|no-codex-progress-before-stall-threshold' "$pr_comment_file" 2>/dev/null; then
+    printf 'codex-stalled\n'
+    return 0
+  fi
+
+  if [[ -f "$pr_comment_file" ]] && grep -Eiq 'no-agent-output-before-stall-threshold|no-agent-progress-before-stall-threshold' "$pr_comment_file" 2>/dev/null; then
+    printf 'agent-stalled\n'
+    return 0
+  fi
+
   return 1
 }
 
