@@ -123,17 +123,7 @@ See [ROADMAP.md](./ROADMAP.md) for the fuller public roadmap.
 
 ## See It Running
 
-The dashboard media below is rendered from a real local ACP demo fixture using
-`bash tools/bin/render-dashboard-demo-media.sh`.
-
 ![ACP dashboard demo screenshot](./assets/readme/dashboard-demo.png)
-
-<details>
-<summary>Animated dashboard walkthrough</summary>
-
-![ACP dashboard demo walkthrough](./assets/readme/dashboard-demo.gif)
-
-</details>
 
 ## Architecture
 
@@ -217,7 +207,6 @@ system.
 | `tmux` | yes | ACP runs long-lived worker sessions and captures status through `tmux`. | If `tmux` is missing, background worker workflows will not launch. |
 | Worker CLI: `codex`, `claude`, or `openclaw` | depends on backend | The actual coding worker for a profile. | You only need the backend you plan to choose via `--coding-worker`. Authenticate that backend before starting recurring or background runs. |
 | Bundled `codex-quota` plus ACP quota manager | automatic for Codex profiles | Improves Codex quota-aware failover and health signals. | ACP now ships a maintained `codex-quota` fork and a first-party manager script for Codex worker flows. You only need an external install if you intentionally override `ACP_CODEX_QUOTA_BIN` or `ACP_CODEX_QUOTA_MANAGER_SCRIPT`. |
-| `playwright` and `ffmpeg` | maintainer-only | Regenerate the README dashboard screenshot and GIF. | Needed for `bash tools/bin/render-dashboard-demo-media.sh`, not for everyday ACP use. |
 
 Before you start background runtimes, make sure `gh` and whichever worker
 backend you plan to use are already authenticated for the same OS user.
