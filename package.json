@@ -1,6 +1,6 @@
 {
   "name": "agent-control-plane",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "description": "Help a repo keep GitHub-driven coding agents running reliably without constant human babysitting",
   "homepage": "https://github.com/ducminhnguyen0319/agent-control-plane",
   "bugs": {
