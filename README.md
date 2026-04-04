@@ -94,7 +94,7 @@ it had a supervisor."
 | Get real value out of free-tier models | Quota cooldowns, stall detection, provider failover, and retry backoff that free-tier models need to be actually useful |
 | Manage multiple repos cleanly | One profile per repo with isolated runtime state, each with its own identity and status |
 | Observe what is happening without digging through files | Dashboard and `runtime status` that show the real state without spelunking through `tmux` or temp folders |
-| Compare worker backends on real workloads | Swap between `codex`, `claude`, and `openclaw` without rebuilding your runtime habits |
+| Compare worker backends on real workloads | Swap between `codex`, `claude`, `openclaw`, and `ollama` without rebuilding your runtime habits |
 | Run reproducible agent research cheaply | Cost-controlled execution harness for studying agent behavior, output quality, or prompting strategies |
 | Enforce safety by architecture, not by hope | Launch limits, reconcile gates, and cooldowns that are built into the runtime, not left to chance |
 
@@ -130,18 +130,58 @@ Windows.
 | `codex` | Production-ready | Full ACP workflow support today. |
 | `claude` | Production-ready | Full ACP workflow support today. |
 | `openclaw` | Production-ready | Full ACP workflow support, including resident-style runs. |
+| `ollama` | Experimental | Working adapter with Node.js agentic loop. Runs any model served by a local Ollama instance. Output quality depends on model size — 7–9B models handle exploration well but struggle with complex multi-step tasks. |
 | `opencode` | Scaffolded | Routing and docs in place; live execution not yet implemented. |
 | `kilo` | Scaffolded | Routing and docs in place; live execution not yet implemented. |
 | `gemini-cli` | Roadmap | Strong future candidate; not wired into ACP yet. |
-| `ollama` | Research | Candidate local-model substrate for future ACP integrations. |
 | `nanoclaw` | Exploratory | Ecosystem reference for containerized and WSL2-friendly workflows. |
 | `picoclaw` | Exploratory | Ecosystem reference for lightweight Linux and edge-style runtimes. |
 
 If you are trying ACP on a real repo right now, start with `codex`, `claude`,
-or `openclaw`. The other entries show the direction of travel, not finished
-support.
+or `openclaw`. Use `ollama` to run local models — useful for research, offline
+workflows, or comparing local model output against cloud backends without
+incurring API costs. The remaining entries show the direction of travel, not
+finished support.
 
 See [ROADMAP.md](./ROADMAP.md) for the fuller public roadmap.
+
+### Using Ollama (local models)
+
+To run ACP with a local model via [Ollama](https://ollama.com):
+
+```bash
+# 1. Install Ollama and pull a model
+ollama pull qwen3.5:9b
+
+# 2. Init a profile with ollama backend
+npx agent-control-plane@latest init \
+  --profile-id my-repo \
+  --repo-slug owner/my-repo \
+  --repo-root ~/src/my-repo \
+  --agent-root ~/.agent-runtime/projects/my-repo \
+  --worktree-root ~/src/my-repo-worktrees \
+  --coding-worker ollama
+
+# 3. Configure the model in your profile YAML
+#    ~/.agent-runtime/control-plane/profiles/my-repo/control-plane.yaml
+#
+#    execution:
+#      coding_worker: "ollama"
+#      ollama:
+#        model: "qwen3.5:9b"
+#        base_url: "http://localhost:11434"
+#        timeout_seconds: 900
+```
+
+The Ollama adapter runs a Node.js agentic loop that calls the Ollama API with
+tool-use support. It handles both native tool-call responses and models that
+return tool calls as JSON text in the content field.
+
+**Model guidance:** Models in the 7–14B range can explore codebases and run
+commands, but may struggle with complex multi-step repair tasks. Larger models
+(27B+) produce significantly better results if your hardware supports them.
+Thinking mode is disabled by default (`think: false`) and context is set to
+32K tokens to balance speed and capability.
 
 ## See It Running
 
@@ -231,6 +271,7 @@ system.
 | `python3` | yes | Powers the dashboard server, snapshot renderer, and config helpers. | Required for both dashboard use and several internal scripts. |
 | `tmux` | yes | Runs long-lived worker sessions and captures their status. | Missing `tmux` means background worker workflows will not launch. |
 | Worker CLI (`codex`, `claude`, or `openclaw`) | depends on backend | The actual coding agent for a profile. | Install and authenticate the backend you plan to use before starting background runs. |
+| `ollama` | for `ollama` backend | Serves local models via OpenAI-compatible API at `http://localhost:11434`. | Install from [ollama.com](https://ollama.com) and pull a model (e.g. `ollama pull qwen3.5:9b`) before starting a profile with `--coding-worker ollama`. |
 | Bundled `codex-quota` + ACP quota manager | automatic for Codex | Quota-aware failover and health signals for Codex profiles. | Bundled by default. Override with `ACP_CODEX_QUOTA_BIN` only if you have a custom setup. |
 
 Make sure `gh` and your chosen worker backend are both authenticated for the
@@ -325,7 +366,7 @@ npx agent-control-plane@latest init \
 | `--repo-root` | Path to your local checkout |
 | `--agent-root` | Where ACP keeps per-project runtime state |
 | `--worktree-root` | Where ACP places repo worktrees |
-| `--coding-worker` | Backend to orchestrate (`codex`, `claude`, or `openclaw`) |
+| `--coding-worker` | Backend to orchestrate (`codex`, `claude`, `openclaw`, or `ollama`) |
 
 **4. Validate before trusting it**
 
