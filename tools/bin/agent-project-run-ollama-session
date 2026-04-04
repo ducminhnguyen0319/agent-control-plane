@@ -421,16 +421,31 @@ const tools = [
   },
 ];
 
+const retainedRepoRoot = (process.env.ACP_RETAINED_REPO_ROOT || '').replace(/\/$/, '');
+
+function isAllowedPath(abs) {
+  const sep = path.sep;
+  if (abs === worktree || abs.startsWith(worktree + sep)) return true;
+  if (retainedRepoRoot && (abs === retainedRepoRoot || abs.startsWith(retainedRepoRoot + sep))) return true;
+  return false;
+}
+
+function resolvePath(p) {
+  // Absolute paths are used as-is; relative paths resolve against worktree
+  return path.isAbsolute(p) ? p : path.resolve(worktree, p);
+}
+
 function executeTool(name, args) {
   try {
     if (name === 'read_file') {
-      const abs = path.resolve(worktree, args.path);
-      if (!abs.startsWith(worktree + path.sep) && abs !== worktree) throw new Error('path outside worktree');
+      const abs = resolvePath(args.path);
+      if (!isAllowedPath(abs)) throw new Error('path outside worktree');
       return fs.readFileSync(abs, 'utf8');
     }
     if (name === 'write_file') {
-      const abs = path.resolve(worktree, args.path);
-      if (!abs.startsWith(worktree + path.sep) && abs !== worktree) throw new Error('path outside worktree');
+      // Writes only allowed in worktree (not retained read-only root)
+      const abs = resolvePath(args.path);
+      if (abs !== worktree && !abs.startsWith(worktree + path.sep)) throw new Error('path outside worktree');
       fs.mkdirSync(path.dirname(abs), { recursive: true });
       fs.writeFileSync(abs, args.content, 'utf8');
       return \`wrote \${args.path}\`;
@@ -440,8 +455,8 @@ function executeTool(name, args) {
       return out || '(no output)';
     }
     if (name === 'list_directory') {
-      const abs = path.resolve(worktree, args.path || '.');
-      if (!abs.startsWith(worktree + path.sep) && abs !== worktree) throw new Error('path outside worktree');
+      const abs = resolvePath(args.path || '.');
+      if (!isAllowedPath(abs)) throw new Error('path outside worktree');
       return fs.readdirSync(abs).join('\n');
     }
     if (name === 'task_complete') {
