@@ -76,18 +76,17 @@ printf -v CONFIG_YAML_Q '%q' "$CONFIG_YAML"
 printf -v ADAPTER_ID_Q '%q' "$ADAPTER_ID"
 RECONCILE_ENV_PREFIX="ACP_PROJECT_ID=${ADAPTER_ID_Q} AGENT_PROJECT_ID=${ADAPTER_ID_Q} AGENT_CONTROL_PLANE_CONFIG=${CONFIG_YAML_Q} ACP_CONFIG=${CONFIG_YAML_Q}"
 
-# Resolve reconcile scripts through file symlinks so the path remains valid
-# after the materialized skills surface is cleaned up post-heartbeat.
-_resolve_real_path() {
-  local p="${1:-}"
-  [[ -n "$p" ]] || return 1
-  if command -v python3 >/dev/null 2>&1; then
-    python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$p" 2>/dev/null && return
-  fi
-  printf '%s\n' "$p"
-}
-RECONCILE_ISSUE_BIN="$(_resolve_real_path "${WORKSPACE_DIR}/bin/reconcile-issue-worker.sh")"
-RECONCILE_PR_BIN="$(_resolve_real_path "${WORKSPACE_DIR}/bin/reconcile-pr-worker.sh")"
+# The materialized skills surface is cleaned up after each heartbeat cycle.
+# Reconcile runs post-tmux via nohup, after the skills dir is gone.
+# Use the permanent runtime-home/tools/bin path derived from AGENT_PLATFORM_HOME.
+_runtime_tools_bin="${AGENT_PLATFORM_HOME:-${HOME}/.agent-runtime}/runtime-home/tools/bin"
+if [[ -f "${_runtime_tools_bin}/reconcile-pr-worker.sh" ]]; then
+  RECONCILE_ISSUE_BIN="${_runtime_tools_bin}/reconcile-issue-worker.sh"
+  RECONCILE_PR_BIN="${_runtime_tools_bin}/reconcile-pr-worker.sh"
+else
+  RECONCILE_ISSUE_BIN="${WORKSPACE_DIR}/bin/reconcile-issue-worker.sh"
+  RECONCILE_PR_BIN="${WORKSPACE_DIR}/bin/reconcile-pr-worker.sh"
+fi
 
 case "$SESSION" in
   "${ISSUE_SESSION_PREFIX}"*)
