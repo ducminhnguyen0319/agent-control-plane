@@ -10,7 +10,7 @@ SESSION="${2:?usage: run-codex-task.sh MODE SESSION WORKTREE PROMPT_FILE}"
 WORKTREE="${3:?usage: run-codex-task.sh MODE SESSION WORKTREE PROMPT_FILE}"
 PROMPT_FILE="${4:?usage: run-codex-task.sh MODE SESSION WORKTREE PROMPT_FILE}"
 
-WORKSPACE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+WORKSPACE_DIR="$(cd "$(dirname "$0")" && cd -P .. && pwd)"
 CONFIG_YAML="$(resolve_flow_config_yaml "${BASH_SOURCE[0]}")"
 flow_export_execution_env "${CONFIG_YAML}"
 flow_export_project_env_aliases
