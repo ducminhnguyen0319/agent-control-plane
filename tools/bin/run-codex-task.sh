@@ -10,7 +10,7 @@ SESSION="${2:?usage: run-codex-task.sh MODE SESSION WORKTREE PROMPT_FILE}"
 WORKTREE="${3:?usage: run-codex-task.sh MODE SESSION WORKTREE PROMPT_FILE}"
 PROMPT_FILE="${4:?usage: run-codex-task.sh MODE SESSION WORKTREE PROMPT_FILE}"
 
-WORKSPACE_DIR="$(cd "$(dirname "$0")" && cd -P .. && pwd)"
+WORKSPACE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIG_YAML="$(resolve_flow_config_yaml "${BASH_SOURCE[0]}")"
 flow_export_execution_env "${CONFIG_YAML}"
 flow_export_project_env_aliases
@@ -76,18 +76,31 @@ printf -v CONFIG_YAML_Q '%q' "$CONFIG_YAML"
 printf -v ADAPTER_ID_Q '%q' "$ADAPTER_ID"
 RECONCILE_ENV_PREFIX="ACP_PROJECT_ID=${ADAPTER_ID_Q} AGENT_PROJECT_ID=${ADAPTER_ID_Q} AGENT_CONTROL_PLANE_CONFIG=${CONFIG_YAML_Q} ACP_CONFIG=${CONFIG_YAML_Q}"
 
+# Resolve reconcile scripts through file symlinks so the path remains valid
+# after the materialized skills surface is cleaned up post-heartbeat.
+_resolve_real_path() {
+  local p="${1:-}"
+  [[ -n "$p" ]] || return 1
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$p" 2>/dev/null && return
+  fi
+  printf '%s\n' "$p"
+}
+RECONCILE_ISSUE_BIN="$(_resolve_real_path "${WORKSPACE_DIR}/bin/reconcile-issue-worker.sh")"
+RECONCILE_PR_BIN="$(_resolve_real_path "${WORKSPACE_DIR}/bin/reconcile-pr-worker.sh")"
+
 case "$SESSION" in
   "${ISSUE_SESSION_PREFIX}"*)
     TASK_KIND="issue"
     TASK_ID="${ISSUE_ID:-${SESSION#${ISSUE_SESSION_PREFIX}}}"
     if [[ "${RESIDENT_WORKER_ENABLED}" != "yes" ]]; then
-      RECONCILE_COMMAND="${RECONCILE_ENV_PREFIX} ${WORKSPACE_DIR}/bin/reconcile-issue-worker.sh ${SESSION_Q}"
+      RECONCILE_COMMAND="${RECONCILE_ENV_PREFIX} ${RECONCILE_ISSUE_BIN} ${SESSION_Q}"
     fi
     ;;
   "${PR_SESSION_PREFIX}"*)
     TASK_KIND="pr"
     TASK_ID="${PR_NUMBER:-${SESSION#${PR_SESSION_PREFIX}}}"
-    RECONCILE_COMMAND="${RECONCILE_ENV_PREFIX} ${WORKSPACE_DIR}/bin/reconcile-pr-worker.sh ${SESSION_Q}"
+    RECONCILE_COMMAND="${RECONCILE_ENV_PREFIX} ${RECONCILE_PR_BIN} ${SESSION_Q}"
     ;;
 esac
 
