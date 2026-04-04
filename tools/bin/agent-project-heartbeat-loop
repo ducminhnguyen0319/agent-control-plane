@@ -1482,9 +1482,13 @@ sync_open_agent_issues() {
         --session "${issue_prefix}${issue_id}"
     )"
     status="$(awk -F= '/^STATUS=/{print $2}' <<<"$status_out")"
-    if [[ "$status" == "UNKNOWN" ]]; then
-      heartbeat_sync_issue_labels "$issue_id" >/dev/null || true
-    fi
+    case "$status" in
+      RUNNING)
+        ;;
+      *)
+        heartbeat_sync_issue_labels "$issue_id" >/dev/null || true
+        ;;
+    esac
   done <<<"$running_issue_ids_cache"
 }
 

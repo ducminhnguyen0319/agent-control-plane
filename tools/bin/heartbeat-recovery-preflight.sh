@@ -80,6 +80,7 @@ run_preflight_test "heartbeat-no-tmux-sessions" "${TEST_DIR}/test-heartbeat-safe
 run_preflight_test "heartbeat-static-capacity-without-quota-cache" "${TEST_DIR}/test-heartbeat-safe-auto-static-capacity-without-quota-cache.sh"
 run_preflight_test "heartbeat-openclaw-skips-codex-quota" "${TEST_DIR}/test-heartbeat-safe-auto-openclaw-skips-codex-quota.sh"
 run_preflight_test "heartbeat-empty-schedule-label-sync" "${TEST_DIR}/test-heartbeat-sync-issue-labels-empty-schedule.sh"
+run_preflight_test "heartbeat-open-issue-terminal-sync" "${TEST_DIR}/test-heartbeat-sync-open-agent-issues-terminal-clears-running.sh"
 run_preflight_test "heartbeat-open-pr-terminal-sync" "${TEST_DIR}/test-heartbeat-sync-open-agent-prs-terminal-clears-running.sh"
 run_preflight_test "heartbeat-pr-launch-dedup" "${TEST_DIR}/test-heartbeat-loop-pr-launch-dedup.sh"
 run_preflight_test "heartbeat-auth-wait-capacity" "${TEST_DIR}/test-heartbeat-loop-auth-wait-does-not-consume-capacity.sh"

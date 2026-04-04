@@ -331,13 +331,15 @@ async function ollamaChat(messages, tools) {
     messages,
     tools: tools || undefined,
     stream: false,
+    think: false,
+    options: { num_ctx: 32768 },
   });
 
   const url = new URL('/api/chat', ollamaBaseUrl);
   const { default: https } = await import(url.protocol === 'https:' ? 'node:https' : 'node:http');
 
   return new Promise((resolve, reject) => {
-    const deadline = setTimeout(() => reject(new Error('ollama request timed out')), Math.min(ollamaTimeoutMs, 120_000));
+    const deadline = setTimeout(() => reject(new Error('ollama request timed out')), Math.min(ollamaTimeoutMs, 300_000));
     const req = https.request(
       { hostname: url.hostname, port: url.port || (url.protocol === 'https:' ? 443 : 80), path: url.pathname, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } },
       (res) => {
@@ -481,6 +483,9 @@ async function main() {
   const deadline = Date.now() + ollamaTimeoutMs;
   let taskDone = false;
   let summary = '';
+  let lastToolSig = '';
+  let repeatCount = 0;
+  const toolHistory = []; // sliding window for cycle detection
 
   for (let i = 0; i < maxIterations; i++) {
     if (Date.now() > deadline) {
@@ -558,6 +563,33 @@ async function main() {
       const args = call?.function?.arguments || {};
       const parsedArgs = typeof args === 'string' ? JSON.parse(args) : args;
       process.stdout.write(\`[tool] \${name}(\${JSON.stringify(parsedArgs)})\n\`);
+
+      // Detect repetitive tool calls (stuck loop guard)
+      const sig = \`\${name}:\${JSON.stringify(parsedArgs)}\`;
+      if (sig === lastToolSig) {
+        repeatCount++;
+        if (repeatCount >= 3) {
+          process.stdout.write('[agent] stuck in repetitive loop, aborting\n');
+          writeResult('failure', 'stuck-loop');
+          process.exit(1);
+        }
+      } else {
+        lastToolSig = sig;
+        repeatCount = 0;
+      }
+      // Cycle detection: abort if last 6 tool sigs appeared in same order before
+      toolHistory.push(sig);
+      const W = 6;
+      if (toolHistory.length >= W * 2) {
+        const recent = toolHistory.slice(-W).join('|');
+        const prev = toolHistory.slice(-W * 2, -W).join('|');
+        if (recent === prev) {
+          process.stdout.write('[agent] detected repeating cycle, aborting\n');
+          writeResult('failure', 'stuck-cycle');
+          process.exit(1);
+        }
+      }
+
       const result = executeTool(name, parsedArgs);
       if (result === '__TASK_COMPLETE__') {
         taskDone = true;
