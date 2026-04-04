@@ -17,7 +17,7 @@ Options:
   --collect-file <name>             Copy sandbox artifact file into the host run dir after execution
   --reconcile-command <cmd>         Host-side command queued after the worker exits
   --sandbox-subdir <name>           Subdir under the worktree for worker artifacts (default: .pi-artifacts)
-  --pi-model <id>                   Model ID for pi (e.g. openrouter/qwen/qwen3.6-plus-preview:free)
+  --pi-model <id>                   Model ID for pi (e.g. openrouter/qwen/qwen3.6-plus:free)
   --pi-thinking <level>             Thinking level: off, minimal, low, medium, high, xhigh (default: low)
   --pi-timeout-seconds <secs>       Hard timeout in seconds (default: 900)
   --pi-stall-seconds <secs>         Abort if no output for this long, 0 disables (default: 300)
@@ -36,7 +36,7 @@ task_id=""
 env_prefix=""
 sandbox_subdir=".pi-artifacts"
 reconcile_command=""
-pi_model="${ACP_PI_MODEL:-${F_LOSNING_PI_MODEL:-openrouter/qwen/qwen3.6-plus-preview:free}}"
+pi_model="${ACP_PI_MODEL:-${F_LOSNING_PI_MODEL:-openrouter/qwen/qwen3.6-plus:free}}"
 pi_thinking="${ACP_PI_THINKING:-${F_LOSNING_PI_THINKING:-low}}"
 pi_timeout_seconds="${ACP_PI_TIMEOUT_SECONDS:-${F_LOSNING_PI_TIMEOUT_SECONDS:-900}}"
 pi_stall_seconds="${ACP_PI_STALL_SECONDS:-${F_LOSNING_PI_STALL_SECONDS:-300}}"
@@ -364,12 +364,38 @@ mkdir -p "\${sandbox_run_dir}"
 # --thinking: reasoning depth
 # @prompt_file: pass prompt as file reference
 pi_exit_code=0
-timeout "\${pi_timeout_seconds}" \\
+# macOS does not ship 'timeout'; prefer it when available, else use background watchdog
+if command -v timeout >/dev/null 2>&1; then
+  timeout "\${pi_timeout_seconds}" \\
+    "\${pi_bin}" --print --no-session \\
+      --model "\${pi_model}" \\
+      --thinking "\${pi_thinking}" \\
+      "@\${prompt_file}" \\
+    2>&1 | tee -a "\${output_file}" || pi_exit_code=\$?
+elif command -v gtimeout >/dev/null 2>&1; then
+  gtimeout "\${pi_timeout_seconds}" \\
+    "\${pi_bin}" --print --no-session \\
+      --model "\${pi_model}" \\
+      --thinking "\${pi_thinking}" \\
+      "@\${prompt_file}" \\
+    2>&1 | tee -a "\${output_file}" || pi_exit_code=\$?
+else
   "\${pi_bin}" --print --no-session \\
     --model "\${pi_model}" \\
     --thinking "\${pi_thinking}" \\
     "@\${prompt_file}" \\
-  2>&1 | tee -a "\${output_file}" || pi_exit_code=\$?
+    2>&1 >> "\${output_file}" &
+  _pi_bgpid=\$!
+  ( sleep "\${pi_timeout_seconds}" && kill "\${_pi_bgpid}" 2>/dev/null \\
+      && printf '[pi] timed out after %s seconds\n' "\${pi_timeout_seconds}" >> "\${output_file}" ) &
+  _pi_watchdog=\$!
+  wait "\${_pi_bgpid}" || pi_exit_code=\$?
+  kill "\${_pi_watchdog}" 2>/dev/null || true
+  wait "\${_pi_watchdog}" 2>/dev/null || true
+  if [[ "\${pi_exit_code}" -eq 143 ]]; then
+    pi_exit_code=124
+  fi
+fi
 
 if [[ "\${pi_exit_code}" -eq 0 ]]; then
   write_result success
