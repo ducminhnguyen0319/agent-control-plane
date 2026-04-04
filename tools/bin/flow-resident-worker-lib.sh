@@ -118,7 +118,7 @@ flow_resident_issue_backend_supported() {
   local backend="${1:-}"
 
   case "${backend}" in
-    codex|openclaw|claude|ollama)
+    codex|openclaw|claude|ollama|pi)
       return 0
       ;;
     *)

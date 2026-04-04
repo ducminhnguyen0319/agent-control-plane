@@ -94,7 +94,7 @@ it had a supervisor."
 | Get real value out of free-tier models | Quota cooldowns, stall detection, provider failover, and retry backoff that free-tier models need to be actually useful |
 | Manage multiple repos cleanly | One profile per repo with isolated runtime state, each with its own identity and status |
 | Observe what is happening without digging through files | Dashboard and `runtime status` that show the real state without spelunking through `tmux` or temp folders |
-| Compare worker backends on real workloads | Swap between `codex`, `claude`, `openclaw`, and `ollama` without rebuilding your runtime habits |
+| Compare worker backends on real workloads | Swap between `codex`, `claude`, `openclaw`, `ollama`, and `pi` without rebuilding your runtime habits |
 | Run reproducible agent research cheaply | Cost-controlled execution harness for studying agent behavior, output quality, or prompting strategies |
 | Enforce safety by architecture, not by hope | Launch limits, reconcile gates, and cooldowns that are built into the runtime, not left to chance |
 
@@ -131,6 +131,7 @@ Windows.
 | `claude` | Production-ready | Full ACP workflow support today. |
 | `openclaw` | Production-ready | Full ACP workflow support, including resident-style runs. |
 | `ollama` | Experimental | Working adapter with Node.js agentic loop. Runs any model served by a local Ollama instance. Output quality depends on model size — 7–9B models handle exploration well but struggle with complex multi-step tasks. |
+| `pi` | Experimental | Working adapter using the [pi CLI](https://github.com/mariozechner/pi) in `--print --no-session` mode. Connects to any OpenRouter-compatible model. Useful as a lightweight alternative to openclaw for free-tier model testing. |
 | `opencode` | Scaffolded | Routing and docs in place; live execution not yet implemented. |
 | `kilo` | Scaffolded | Routing and docs in place; live execution not yet implemented. |
 | `gemini-cli` | Roadmap | Strong future candidate; not wired into ACP yet. |
@@ -140,7 +141,8 @@ Windows.
 If you are trying ACP on a real repo right now, start with `codex`, `claude`,
 or `openclaw`. Use `ollama` to run local models — useful for research, offline
 workflows, or comparing local model output against cloud backends without
-incurring API costs. The remaining entries show the direction of travel, not
+incurring API costs. Use `pi` to experiment with OpenRouter-hosted free-tier
+models via the pi CLI. The remaining entries show the direction of travel, not
 finished support.
 
 See [ROADMAP.md](./ROADMAP.md) for the fuller public roadmap.
@@ -272,6 +274,7 @@ system.
 | `tmux` | yes | Runs long-lived worker sessions and captures their status. | Missing `tmux` means background worker workflows will not launch. |
 | Worker CLI (`codex`, `claude`, or `openclaw`) | depends on backend | The actual coding agent for a profile. | Install and authenticate the backend you plan to use before starting background runs. |
 | `ollama` | for `ollama` backend | Serves local models via OpenAI-compatible API at `http://localhost:11434`. | Install from [ollama.com](https://ollama.com) and pull a model (e.g. `ollama pull qwen3.5:9b`) before starting a profile with `--coding-worker ollama`. |
+| `pi` CLI | for `pi` backend | Lightweight coding agent using OpenRouter-compatible APIs. Binary at `/opt/homebrew/bin/pi`. | Install via `npm i -g @mariozechner/pi-coding-agent`. Set `OPENROUTER_API_KEY` env var before use. |
 | Bundled `codex-quota` + ACP quota manager | automatic for Codex | Quota-aware failover and health signals for Codex profiles. | Bundled by default. Override with `ACP_CODEX_QUOTA_BIN` only if you have a custom setup. |
 
 Make sure `gh` and your chosen worker backend are both authenticated for the
@@ -366,7 +369,7 @@ npx agent-control-plane@latest init \
 | `--repo-root` | Path to your local checkout |
 | `--agent-root` | Where ACP keeps per-project runtime state |
 | `--worktree-root` | Where ACP places repo worktrees |
-| `--coding-worker` | Backend to orchestrate (`codex`, `claude`, `openclaw`, or `ollama`) |
+| `--coding-worker` | Backend to orchestrate (`codex`, `claude`, `openclaw`, `ollama`, or `pi`) |
 
 **4. Validate before trusting it**
 

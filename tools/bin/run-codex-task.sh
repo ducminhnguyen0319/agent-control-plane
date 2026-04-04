@@ -67,6 +67,10 @@ OPENCLAW_TIMEOUT_SECONDS="${OPENCLAW_TIMEOUT_SECONDS:-${ACP_OPENCLAW_TIMEOUT_SEC
 OLLAMA_MODEL="${ACP_OLLAMA_MODEL:-${F_LOSNING_OLLAMA_MODEL:-qwen2.5-coder:7b}}"
 OLLAMA_BASE_URL="${ACP_OLLAMA_BASE_URL:-${F_LOSNING_OLLAMA_BASE_URL:-http://localhost:11434}}"
 OLLAMA_TIMEOUT_SECONDS="${ACP_OLLAMA_TIMEOUT_SECONDS:-${F_LOSNING_OLLAMA_TIMEOUT_SECONDS:-900}}"
+PI_MODEL="${ACP_PI_MODEL:-${F_LOSNING_PI_MODEL:-openrouter/qwen/qwen3.6-plus-preview:free}}"
+PI_THINKING="${ACP_PI_THINKING:-${F_LOSNING_PI_THINKING:-low}}"
+PI_TIMEOUT_SECONDS="${ACP_PI_TIMEOUT_SECONDS:-${F_LOSNING_PI_TIMEOUT_SECONDS:-900}}"
+PI_STALL_SECONDS="${ACP_PI_STALL_SECONDS:-${F_LOSNING_PI_STALL_SECONDS:-300}}"
 printf -v SESSION_Q '%q' "$SESSION"
 printf -v CONFIG_YAML_Q '%q' "$CONFIG_YAML"
 printf -v ADAPTER_ID_Q '%q' "$ADAPTER_ID"
@@ -234,6 +238,15 @@ case "$CODING_WORKER" in
       --ollama-timeout-seconds "${OLLAMA_TIMEOUT_SECONDS}"
     )
     bash "${FLOW_TOOLS_DIR}/agent-project-run-ollama-session" "${ARGS[@]}"
+    ;;
+  pi)
+    ARGS+=(
+      --pi-model "${PI_MODEL}"
+      --pi-thinking "${PI_THINKING}"
+      --pi-timeout-seconds "${PI_TIMEOUT_SECONDS}"
+      --pi-stall-seconds "${PI_STALL_SECONDS}"
+    )
+    bash "${FLOW_TOOLS_DIR}/agent-project-run-pi-session" "${ARGS[@]}"
     ;;
   *)
     echo "unsupported coding worker: ${CODING_WORKER}" >&2

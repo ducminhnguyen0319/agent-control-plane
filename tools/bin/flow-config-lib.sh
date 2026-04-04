@@ -1720,6 +1720,27 @@ flow_provider_pool_ollama_timeout_seconds() {
   flow_provider_pool_value "${config_file}" "${pool_name}" "ollama.timeout_seconds"
 }
 
+flow_provider_pool_pi_model() {
+  local config_file="${1:?config file required}"
+  local pool_name="${2:?pool name required}"
+
+  flow_provider_pool_value "${config_file}" "${pool_name}" "pi.model"
+}
+
+flow_provider_pool_pi_thinking() {
+  local config_file="${1:?config file required}"
+  local pool_name="${2:?pool name required}"
+
+  flow_provider_pool_value "${config_file}" "${pool_name}" "pi.thinking"
+}
+
+flow_provider_pool_pi_timeout_seconds() {
+  local config_file="${1:?config file required}"
+  local pool_name="${2:?pool name required}"
+
+  flow_provider_pool_value "${config_file}" "${pool_name}" "pi.timeout_seconds"
+}
+
 flow_sanitize_provider_key() {
   local raw_key="${1:?raw key required}"
 
@@ -1746,6 +1767,9 @@ flow_provider_pool_model_identity() {
       ;;
     ollama)
       flow_provider_pool_ollama_model "${config_file}" "${pool_name}"
+      ;;
+    pi)
+      flow_provider_pool_pi_model "${config_file}" "${pool_name}"
       ;;
     *)
       printf '\n'
@@ -1783,6 +1807,9 @@ flow_provider_pool_state_get() {
   local ollama_model=""
   local ollama_base_url=""
   local ollama_timeout_seconds=""
+  local pi_model=""
+  local pi_thinking=""
+  local pi_timeout_seconds=""
 
   backend="$(flow_provider_pool_backend "${config_file}" "${pool_name}")"
   safe_profile="$(flow_provider_pool_safe_profile "${config_file}" "${pool_name}")"
@@ -1799,6 +1826,9 @@ flow_provider_pool_state_get() {
   ollama_model="$(flow_provider_pool_ollama_model "${config_file}" "${pool_name}")"
   ollama_base_url="$(flow_provider_pool_ollama_base_url "${config_file}" "${pool_name}")"
   ollama_timeout_seconds="$(flow_provider_pool_ollama_timeout_seconds "${config_file}" "${pool_name}")"
+  pi_model="$(flow_provider_pool_pi_model "${config_file}" "${pool_name}")"
+  pi_thinking="$(flow_provider_pool_pi_thinking "${config_file}" "${pool_name}")"
+  pi_timeout_seconds="$(flow_provider_pool_pi_timeout_seconds "${config_file}" "${pool_name}")"
   model="$(flow_provider_pool_model_identity "${config_file}" "${pool_name}")"
 
   case "${backend}" in
@@ -1813,6 +1843,9 @@ flow_provider_pool_state_get() {
       ;;
     ollama)
       [[ -n "${ollama_model}" ]] || valid="no"
+      ;;
+    pi)
+      [[ -n "${pi_model}" ]] || valid="no"
       ;;
     *)
       valid="no"
@@ -1869,6 +1902,9 @@ flow_provider_pool_state_get() {
   printf 'OLLAMA_MODEL=%s\n' "${ollama_model}"
   printf 'OLLAMA_BASE_URL=%s\n' "${ollama_base_url}"
   printf 'OLLAMA_TIMEOUT_SECONDS=%s\n' "${ollama_timeout_seconds}"
+  printf 'PI_MODEL=%s\n' "${pi_model}"
+  printf 'PI_THINKING=%s\n' "${pi_thinking}"
+  printf 'PI_TIMEOUT_SECONDS=%s\n' "${pi_timeout_seconds}"
 }
 
 flow_selected_provider_pool_env() {
@@ -2079,6 +2115,9 @@ flow_export_execution_env() {
   local ollama_model=""
   local ollama_base_url=""
   local ollama_timeout=""
+  local pi_model=""
+  local pi_thinking=""
+  local pi_timeout=""
 
   repo_id="$(flow_resolve_repo_id "${config_file}")"
   provider_quota_cooldowns="$(flow_resolve_provider_quota_cooldowns "${config_file}")"
@@ -2115,6 +2154,9 @@ flow_export_execution_env() {
     ollama_model="$(flow_kv_get "${provider_pool_selection}" "OLLAMA_MODEL")"
     ollama_base_url="$(flow_kv_get "${provider_pool_selection}" "OLLAMA_BASE_URL")"
     ollama_timeout="$(flow_kv_get "${provider_pool_selection}" "OLLAMA_TIMEOUT_SECONDS")"
+    pi_model="$(flow_kv_get "${provider_pool_selection}" "PI_MODEL")"
+    pi_thinking="$(flow_kv_get "${provider_pool_selection}" "PI_THINKING")"
+    pi_timeout="$(flow_kv_get "${provider_pool_selection}" "PI_TIMEOUT_SECONDS")"
   else
     if [[ -n "${explicit_coding_worker}" ]]; then
       active_provider_selection_reason="env-override"
@@ -2135,6 +2177,9 @@ flow_export_execution_env() {
     ollama_model="$(flow_env_or_config "${config_file}" "ACP_OLLAMA_MODEL F_LOSNING_OLLAMA_MODEL" "execution.ollama.model" "")"
     ollama_base_url="$(flow_env_or_config "${config_file}" "ACP_OLLAMA_BASE_URL F_LOSNING_OLLAMA_BASE_URL" "execution.ollama.base_url" "")"
     ollama_timeout="$(flow_env_or_config "${config_file}" "ACP_OLLAMA_TIMEOUT_SECONDS F_LOSNING_OLLAMA_TIMEOUT_SECONDS" "execution.ollama.timeout_seconds" "")"
+    pi_model="$(flow_env_or_config "${config_file}" "ACP_PI_MODEL F_LOSNING_PI_MODEL" "execution.pi.model" "")"
+    pi_thinking="$(flow_env_or_config "${config_file}" "ACP_PI_THINKING F_LOSNING_PI_THINKING" "execution.pi.thinking" "")"
+    pi_timeout="$(flow_env_or_config "${config_file}" "ACP_PI_TIMEOUT_SECONDS F_LOSNING_PI_TIMEOUT_SECONDS" "execution.pi.timeout_seconds" "")"
   fi
 
   if [[ -n "${coding_worker}" ]]; then
@@ -2229,6 +2274,18 @@ flow_export_execution_env() {
   if [[ -n "${ollama_timeout}" ]]; then
     export F_LOSNING_OLLAMA_TIMEOUT_SECONDS="${ollama_timeout}"
     export ACP_OLLAMA_TIMEOUT_SECONDS="${ollama_timeout}"
+  fi
+  if [[ -n "${pi_model}" ]]; then
+    export F_LOSNING_PI_MODEL="${pi_model}"
+    export ACP_PI_MODEL="${pi_model}"
+  fi
+  if [[ -n "${pi_thinking}" ]]; then
+    export F_LOSNING_PI_THINKING="${pi_thinking}"
+    export ACP_PI_THINKING="${pi_thinking}"
+  fi
+  if [[ -n "${pi_timeout}" ]]; then
+    export F_LOSNING_PI_TIMEOUT_SECONDS="${pi_timeout}"
+    export ACP_PI_TIMEOUT_SECONDS="${pi_timeout}"
   fi
 
   flow_export_github_cli_auth_env "$(flow_resolve_repo_slug "${config_file}")"
