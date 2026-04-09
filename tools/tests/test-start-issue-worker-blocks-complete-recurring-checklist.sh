@@ -91,6 +91,10 @@ set -euo pipefail
 
 capture_dir="${TEST_CAPTURE_DIR:?}"
 
+if [[ "${1:-}" == "api" && "${2:-}" == "rate_limit" ]]; then
+  printf '5000\n'
+  exit 0
+fi
 if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then
   issue_id="${3:-0}"
   cat <<JSON

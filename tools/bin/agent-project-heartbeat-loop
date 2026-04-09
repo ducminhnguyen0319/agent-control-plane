@@ -558,6 +558,9 @@ cleanup_scheduler_caches() {
   if [[ -n "${pr_risk_cache_dir:-}" && -d "${pr_risk_cache_dir}" ]]; then
     rm -rf "${pr_risk_cache_dir}" || true
   fi
+  if declare -F heartbeat_invalidate_snapshot_cache >/dev/null 2>&1; then
+    heartbeat_invalidate_snapshot_cache
+  fi
 }
 
 stage_issue_launch() {

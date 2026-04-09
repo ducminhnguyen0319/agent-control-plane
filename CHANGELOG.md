@@ -11,11 +11,83 @@ layout for public releases.
 
 - GitHub Actions trusted publishing workflow for tag-driven npm releases without
   local OTP prompts
+- stall detection watchdog for the Pi backend when neither `timeout` nor
+  `gtimeout` is available (background fallback path)
+- exit marker (`__CODEX_EXIT__`) for Pi and Ollama session runners so
+  worker-status can detect completion via the primary log-based path
+- setup wizard offers to create recurring starter issues (`agent-keep-open`)
+  so ACP starts working on the repo immediately after installation; five
+  built-in templates: code quality, test coverage, documentation,
+  dependency audit, and refactoring sweeps
+- setup wizard offers to launch the monitoring dashboard in background as
+  part of the guided flow (`--start-dashboard` / `--dashboard-port`)
+- setup wizard checks Ollama readiness (server running, models available)
+  when the `ollama` backend is selected
+- Pi backend now prompts for `OPENROUTER_API_KEY` during interactive setup,
+  same as the existing openclaw prompt
+- post-setup summary now shows created starter issues, dashboard URL, and
+  a "Getting started" section with clear first-use instructions
+- opencode (Crush) adapter: full session runner using `crush run` with
+  non-interactive execution, git-state result inference, timeout handling,
+  exit marker, and proper RUNNER_STATE
+- kilo adapter: full session runner using `kilo run --auto --format json`
+  with structured JSON event output, git-state result inference, timeout
+  handling, exit marker, and proper RUNNER_STATE
+
+### Fixed
+
+- unified `RUNNER_STATE` values across all backends: Claude wrote `completed`
+  instead of `succeeded`, Ollama wrote `completed`, and Pi wrote
+  `success`/`failure` — worker-status only recognised `succeeded`/`failed`, so
+  non-Codex workers relied on the weaker result.env fallback for status
+  detection
+- broadened the worker-status exit-marker regex from the hard-coded
+  `__CODEX_EXIT__:` to `__\w+_EXIT__:` so Claude's `__CLAUDE_EXIT__:` (and
+  any future backend marker) is detected without a caller-side override
+- Pi and Ollama result contracts now write a valid `OUTCOME`/`ACTION` envelope
+  instead of the bare `STATUS=success` that reconcile could never match,
+  eliminating perpetual `invalid-result-contract` failures for those backends
+- Ollama Node.js agent no longer writes a blanket `OUTCOME=blocked` on
+  success; the host bash wrapper now infers the outcome from git state so
+  product changes can reach the publish path
+- OpenClaw `infer_result_from_output` no longer overrides an agent-written
+  `OUTCOME=implemented` to blocked when `verification.jsonl` is missing —
+  the host reconcile's verification recovery now gets a chance to run first
+- OpenClaw git-change detection (`git log`) now filters `.md`,
+  `.openclaw-artifacts`, and `.agent-session.env` so doc-only commits no
+  longer trigger a false "product changes without verification" block
+- OpenClaw blocked-keyword grep narrowed from broad terms (`blocked`,
+  `cannot proceed`) to explicit agent decisions (`^OUTCOME=blocked`,
+  `^I am blocked`) to avoid false positives from prompt context echoed in
+  the log
+- reconcile FAILED path for `provider-quota-limit` no longer preserves a
+  stale `OUTCOME=implemented` from a prior cycle's result.env, fixing
+  resident metadata that showed a misleading last-outcome after quota
+  failures
+- heartbeat snapshot cache now uses disk-only caching (removed ineffective
+  in-memory variables that were always lost in subshell callers) and adds
+  disk cache for `heartbeat_open_agent_pr_issue_ids`
+- heartbeat loop cleanup now calls `heartbeat_invalidate_snapshot_cache` on
+  exit, preventing `/tmp` accumulation of PID-scoped cache directories
+- reconcile watch-mode detection regex extended to catch `vitest watch`
+  (without `--` prefix) so `npm test` is not used as a fallback for
+  watch-mode test scripts
+- heartbeat catch-up passes (merged-PR, linked-issue, scheduled-retry) are
+  now throttled to run at most once every 5 minutes instead of every
+  heartbeat cycle, reducing GitHub API quota burn
+- fixed 12 pre-existing test failures caused by missing `gh api rate_limit`
+  stubs and outdated test expectations for openclaw session IDs,
+  failure-reason inference, and reconcile summary clearing
 
 ### Changed
 
 - maintainer release docs now point to trusted publishing through
   `.github/workflows/publish.yml` instead of local `npm publish`
+- setup wizard, `init`, and `scaffold-profile` now accept `ollama` and `pi`
+  as `--coding-worker` values alongside the existing `codex`, `claude`, and
+  `openclaw`
+- scaffolded profile YAML now includes default `ollama` and `pi`
+  configuration sections
 
 ## [0.1.8] - 2026-03-31
 

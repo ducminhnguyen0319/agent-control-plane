@@ -162,6 +162,10 @@ if [[ "${1:-}" == "pr" && "${2:-}" == "view" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "api" && "${2:-}" == "rate_limit" ]]; then
+  printf '5000\n'
+  exit 0
+fi
 if [[ "${1:-}" == "api" ]]; then
   exit 0
 fi

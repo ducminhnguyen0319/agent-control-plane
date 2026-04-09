@@ -48,7 +48,12 @@ if [[ -z "$repo_slug" || -z "$number" ]]; then
 fi
 
 resource="issues/${number}"
-current_json="$(flow_github_api_repo "${repo_slug}" "${resource}")"
+# Use caller-provided cached JSON if available to skip the GET call
+if [[ -n "${ACP_CACHED_ISSUE_JSON:-}" ]]; then
+  current_json="${ACP_CACHED_ISSUE_JSON}"
+else
+  current_json="$(flow_github_api_repo "${repo_slug}" "${resource}")"
+fi
 add_json="$(jq -R . <"$add_file" | jq -s .)"
 remove_json="$(jq -R . <"$remove_file" | jq -s .)"
 payload="$(

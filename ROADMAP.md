@@ -40,27 +40,38 @@ done.
 
 | Backend | Status | Runtime Routing | Profile Scaffolding | Notes |
 | --- | --- | --- | --- | --- |
-| `codex` | available now | yes | yes | First-class worker path for Codex-backed runs. |
-| `claude` | available now | yes | yes | First-class worker path for Claude-backed runs. |
-| `openclaw` | available now | yes | yes | First-class worker path with resident workflow support. |
-| `opencode` | planned next | placeholder scaffold | no | Adapter stub ships in the package, but live execution is not implemented yet. |
-| `kilo` | planned next | placeholder scaffold | no | Adapter stub ships in the package, but live execution is not implemented yet. |
+| `codex` | production-ready | yes | yes | First-class worker path for Codex-backed runs. |
+| `claude` | production-ready | yes | yes | First-class worker path for Claude-backed runs. Retry, timeout, and provider-quota handling. |
+| `openclaw` | production-ready | yes | yes | First-class worker path with resident workflow support, stall detection, and host-side result inference. |
+| `ollama` | experimental | yes | yes | Working adapter with Node.js agentic loop. Runs any model served by a local Ollama instance. Host-side git-state inference for result contracts. |
+| `pi` | experimental | yes | yes | Working adapter using the pi CLI in `--print --no-session` mode. Stall detection, exit markers, and proper result contracts. |
+| `opencode` | experimental | yes | yes | Working adapter for Crush (charmbracelet/crush, formerly opencode). Non-interactive `crush run` with git-state result inference. |
+| `kilo` | experimental | yes | yes | Working adapter for Kilo Code (kilocode/cli). Non-interactive `kilo run --auto --format json` with structured event output. |
 | `gemini-cli` | research next | no | no | Official Google terminal agent and the closest ecosystem fit for a future ACP worker adapter. |
 
-### Available Now
+### Production-Ready
 
-These backends already have first-class routing or runtime support in the repo:
+These backends have full ACP workflow support, verified result contracts, and
+consistent worker-status detection:
 
 - `codex`
 - `claude`
 - `openclaw`
 
+### Experimental
+
+Working adapters with routing, profile scaffolding, and result contracts.
+Useful for research, free-tier model testing, and local-model workflows:
+
+- `ollama` — local models via Ollama API with tool-use support
+- `pi` — OpenRouter-compatible models via the pi CLI
+- `opencode` — Crush (charmbracelet/crush) with full tool execution
+- `kilo` — Kilo Code (kilocode/cli) with JSON event stream output
+
 ### Planned Next
 
-These are high-priority backend additions for the public package:
+High-priority backend additions for the public package:
 
-- `opencode`
-- `kilo`
 - `gemini-cli`
 
 ## Adjacent Runtime and Model Integrations
@@ -71,7 +82,8 @@ that ACP should learn to work with over time.
 
 | Target | Category | Status | Why it matters |
 | --- | --- | --- | --- |
-| `ollama` | local model runtime | research next | Strong local-first story, cross-platform distribution, and an existing tool-launch surface that already knows about coding tools. |
+| `ollama` | local model runtime | **integrated** | Full ACP adapter with Node.js agentic loop, tool-use support, and git-state result inference. Setup wizard checks server readiness and available models. |
+| `pi` | lightweight coding agent | **integrated** | Full ACP adapter with stall detection, exit markers, and proper result contracts. Setup wizard handles OpenRouter API key. |
 | `nanoclaw` | containerized assistant runtime | exploratory | Useful reference for container isolation, scheduled tasks, and WSL2-friendly workflows around Claude-powered agents. |
 | `picoclaw` | lightweight assistant runtime | exploratory | Interesting for Linux and edge-style deployments, MCP-heavy workflows, and ultra-low-footprint automation. |
 
@@ -89,7 +101,7 @@ ACP should eventually support a broader adapter model for:
 ### 1. Multi-Backend Worker Layer
 
 - keep strengthening `codex`, `claude`, and `openclaw`
-- add `opencode` and `kilo` workers
+- harden `ollama`, `pi`, `opencode`, and `kilo` experimental adapters toward production readiness
 - standardize worker capability detection and backend health reporting
 - improve fallback behavior when one backend is rate-limited or degraded
 
@@ -102,9 +114,9 @@ ACP should eventually support a broader adapter model for:
 
 ### 3. Public Package Experience
 
-- faster onboarding for first-time users
+- ~~faster onboarding for first-time users~~ done: setup wizard now handles deps, auth, profile, runtime, dashboard, and starter issues in one pass
 - stronger public docs, screenshots, badges, and demo flows
-- cleaner one-command setup paths for common repo profiles
+- ~~cleaner one-command setup paths for common repo profiles~~ done: `npx agent-control-plane@latest setup` is the single entry point
 - release automation that keeps npm and GitHub release metadata aligned
 
 ### 4. Operator Experience
@@ -119,7 +131,7 @@ ACP should eventually support a broader adapter model for:
 - easier profile sharing across machines or team members
 - stronger contribution workflow and automation around CLA and docs policy
 - more reusable backend adapters so ACP is not locked to one agent ecosystem
-- integration patterns for local-model runtimes such as `ollama`
+- ~~integration patterns for local-model runtimes such as `ollama`~~ done: ollama adapter is integrated with tool-use and git-state inference
 - interoperability experiments with adjacent runtimes such as `nanoclaw` and `picoclaw`
 
 ## Notes

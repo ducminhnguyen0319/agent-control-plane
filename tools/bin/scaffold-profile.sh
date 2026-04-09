@@ -22,7 +22,7 @@ Options:
   --worktree-root <path>             Worktree parent root
   --retained-repo-root <path>        Optional retained/manual checkout root
   --vscode-workspace-file <path>     Optional VS Code workspace file
-  --coding-worker <codex|openclaw|claude>
+  --coding-worker <codex|openclaw|claude|ollama|pi|opencode|kilo>
                                      Default coding backend (default: openclaw)
   --claude-model <model>             Claude model alias or full name
   --claude-permission-mode <mode>    Claude permission mode (default: acceptEdits)
@@ -97,9 +97,9 @@ if [[ ! "$profile_id" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
 fi
 
 case "$coding_worker" in
-  codex|openclaw|claude) ;;
+  codex|openclaw|claude|ollama|pi|opencode|kilo) ;;
   *)
-    echo "--coding-worker must be codex, openclaw, or claude" >&2
+    echo "--coding-worker must be codex, openclaw, claude, ollama, pi, opencode, or kilo" >&2
     exit 1
     ;;
 esac
@@ -271,6 +271,21 @@ execution:
     model: "${openclaw_model}"
     thinking: "${openclaw_thinking}"
     timeout_seconds: ${openclaw_timeout_seconds}
+  ollama:
+    model: "qwen2.5-coder:7b"
+    base_url: "http://localhost:11434"
+    timeout_seconds: 900
+  pi:
+    model: "openrouter/qwen/qwen3.6-plus:free"
+    thinking: "low"
+    timeout_seconds: 900
+    stall_seconds: 300
+  opencode:
+    model: "anthropic/claude-sonnet-4-20250514"
+    timeout_seconds: 900
+  kilo:
+    model: "anthropic/claude-sonnet-4-20250514"
+    timeout_seconds: 900
   review_requires_independent_final_review: true
   verification:
     web_playwright_command: "pnpm exec playwright test"

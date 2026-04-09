@@ -63,6 +63,10 @@ set -euo pipefail
 posted_comment_file="${TEST_POSTED_COMMENT_FILE:?}"
 duplicate_body="${TEST_DUPLICATE_BODY:?}"
 
+if [[ "${1:-}" == "api" && "${2:-}" == "rate_limit" ]]; then
+  printf '5000\n'
+  exit 0
+fi
 if [[ "${1:-}" == "api" ]]; then
   route="${2:-}"
   shift 2
@@ -137,7 +141,7 @@ out="$(
 grep -q '^STATUS=SUCCEEDED$' <<<"$out"
 grep -q '^OUTCOME=blocked$' <<<"$out"
 grep -q '^ACTION=host-comment-blocker$' <<<"$out"
-grep -q '^FAILURE_REASON=issue-worker-blocked$' <<<"$out"
+grep -q '^FAILURE_REASON=no-publishable-commits$' <<<"$out"
 
 test ! -e "$posted_comment_file"
 

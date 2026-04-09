@@ -93,6 +93,10 @@ chmod +x "$shim_dir/tmux"
 cat >"$shim_dir/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${1:-}" == "api" && "${2:-}" == "rate_limit" ]]; then
+  printf '5000\n'
+  exit 0
+fi
 if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then
   issue_id="${3:-0}"
   cat <<JSON
@@ -186,7 +190,7 @@ grep -q '^SESSION=demo-issue-441$' "$capture_dir/runner-1.env"
 grep -q "^WORKTREE=$resident_alias_path$" "$capture_dir/runner-1.env"
 grep -q '^ACP_RESIDENT_TASK_COUNT=1$' "$capture_dir/runner-1.env"
 grep -q '^ACP_RESIDENT_WORKTREE_REUSED=no$' "$capture_dir/runner-1.env"
-grep -q '^ACP_RESIDENT_OPENCLAW_SESSION_ID=demo-resident-session-issue-441$' "$capture_dir/runner-1.env"
+grep -q '^ACP_RESIDENT_OPENCLAW_SESSION_ID=demo-resident-session-issue-441-cycle-1$' "$capture_dir/runner-1.env"
 grep -q '^ISSUE_ID=441$' "$metadata_file"
 grep -q "^WORKTREE=$resident_alias_path$" "$metadata_file"
 metadata_worktree_realpath="$(awk -F= '/^WORKTREE_REALPATH=/{print $2; exit}' "$metadata_file")"

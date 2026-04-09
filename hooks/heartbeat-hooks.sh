@@ -26,6 +26,43 @@ AGENT_EXCLUSIVE_LABEL="${AGENT_EXCLUSIVE_LABEL:-agent-exclusive}"
 CODING_WORKER="${ACP_CODING_WORKER:-codex}"
 HEARTBEAT_ISSUE_JSON_CACHE_DIR="${TMPDIR:-/tmp}/heartbeat-issue-json.$$"
 
+# ── Per-heartbeat snapshot cache ──────────────────────────────────────────────
+# Fetch open issues and open PRs once per heartbeat cycle and reuse the
+# snapshot for every list query.  This eliminates 4x issue_list + 3x pr_list
+# redundant GitHub API calls per cycle.
+HEARTBEAT_SNAPSHOT_CACHE_DIR="${TMPDIR:-/tmp}/heartbeat-snapshot.$$"
+
+# Snapshot functions are always called from subshells (command substitution or
+# pipes), so in-memory variables would be lost immediately.  We rely exclusively
+# on the PID-scoped disk cache under HEARTBEAT_SNAPSHOT_CACHE_DIR.
+
+heartbeat_cached_issue_list_json() {
+  mkdir -p "${HEARTBEAT_SNAPSHOT_CACHE_DIR}"
+  local cache_file="${HEARTBEAT_SNAPSHOT_CACHE_DIR}/issues.json"
+  if [[ ! -f "${cache_file}" ]]; then
+    local snapshot
+    snapshot="$(flow_github_issue_list_json "$REPO_SLUG" open 100 2>/dev/null || true)"
+    printf '%s' "${snapshot}" >"${cache_file}"
+  fi
+  cat "${cache_file}"
+}
+
+heartbeat_cached_pr_list_json() {
+  mkdir -p "${HEARTBEAT_SNAPSHOT_CACHE_DIR}"
+  local cache_file="${HEARTBEAT_SNAPSHOT_CACHE_DIR}/prs.json"
+  if [[ ! -f "${cache_file}" ]]; then
+    local snapshot
+    snapshot="$(flow_github_pr_list_json "$REPO_SLUG" open 100 2>/dev/null || true)"
+    printf '%s' "${snapshot}" >"${cache_file}"
+  fi
+  cat "${cache_file}"
+}
+
+heartbeat_invalidate_snapshot_cache() {
+  rm -rf "${HEARTBEAT_SNAPSHOT_CACHE_DIR}" 2>/dev/null || true
+  rm -rf "${HEARTBEAT_ISSUE_JSON_CACHE_DIR}" 2>/dev/null || true
+}
+
 heartbeat_issue_retry_state_file() {
   local issue_id="${1:?issue id required}"
   printf '%s/retries/issues/%s.env\n' "${STATE_ROOT}" "${issue_id}"
@@ -92,10 +129,15 @@ heartbeat_issue_json_cached() {
 }
 
 heartbeat_open_agent_pr_issue_ids() {
+  mkdir -p "${HEARTBEAT_SNAPSHOT_CACHE_DIR}"
+  local cache_file="${HEARTBEAT_SNAPSHOT_CACHE_DIR}/pr_issue_ids.json"
+  if [[ -f "${cache_file}" ]]; then
+    cat "${cache_file}"
+    return 0
+  fi
   local pr_issue_ids_json=""
   pr_issue_ids_json="$(
-    flow_github_pr_list_json "$REPO_SLUG" open 100 \
-      2>/dev/null \
+    heartbeat_cached_pr_list_json \
       | jq --argjson agentPrPrefixes "${AGENT_PR_PREFIXES_JSON}" --arg handoffLabel "${AGENT_PR_HANDOFF_LABEL}" --arg branchIssueRegex "${AGENT_PR_ISSUE_CAPTURE_REGEX}" '
         map(
           . as $pr
@@ -124,10 +166,10 @@ heartbeat_open_agent_pr_issue_ids() {
   )"
 
   if [[ -z "${pr_issue_ids_json:-}" ]]; then
-    printf '[]\n'
-  else
-    printf '%s\n' "${pr_issue_ids_json}"
+    pr_issue_ids_json="[]"
   fi
+  printf '%s' "${pr_issue_ids_json}" >"${cache_file}"
+  printf '%s\n' "${pr_issue_ids_json}"
 }
 
 heartbeat_list_ready_issue_ids() {
@@ -136,8 +178,7 @@ heartbeat_list_ready_issue_ids() {
   open_agent_pr_issue_ids="$(heartbeat_open_agent_pr_issue_ids)"
 
   ready_issue_rows="$(
-    flow_github_issue_list_json "$REPO_SLUG" open 100 \
-    2>/dev/null \
+    heartbeat_cached_issue_list_json \
     | jq -r --argjson openAgentPrIssueIds "${open_agent_pr_issue_ids}" '
         map(select(
           (any(.labels[]?; .name == "agent-running") | not)
@@ -171,8 +212,7 @@ heartbeat_list_blocked_recovery_issue_ids() {
   open_agent_pr_issue_ids="$(heartbeat_open_agent_pr_issue_ids)"
 
   blocked_issue_rows="$(
-    flow_github_issue_list_json "$REPO_SLUG" open 100 \
-    2>/dev/null \
+    heartbeat_cached_issue_list_json \
     | jq -r --argjson openAgentPrIssueIds "${open_agent_pr_issue_ids}" '
         map(select(
           any(.labels[]?; .name == "agent-blocked")
@@ -270,8 +310,7 @@ heartbeat_list_exclusive_issue_ids() {
   local open_agent_pr_issue_ids
   open_agent_pr_issue_ids="$(heartbeat_open_agent_pr_issue_ids)"
 
-  flow_github_issue_list_json "$REPO_SLUG" open 100 \
-    2>/dev/null \
+  heartbeat_cached_issue_list_json \
     | jq -r --arg exclusiveLabel "${AGENT_EXCLUSIVE_LABEL}" --argjson openAgentPrIssueIds "${open_agent_pr_issue_ids}" '
         map(select(
           any(.labels[]?; .name == $exclusiveLabel)
@@ -285,8 +324,7 @@ heartbeat_list_exclusive_issue_ids() {
 }
 
 heartbeat_list_running_issue_ids() {
-  flow_github_issue_list_json "$REPO_SLUG" open 100 \
-    2>/dev/null \
+  heartbeat_cached_issue_list_json \
     | jq -r '
         map(select(any(.labels[]?; .name == "agent-running")))
         | sort_by(.createdAt, .number)
@@ -295,8 +333,7 @@ heartbeat_list_running_issue_ids() {
 }
 
 heartbeat_list_open_agent_pr_ids() {
-  flow_github_pr_list_json "$REPO_SLUG" open 100 \
-    2>/dev/null \
+  heartbeat_cached_pr_list_json \
     | jq -r --argjson agentPrPrefixes "${AGENT_PR_PREFIXES_JSON}" --arg handoffLabel "${AGENT_PR_HANDOFF_LABEL}" '
         map(select(
           . as $pr
@@ -312,8 +349,7 @@ heartbeat_list_open_agent_pr_ids() {
 }
 
 heartbeat_list_exclusive_pr_ids() {
-  flow_github_pr_list_json "$REPO_SLUG" open 100 \
-    2>/dev/null \
+  heartbeat_cached_pr_list_json \
     | jq -r --argjson agentPrPrefixes "${AGENT_PR_PREFIXES_JSON}" --arg handoffLabel "${AGENT_PR_HANDOFF_LABEL}" --arg exclusiveLabel "${AGENT_EXCLUSIVE_LABEL}" '
         map(select(
           . as $pr
@@ -444,16 +480,20 @@ heartbeat_pr_risk_json() {
 heartbeat_mark_issue_running() {
   local issue_id="${1:?issue id required}"
   local is_heavy="${2:-no}"
+  local cached_json
+  cached_json="$(heartbeat_issue_json_cached "$issue_id" 2>/dev/null || true)"
   if [[ "$is_heavy" == "yes" ]]; then
-    bash "${FLOW_TOOLS_DIR}/agent-github-update-labels" --repo-slug "$REPO_SLUG" --number "$issue_id" --remove agent-ready --remove agent-blocked --add agent-running --add agent-e2e-heavy >/dev/null || true
+    ACP_CACHED_ISSUE_JSON="${cached_json}" bash "${FLOW_TOOLS_DIR}/agent-github-update-labels" --repo-slug "$REPO_SLUG" --number "$issue_id" --remove agent-ready --remove agent-blocked --add agent-running --add agent-e2e-heavy >/dev/null || true
   else
-    bash "${FLOW_TOOLS_DIR}/agent-github-update-labels" --repo-slug "$REPO_SLUG" --number "$issue_id" --remove agent-ready --remove agent-blocked --add agent-running >/dev/null || true
+    ACP_CACHED_ISSUE_JSON="${cached_json}" bash "${FLOW_TOOLS_DIR}/agent-github-update-labels" --repo-slug "$REPO_SLUG" --number "$issue_id" --remove agent-ready --remove agent-blocked --add agent-running >/dev/null || true
   fi
 }
 
 heartbeat_issue_launch_failed() {
   local issue_id="${1:?issue id required}"
-  bash "${FLOW_TOOLS_DIR}/agent-github-update-labels" --repo-slug "$REPO_SLUG" --number "$issue_id" --remove agent-running >/dev/null || true
+  local cached_json
+  cached_json="$(heartbeat_issue_json_cached "$issue_id" 2>/dev/null || true)"
+  ACP_CACHED_ISSUE_JSON="${cached_json}" bash "${FLOW_TOOLS_DIR}/agent-github-update-labels" --repo-slug "$REPO_SLUG" --number "$issue_id" --remove agent-running >/dev/null || true
 }
 
 heartbeat_ensure_issue_label_exists() {

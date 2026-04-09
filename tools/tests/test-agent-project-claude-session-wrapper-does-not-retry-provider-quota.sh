@@ -81,6 +81,6 @@ if grep -q '\[claude-retry\]' "$run_dir/$session.log"; then
   echo "provider quota failure unexpectedly retried" >&2
   exit 1
 fi
-grep -q '__CLAUDE_EXIT__:1' "$run_dir/$session.log"
+grep -q '__CODEX_EXIT__:1' "$run_dir/$session.log"
 
 echo "agent-project claude provider quota no-retry test passed"

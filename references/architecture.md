@@ -41,10 +41,18 @@ flowchart LR
   Router --> Codex["agent-project-run-codex-session"]
   Router --> Claude["agent-project-run-claude-session"]
   Router --> OpenClaw["agent-project-run-openclaw-session"]
+  Router --> Ollama["agent-project-run-ollama-session"]
+  Router --> Pi["agent-project-run-pi-session"]
+  Router --> OpenCode["agent-project-run-opencode-session"]
+  Router --> Kilo["agent-project-run-kilo-session"]
 
   Codex --> Artifacts["run.env / runner.env /\nresult.env / verification.jsonl"]
   Claude --> Artifacts
   OpenClaw --> Artifacts
+  Ollama --> Artifacts
+  Pi --> Artifacts
+  OpenCode --> Artifacts
+  Kilo --> Artifacts
 
   Artifacts --> Reconcile["reconcile-issue-worker.sh\nreconcile-pr-worker.sh"]
   Reconcile --> GitHub["GitHub issues / PRs / labels / comments"]

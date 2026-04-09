@@ -685,14 +685,16 @@ for key in ("OUTCOME", "ACTION", "DETAIL", "ISSUE_ID"):
 PY
   }
 
-  # If sandbox result.env exists with implemented, validate it has verification
+  # If sandbox result.env already exists, trust the agent's contract.
+  # When the agent wrote OUTCOME=implemented but verification.jsonl is missing,
+  # keep the contract intact — the host reconcile will attempt verification
+  # recovery (extract_issue_host_recovery_commands) before publish, and that
+  # path can block if recovery also fails.  Overriding to blocked here would
+  # skip reconcile's host-side recovery entirely and always produce a false
+  # block when the tool sandbox didn't inherit env vars for record-verification.
   if [[ -f "\${result_file_path}" ]]; then
-    if grep -q 'OUTCOME=implemented' "\${result_file_path}" 2>/dev/null; then
-      if [[ ! -f "\${verification_file}" ]]; then
-        write_result 'OUTCOME=blocked\nACTION=host-comment-blocker\n'
-        printf '[infer] BLOCKED: agent wrote OUTCOME=implemented but verification.jsonl is missing\n' >> "\${output_file}" 2>/dev/null || true
-        return 0
-      fi
+    if grep -q 'OUTCOME=implemented' "\${result_file_path}" 2>/dev/null && [[ ! -f "\${verification_file}" ]]; then
+      printf '[infer] WARN: agent wrote OUTCOME=implemented but verification.jsonl is missing — deferring to host reconcile recovery\n' >> "\${output_file}" 2>/dev/null || true
     fi
     return 0
   fi
@@ -708,15 +710,15 @@ PY
     return 0
   fi
 
-  # Check if there are actual code changes (not just artifact files)
+  # Check if there are actual code changes (not just artifact files or docs)
   local has_product_changes="no"
-  if git -C ${worktree_q} diff --name-only HEAD 2>/dev/null | grep -qvE '\.openclaw-artifacts/|\.md$' 2>/dev/null; then
+  if git -C ${worktree_q} diff --name-only HEAD 2>/dev/null | grep -qvE '\.openclaw-artifacts/|\.openclaw/|\.agent-session\.env$|\.md$' 2>/dev/null; then
     has_product_changes="yes"
   fi
-  if git -C ${worktree_q} diff --cached --name-only 2>/dev/null | grep -qvE '\.openclaw-artifacts/|\.md$' 2>/dev/null; then
+  if git -C ${worktree_q} diff --cached --name-only 2>/dev/null | grep -qvE '\.openclaw-artifacts/|\.openclaw/|\.agent-session\.env$|\.md$' 2>/dev/null; then
     has_product_changes="yes"
   fi
-  if git -C ${worktree_q} log --oneline origin/main..HEAD 2>/dev/null | grep -q . 2>/dev/null; then
+  if git -C ${worktree_q} diff --name-only origin/main..HEAD 2>/dev/null | grep -qvE '\.openclaw-artifacts/|\.openclaw/|\.agent-session\.env$|\.md$' 2>/dev/null; then
     has_product_changes="yes"
   fi
 
@@ -726,32 +728,32 @@ PY
     return 0
   fi
 
-  # If there are product changes but NO verification.jsonl, this is BLOCKED
-  # The worker skipped verification — do not allow publish
-  if [[ "\${has_product_changes}" == "yes" && ! -f "\${verification_file}" ]]; then
-    write_result 'OUTCOME=blocked\nACTION=host-comment-blocker\n'
-    return 0
-  fi
-
-  # If there are product changes AND verification.jsonl exists with entries, allow implemented
+  # If there are product changes AND verification.jsonl exists with pass entries, allow implemented
   if [[ "\${has_product_changes}" == "yes" && -f "\${verification_file}" ]] && grep -q '"status":"pass"' "\${verification_file}" 2>/dev/null; then
     write_result 'OUTCOME=implemented\nACTION=host-publish-issue-pr\n'
     return 0
   fi
 
-  # If output explicitly says blocked, trust that
-  if grep -Eiq 'blocked|cannot proceed|unable to complete|not possible|missing spec' "\${output_file}" 2>/dev/null; then
+  # If there are product changes but NO verification.jsonl, still mark as
+  # implemented and let the host reconcile attempt verification recovery.
+  # Blocking here would prevent host-side recovery from ever running.
+  if [[ "\${has_product_changes}" == "yes" && ! -f "\${verification_file}" ]]; then
+    printf '[infer] product changes detected without verification.jsonl — marking implemented for host recovery\n' >> "\${output_file}" 2>/dev/null || true
+    write_result 'OUTCOME=implemented\nACTION=host-publish-issue-pr\n'
+    return 0
+  fi
+
+  # If output explicitly indicates the agent decided it is blocked.
+  # Use narrow patterns to avoid false positives from prompt context echoed in logs
+  # (e.g. "Prior Blocker Context" sections or issue comments mentioning "blocked").
+  if grep -Eiq '^(OUTCOME=blocked|I am blocked|This issue is blocked|Cannot proceed with implementation|Unable to complete the task)' "\${output_file}" 2>/dev/null; then
     write_result 'OUTCOME=blocked\nACTION=host-comment-blocker\n'
     return 0
   fi
 
-  # If output suggests implemented but we couldn't verify, still block
+  # If output suggests implemented, mark as implemented and let reconcile verify
   if grep -Eiq 'created PR|opened PR|PR #|pull request|implemented' "\${output_file}" 2>/dev/null; then
-    if [[ -f "\${verification_file}" ]]; then
-      write_result 'OUTCOME=implemented\nACTION=host-publish-issue-pr\n'
-    else
-      write_result 'OUTCOME=blocked\nACTION=host-comment-blocker\n'
-    fi
+    write_result 'OUTCOME=implemented\nACTION=host-publish-issue-pr\n'
     return 0
   fi
 

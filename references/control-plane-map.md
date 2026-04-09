@@ -36,10 +36,14 @@ roots, labels, worker preferences, prompts, and project-specific guardrails.
   Launches Claude-backed worker sessions.
 - `tools/bin/agent-project-run-openclaw-session`
   Launches OpenClaw-backed worker sessions.
+- `tools/bin/agent-project-run-ollama-session`
+  Launches Ollama-backed worker sessions with a Node.js agentic loop.
+- `tools/bin/agent-project-run-pi-session`
+  Launches Pi-backed worker sessions in `--print --no-session` mode.
 - `tools/bin/agent-project-run-opencode-session`
-  Placeholder adapter stub for the planned `opencode` backend.
+  Launches Crush (formerly OpenCode) worker sessions via `crush run`.
 - `tools/bin/agent-project-run-kilo-session`
-  Placeholder adapter stub for the planned `kilo` backend.
+  Launches Kilo Code worker sessions via `kilo run --auto --format json`.
 - `tools/bin/project-init.sh`
   Runs scaffold + smoke + adopt + runtime sync for one installed profile.
 - `tools/bin/scaffold-profile.sh`

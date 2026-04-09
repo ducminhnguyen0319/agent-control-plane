@@ -57,7 +57,7 @@ Options:
   --retained-repo-root <path>  Manual checkout root to keep linked in the profile
   --vscode-workspace-file <path>
                                Workspace file path ACP should generate/use
-  --coding-worker <backend>    One of: codex, claude, openclaw
+  --coding-worker <backend>    One of: codex, claude, openclaw, ollama, pi, opencode, kilo
   --force                      Overwrite an existing profile
   --skip-anchor-sync           Skip profile-adopt anchor repo sync
   --skip-workspace-sync        Skip profile-adopt workspace sync
@@ -75,6 +75,11 @@ Options:
   --no-start-runtime           Do not start the runtime after setup
   --install-launchd            Install macOS autostart after a successful runtime start
   --no-install-launchd         Do not install macOS autostart
+  --start-dashboard            Start the dashboard in background after setup
+  --no-start-dashboard         Do not start the dashboard
+  --dashboard-port <port>      Dashboard port (default: 8765)
+  --create-starter-issues      Create recurring issues so ACP starts working immediately
+  --no-create-starter-issues   Skip starter issue creation
   --yes                        Accept detected defaults without prompting
   --non-interactive            Same as --yes
   --help                       Show this help
@@ -394,6 +399,9 @@ function parseSetupArgs(args) {
     json: false,
     startRuntime: null,
     installLaunchd: null,
+    startDashboard: null,
+    dashboardPort: 8765,
+    createStarterIssues: null,
     interactive: process.stdin.isTTY && process.stdout.isTTY,
     help: false
   };
@@ -481,6 +489,21 @@ function parseSetupArgs(args) {
       case "--no-install-launchd":
         options.installLaunchd = false;
         break;
+      case "--start-dashboard":
+        options.startDashboard = true;
+        break;
+      case "--no-start-dashboard":
+        options.startDashboard = false;
+        break;
+      case "--dashboard-port":
+        options.dashboardPort = parseInt(args[++index] || "8765", 10);
+        break;
+      case "--create-starter-issues":
+        options.createStarterIssues = true;
+        break;
+      case "--no-create-starter-issues":
+        options.createStarterIssues = false;
+        break;
       case "--yes":
       case "--non-interactive":
         options.interactive = false;
@@ -541,6 +564,179 @@ async function promptYesNo(rl, label, defaultValue) {
     return false;
   }
   return defaultValue;
+}
+
+const STARTER_ISSUE_CATALOG = [
+  {
+    key: "code-quality",
+    title: "Keep code quality high: fix lint warnings, type errors, and dead code",
+    body: `## Recurring: Code Quality Sweep
+
+Checklist:
+- [ ] Fix any TypeScript / ESLint / type-check errors in the codebase
+- [ ] Remove dead exports, unused imports, and unreachable code paths
+- [ ] Resolve any TODO/FIXME comments that are straightforward to address
+
+Agent schedule: every 4h
+
+- Run \`pnpm typecheck\` (or the repo-equivalent lint/typecheck) after code changes and record verification.
+`,
+    labels: ["agent-ready", "agent-keep-open"]
+  },
+  {
+    key: "test-coverage",
+    title: "Improve test coverage for critical and untested modules",
+    body: `## Recurring: Test Coverage Improvement
+
+Checklist:
+- [ ] Identify source files with zero or minimal test coverage
+- [ ] Add focused unit or integration tests for the most critical untested paths
+- [ ] Ensure new tests actually run and pass in the local test runner
+
+Agent schedule: every 6h
+
+- Run the narrowest relevant test command after code changes and record verification.
+`,
+    labels: ["agent-ready", "agent-keep-open"]
+  },
+  {
+    key: "documentation",
+    title: "Keep documentation accurate and up to date",
+    body: `## Recurring: Documentation Refresh
+
+Checklist:
+- [ ] Update README sections that are outdated or reference removed features
+- [ ] Add or fix JSDoc / inline comments for public APIs that lack them
+- [ ] Ensure setup instructions and examples still work on a clean checkout
+
+Agent schedule: every 8h
+
+- Run any doc-build or link-check command after changes and record verification.
+`,
+    labels: ["agent-ready", "agent-keep-open"]
+  },
+  {
+    key: "dependency-audit",
+    title: "Audit and update dependencies for security and freshness",
+    body: `## Recurring: Dependency Audit
+
+Checklist:
+- [ ] Run the package manager audit and fix any critical/high vulnerabilities
+- [ ] Update patch-level dependencies that have safe upgrades available
+- [ ] Verify the lockfile is consistent after changes
+
+Agent schedule: every 12h
+
+- Run \`pnpm audit\` and \`pnpm install --frozen-lockfile\` after changes and record verification.
+`,
+    labels: ["agent-ready", "agent-keep-open"]
+  },
+  {
+    key: "refactor",
+    title: "Refactor complex or duplicated code for maintainability",
+    body: `## Recurring: Refactoring Sweep
+
+Checklist:
+- [ ] Identify functions or modules with high complexity or duplication
+- [ ] Extract shared logic into well-named helpers or utilities
+- [ ] Ensure refactored code passes existing tests without behavior changes
+
+Agent schedule: every 8h
+
+- Run the narrowest relevant test command after refactoring and record verification.
+`,
+    labels: ["agent-ready", "agent-keep-open"]
+  }
+];
+
+async function maybeCreateStarterIssues(options, config, prereq) {
+  const result = { status: "skipped", created: [], reason: "not-requested" };
+
+  if (options.createStarterIssues === false) {
+    return result;
+  }
+
+  if (!prereq.ghAuthOk) {
+    result.reason = "gh-auth-not-ready";
+    return result;
+  }
+
+  let shouldCreate = options.createStarterIssues === true;
+  if (!shouldCreate && options.interactive) {
+    const rl0 = createPromptInterface();
+    try {
+      shouldCreate = await promptYesNo(rl0, "\nCreate starter issues so ACP starts working immediately", true);
+    } finally {
+      rl0.close();
+    }
+  }
+  if (!shouldCreate) {
+    return result;
+  }
+
+  let toCreate;
+  if (options.interactive) {
+    const rlSel = createPromptInterface();
+    try {
+      console.log("\nSelect which recurring issues to create (ACP will work on these continuously):\n");
+      const selections = [];
+      for (const issue of STARTER_ISSUE_CATALOG) {
+        const selected = await promptYesNo(rlSel, `  ${issue.title}`, true);
+        selections.push({ issue, selected });
+      }
+      toCreate = selections.filter((s) => s.selected);
+    } finally {
+      rlSel.close();
+    }
+  } else {
+    // Non-interactive: create all starter issues
+    toCreate = STARTER_ISSUE_CATALOG.map((issue) => ({ issue, selected: true }));
+  }
+
+  if (toCreate.length === 0) {
+    console.log("No issues selected.");
+    return result;
+  }
+
+  // Ensure labels exist
+  console.log("\nCreating labels and issues...");
+  const requiredLabels = [
+    { name: "agent-ready", color: "0E8A16", description: "Ready for agent automation" },
+    { name: "agent-keep-open", color: "D4C5F9", description: "Recurring issue — agent works on this continuously" }
+  ];
+  for (const label of requiredLabels) {
+    spawnSync("gh", ["label", "create", label.name, "--repo", config.repoSlug, "--description", label.description, "--color", label.color, "--force"], { stdio: "pipe", timeout: 15000 });
+  }
+
+  for (const { issue } of toCreate) {
+    const ghArgs = [
+      "issue", "create",
+      "--repo", config.repoSlug,
+      "--title", issue.title,
+      "--body", issue.body,
+      "--label", issue.labels.join(",")
+    ];
+    const ghResult = spawnSync("gh", ghArgs, { encoding: "utf8", stdio: "pipe", timeout: 30000 });
+    if (ghResult.status === 0) {
+      const url = (ghResult.stdout || "").trim();
+      result.created.push({ key: issue.key, title: issue.title, url });
+      console.log(`  Created: ${issue.title}`);
+      if (url) {
+        console.log(`           ${url}`);
+      }
+    } else {
+      console.log(`  Failed to create: ${issue.title}`);
+      const stderr = (ghResult.stderr || "").trim();
+      if (stderr) {
+        console.log(`           ${stderr.split("\n")[0]}`);
+      }
+    }
+  }
+
+  result.status = result.created.length > 0 ? "ok" : "failed";
+  result.reason = "";
+
+  return result;
 }
 
 function buildSetupPaths(platformHome, repoRoot, profileId, overrides) {
@@ -1650,8 +1846,8 @@ async function collectSetupConfig(options, context) {
       profileId = sanitizeProfileId(await promptText(rl, "Profile id", profileId));
 
       let workerInput = codingWorker;
-      while (!["codex", "claude", "openclaw"].includes(workerInput)) {
-        workerInput = await promptText(rl, "Coding worker (codex / claude / openclaw)", codingWorker || "openclaw");
+      while (!["codex", "claude", "openclaw", "ollama", "pi", "opencode", "kilo"].includes(workerInput)) {
+        workerInput = await promptText(rl, "Coding worker (codex / claude / openclaw / ollama / pi / opencode / kilo)", codingWorker || "openclaw");
       }
       codingWorker = workerInput;
     } finally {
@@ -1659,7 +1855,7 @@ async function collectSetupConfig(options, context) {
     }
   }
 
-  if (!["codex", "claude", "openclaw"].includes(codingWorker)) {
+  if (!["codex", "claude", "openclaw", "ollama", "pi", "opencode", "kilo"].includes(codingWorker)) {
     throw new Error(`unsupported coding worker: ${codingWorker}`);
   }
 
@@ -1696,6 +1892,9 @@ async function collectSetupConfig(options, context) {
       if (process.platform === "darwin" && options.installLaunchd === null && options.startRuntime) {
         options.installLaunchd = await promptYesNo(rl, "Install macOS autostart for this profile", false);
       }
+      if (options.startDashboard === null) {
+        options.startDashboard = await promptYesNo(rl, "Start the monitoring dashboard in background", true);
+      }
     } finally {
       rl.close();
     }
@@ -1707,11 +1906,16 @@ async function collectSetupConfig(options, context) {
   if (options.installLaunchd === null) {
     options.installLaunchd = false;
   }
+  if (options.startDashboard === null) {
+    options.startDashboard = false;
+  }
 
   return {
     ...config,
     startRuntime: Boolean(options.startRuntime),
-    installLaunchd: Boolean(options.installLaunchd)
+    installLaunchd: Boolean(options.installLaunchd),
+    startDashboard: Boolean(options.startDashboard),
+    dashboardPort: options.dashboardPort
   };
 }
 
@@ -1941,9 +2145,10 @@ async function runSetupFlow(forwardedArgs) {
     let workerSetupStep = await maybeShowWorkerSetupGuide(options, prereq);
     prereq = collectPrereqStatus(config.codingWorker);
 
-    // Check OpenRouter API key when openclaw is selected
-    if (config.codingWorker === "openclaw" && !process.env.OPENROUTER_API_KEY) {
-      console.log("\nOpenClaw requires an OpenRouter API key (OPENROUTER_API_KEY).");
+    // Check OpenRouter API key when openclaw or pi is selected
+    if ((config.codingWorker === "openclaw" || config.codingWorker === "pi") && !process.env.OPENROUTER_API_KEY) {
+      const workerLabel = config.codingWorker === "openclaw" ? "OpenClaw" : "Pi";
+      console.log(`\n${workerLabel} requires an OpenRouter API key (OPENROUTER_API_KEY).`);
       console.log("- Get a free key at: https://openrouter.ai/keys");
       if (options.interactive) {
         const rl = createPromptInterface();
@@ -1963,6 +2168,29 @@ async function runSetupFlow(forwardedArgs) {
         }
       } else {
         console.log("Set OPENROUTER_API_KEY in your environment before starting the runtime.");
+      }
+    }
+
+    // Check Ollama readiness when ollama is selected
+    if (config.codingWorker === "ollama") {
+      const ollamaRunning = spawnSync("curl", ["-sf", "http://localhost:11434/api/tags"], { timeout: 5000 });
+      if (ollamaRunning.status !== 0) {
+        console.log("\nOllama does not appear to be running at http://localhost:11434.");
+        console.log("- Install from: https://ollama.com");
+        console.log("- Start it with: ollama serve");
+      } else {
+        console.log("\nOllama is running. Checking available models...");
+        try {
+          const tagsJson = JSON.parse(ollamaRunning.stdout.toString());
+          const modelNames = (tagsJson.models || []).map((m) => m.name || m.model || "").filter(Boolean);
+          if (modelNames.length === 0) {
+            console.log("No models pulled yet. Pull one with: ollama pull qwen2.5-coder:7b");
+          } else {
+            console.log(`Available models: ${modelNames.slice(0, 5).join(", ")}${modelNames.length > 5 ? ` (+${modelNames.length - 5} more)` : ""}`);
+          }
+        } catch (_) {
+          console.log("Could not parse model list. Ensure a model is pulled: ollama pull qwen2.5-coder:7b");
+        }
       }
     }
 
@@ -2056,6 +2284,56 @@ async function runSetupFlow(forwardedArgs) {
         launchdInstallReason = "";
       }
     }
+
+    let dashboardStatus = "skipped";
+    let dashboardReason = "not-requested";
+    let dashboardUrl = "";
+    if (config.startDashboard) {
+      const dashboardScript = path.join(scopedContext.stableSkillRoot || scopedContext.packageRoot, "tools", "bin", "serve-dashboard.sh");
+      const dashboardLogDir = path.join(config.paths.agentRoot || context.platformHome, "dashboard-logs");
+      fs.mkdirSync(dashboardLogDir, { recursive: true });
+      const dashboardLogFile = path.join(dashboardLogDir, "dashboard.log");
+      const dashboardPidFile = path.join(dashboardLogDir, "dashboard.pid");
+
+      // Kill any existing dashboard on the same port
+      try {
+        if (fs.existsSync(dashboardPidFile)) {
+          const oldPid = fs.readFileSync(dashboardPidFile, "utf8").trim();
+          if (oldPid && /^\d+$/.test(oldPid)) {
+            try { process.kill(Number(oldPid), "SIGTERM"); } catch (_) { /* already dead */ }
+          }
+        }
+      } catch (_) { /* ignore */ }
+
+      console.log(`\n== Start dashboard (background, port ${config.dashboardPort}) ==`);
+      syncRuntimeHome(context, { stdio: "pipe" });
+      const rtCtx = createRuntimeExecutionContext(context);
+      const rtDashboardScript = path.join(rtCtx.stableSkillRoot, "tools", "bin", "serve-dashboard.sh");
+      const { spawn } = require("child_process");
+      const logHandle = fs.openSync(dashboardLogFile, "a");
+      const dashboardProc = spawn("bash", [rtDashboardScript, "--host", "127.0.0.1", "--port", String(config.dashboardPort)], {
+        detached: true,
+        stdio: ["ignore", logHandle, logHandle],
+        env: { ...process.env, ACP_PROFILE_REGISTRY_ROOT: context.profileRegistryRoot }
+      });
+      dashboardProc.unref();
+      fs.closeSync(logHandle);
+
+      if (dashboardProc.pid) {
+        fs.writeFileSync(dashboardPidFile, `${dashboardProc.pid}\n`);
+        dashboardUrl = `http://127.0.0.1:${config.dashboardPort}`;
+        dashboardStatus = "ok";
+        dashboardReason = "";
+        console.log(`Dashboard running at ${dashboardUrl} (PID ${dashboardProc.pid})`);
+        console.log(`Log: ${dashboardLogFile}`);
+      } else {
+        dashboardStatus = "failed";
+        dashboardReason = "spawn-failed";
+        console.log("Dashboard failed to start.");
+      }
+    }
+
+    const starterIssues = await maybeCreateStarterIssues(options, config, prereq);
 
     const finalFixup = await maybeRunFinalSetupFixups(options, scopedContext, config, {
       anchorSync,
@@ -2157,12 +2435,38 @@ async function runSetupFlow(forwardedArgs) {
         }
       }
 
+      if (dashboardStatus === "ok" && dashboardUrl) {
+        console.log(`\n  Dashboard: ${dashboardUrl}`);
+      }
+
       console.log("\n  Next commands:");
       if (runtimeStartStatus !== "ok") {
         console.log(`    npx agent-control-plane@latest runtime start --profile-id ${config.profileId}`);
       }
       console.log(`    npx agent-control-plane@latest runtime status --profile-id ${config.profileId}`);
+      if (dashboardStatus !== "ok") {
+        console.log(`    npx agent-control-plane@latest dashboard`);
+      }
       console.log(`    npx agent-control-plane@latest doctor`);
+
+      if (starterIssues.created.length > 0) {
+        console.log("\n  Starter issues created (ACP will start working on these):");
+        for (const issue of starterIssues.created) {
+          console.log(`    - ${issue.title}`);
+          if (issue.url) {
+            console.log(`      ${issue.url}`);
+          }
+        }
+      } else {
+        console.log("\n  Getting started:");
+        console.log(`    1. Add the label 'agent-ready' to a GitHub issue in ${config.repoSlug}`);
+        console.log("    2. ACP picks it up automatically, assigns a worker, and opens a PR");
+        console.log("    3. Watch progress in the dashboard or with 'runtime status'");
+      }
+      if (config.codingWorker === "openclaw" || config.codingWorker === "pi") {
+        console.log(`\n  Tip: ${config.codingWorker} uses free-tier models by default.`);
+        console.log("  No API costs until you switch to a paid model in the profile YAML.");
+      }
       console.log("");
     } else {
       // Machine-readable KV output for non-interactive / scripted runs

@@ -18,6 +18,11 @@ cat >"$bin_dir/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${1:-}" == "api" && "${2:-}" == "rate_limit" ]]; then
+  printf '5000\n'
+  exit 0
+fi
+
 if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then
   cat <<'JSON'
 {"body":"No recurring schedule here.","labels":[{"name":"agent-running"},{"name":"agent-schedule-10m"}]}

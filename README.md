@@ -94,7 +94,7 @@ it had a supervisor."
 | Get real value out of free-tier models | Quota cooldowns, stall detection, provider failover, and retry backoff that free-tier models need to be actually useful |
 | Manage multiple repos cleanly | One profile per repo with isolated runtime state, each with its own identity and status |
 | Observe what is happening without digging through files | Dashboard and `runtime status` that show the real state without spelunking through `tmux` or temp folders |
-| Compare worker backends on real workloads | Swap between `codex`, `claude`, `openclaw`, `ollama`, and `pi` without rebuilding your runtime habits |
+| Compare worker backends on real workloads | Swap between `codex`, `claude`, `openclaw`, `ollama`, `pi`, `opencode`, and `kilo` without rebuilding your runtime habits |
 | Run reproducible agent research cheaply | Cost-controlled execution harness for studying agent behavior, output quality, or prompting strategies |
 | Enforce safety by architecture, not by hope | Launch limits, reconcile gates, and cooldowns that are built into the runtime, not left to chance |
 
@@ -132,8 +132,8 @@ Windows.
 | `openclaw` | Production-ready | Full ACP workflow support, including resident-style runs. |
 | `ollama` | Experimental | Working adapter with Node.js agentic loop. Runs any model served by a local Ollama instance. Output quality depends on model size — 7–9B models handle exploration well but struggle with complex multi-step tasks. |
 | `pi` | Experimental | Working adapter using the [pi CLI](https://github.com/mariozechner/pi) in `--print --no-session` mode. Connects to any OpenRouter-compatible model. Useful as a lightweight alternative to openclaw for free-tier model testing. |
-| `opencode` | Scaffolded | Routing and docs in place; live execution not yet implemented. |
-| `kilo` | Scaffolded | Routing and docs in place; live execution not yet implemented. |
+| `opencode` | Experimental | Working adapter for [Crush](https://github.com/charmbracelet/crush) (formerly opencode). Non-interactive `crush run` with full tool execution. |
+| `kilo` | Experimental | Working adapter for [Kilo Code](https://github.com/Kilo-Org/kilocode). Non-interactive `kilo run --auto` with JSON event stream. |
 | `gemini-cli` | Roadmap | Strong future candidate; not wired into ACP yet. |
 | `nanoclaw` | Exploratory | Ecosystem reference for containerized and WSL2-friendly workflows. |
 | `picoclaw` | Exploratory | Ecosystem reference for lightweight Linux and edge-style runtimes. |
@@ -209,7 +209,7 @@ flowchart LR
   Supervisor --> Heartbeat["heartbeat-safe-auto.sh"]
   Heartbeat --> Scheduler["agent-project-heartbeat-loop"]
   Scheduler --> Workers["issue / PR worker launchers"]
-  Workers --> Backends["codex / claude / openclaw"]
+  Workers --> Backends["codex / claude / openclaw / ollama / pi / opencode / kilo"]
   Backends --> Reconcile["reconcile issue / PR session"]
   Reconcile --> GitHub["issues / PRs / labels / comments"]
   Scheduler --> State["runs + state + history"]
@@ -272,9 +272,11 @@ system.
 | `jq` | yes | Parses JSON from `gh` output and worker metadata throughout. | Missing `jq` will break GitHub-heavy and runtime flows. |
 | `python3` | yes | Powers the dashboard server, snapshot renderer, and config helpers. | Required for both dashboard use and several internal scripts. |
 | `tmux` | yes | Runs long-lived worker sessions and captures their status. | Missing `tmux` means background worker workflows will not launch. |
-| Worker CLI (`codex`, `claude`, or `openclaw`) | depends on backend | The actual coding agent for a profile. | Install and authenticate the backend you plan to use before starting background runs. |
-| `ollama` | for `ollama` backend | Serves local models via OpenAI-compatible API at `http://localhost:11434`. | Install from [ollama.com](https://ollama.com) and pull a model (e.g. `ollama pull qwen3.5:9b`) before starting a profile with `--coding-worker ollama`. |
-| `pi` CLI | for `pi` backend | Lightweight coding agent using OpenRouter-compatible APIs. Binary at `/opt/homebrew/bin/pi`. | Install via `npm i -g @mariozechner/pi-coding-agent`. Set `OPENROUTER_API_KEY` env var before use. |
+| Worker CLI (backend-specific) | depends on backend | The coding agent for a profile. Supported: `codex`, `claude`, `openclaw` (production); `ollama`, `pi`, `opencode`, `kilo` (experimental). | Install and authenticate your chosen backend before starting background runs. |
+| `ollama` | for `ollama` backend | Serves local models via OpenAI-compatible API at `http://localhost:11434`. | Install from [ollama.com](https://ollama.com) and pull a model (e.g. `ollama pull qwen3.5:9b`) before use. |
+| `pi` CLI | for `pi` backend | Lightweight coding agent using OpenRouter-compatible APIs. | Install via `npm i -g @mariozechner/pi-coding-agent`. Set `OPENROUTER_API_KEY` before use. |
+| `crush` (opencode) | for `opencode` backend | Go-based coding agent by Charm ([charmbracelet/crush](https://github.com/charmbracelet/crush)). | Install via `brew install charmbracelet/tap/crush`. |
+| `kilo` CLI | for `kilo` backend | TypeScript coding agent ([kilocode/cli](https://github.com/Kilo-Org/kilocode)). | Install via `npm i -g @kilocode/cli`. |
 | Bundled `codex-quota` + ACP quota manager | automatic for Codex | Quota-aware failover and health signals for Codex profiles. | Bundled by default. Override with `ACP_CODEX_QUOTA_BIN` only if you have a custom setup. |
 
 Make sure `gh` and your chosen worker backend are both authenticated for the
@@ -308,9 +310,17 @@ The fastest path is the interactive wizard:
 npx agent-control-plane@latest setup
 ```
 
-The wizard auto-detects the current repo when possible, offers to install
-missing dependencies, prompts for `gh auth login`, scaffolds the profile, runs
-health checks, and optionally starts the runtime — all in one pass.
+The wizard walks you through the full setup in one pass:
+
+1. Detects the current repo and suggests sane defaults
+2. Installs missing dependencies and authenticates `gh`
+3. Checks backend readiness (API keys for openclaw/pi, local server for ollama)
+4. Scaffolds the profile, runs health checks, starts the runtime
+5. Launches the monitoring dashboard in the background
+6. Offers to create recurring starter issues so ACP starts working immediately
+
+After the wizard finishes, your repo has a running agent, a live dashboard,
+and a set of `agent-keep-open` issues that ACP will continuously work through.
 
 To preview exactly what it would do before touching anything:
 
@@ -325,6 +335,8 @@ npx agent-control-plane@latest setup \
   --non-interactive \
   --install-missing-deps \
   --start-runtime \
+  --start-dashboard \
+  --create-starter-issues \
   --json
 ```
 
@@ -369,7 +381,7 @@ npx agent-control-plane@latest init \
 | `--repo-root` | Path to your local checkout |
 | `--agent-root` | Where ACP keeps per-project runtime state |
 | `--worktree-root` | Where ACP places repo worktrees |
-| `--coding-worker` | Backend to orchestrate (`codex`, `claude`, `openclaw`, `ollama`, or `pi`) |
+| `--coding-worker` | Backend to orchestrate (`codex`, `claude`, `openclaw`, `ollama`, `pi`, `opencode`, or `kilo`) |
 
 **4. Validate before trusting it**
 
@@ -391,6 +403,29 @@ npx agent-control-plane@latest runtime status --profile-id my-repo
 Once `runtime status` returns clean output, ACP is actively managing the
 runtime for that profile. Per-profile state lives under `~/.agent-runtime`,
 grouped and inspectable without digging through scattered temp files.
+
+## Starter Issues
+
+The setup wizard can create a set of recurring `agent-keep-open` issues on your
+repo so ACP starts working immediately after installation. Each issue carries the
+`agent-ready` and `agent-keep-open` labels, and ACP picks them up on its next
+heartbeat cycle.
+
+Built-in templates:
+
+| Issue | What ACP does |
+| --- | --- |
+| Code quality sweep | Fix lint warnings, type errors, and dead code |
+| Test coverage improvement | Add tests for critical untested modules |
+| Documentation refresh | Keep README and inline docs accurate |
+| Dependency audit | Fix vulnerabilities and update safe patches |
+| Refactoring sweep | Reduce complexity and duplication |
+
+You can also create your own recurring issues — just add the `agent-ready` and
+`agent-keep-open` labels to any GitHub issue and ACP will work on it
+continuously.
+
+To skip this step during setup, pass `--no-create-starter-issues`.
 
 ## Everyday Usage
 
@@ -471,7 +506,7 @@ Use `--purge-paths` only when you want ACP-managed directories deleted too.
 | `explicit profile selection required` | Pass `--profile-id <id>` to `runtime`, `launchd-install`, `launchd-uninstall`, and `remove`. |
 | `gh` cannot access the repo | Re-run `gh auth login` and confirm the repo slug in the profile is correct. |
 | Setup deferred anchor repo sync | ACP could not reach the repo remote. Fix Git access or the remote URL, then re-run `setup` or `init` without `--skip-anchor-sync`. |
-| Backend auth failures (`codex`, `claude`, `openclaw`) | Authenticate the backend before starting ACP in the background. |
+| Backend auth failures | Authenticate the backend before starting ACP. For `openclaw`/`pi`, set `OPENROUTER_API_KEY`. For `ollama`, ensure the server is running. For `opencode`/`kilo`, install and authenticate the CLI. |
 | Node older than `18` | Upgrade Node first. ACP's minimum version is `18+`. |
 | Missing `jq` | Install `jq`, then retry the failed command. |
 | Runtime or source drift after an update | Run `sync`, then `doctor`. |
@@ -484,7 +519,7 @@ Use `--purge-paths` only when you want ACP-managed directories deleted too.
 | --- | --- |
 | `help` | Show the full CLI surface. Good first command on a new machine. |
 | `version` | Print the running package version. |
-| `setup [--dry-run] [--json]` | Guided bootstrap wizard. Detects repo, installs deps, scaffolds profile, starts runtime. `--dry-run` previews without writing anything. `--json` emits a structured result. |
+| `setup [--dry-run] [--json]` | Guided bootstrap wizard. Detects repo, installs deps, scaffolds profile, starts runtime and dashboard, creates starter issues. `--dry-run` previews. `--json` emits structured output. |
 | `sync` / `install` | Stage or refresh the packaged runtime into `~/.agent-runtime/runtime-home`. Run after install or upgrade. |
 | `init ...` | Scaffold one repo profile manually. Requires `--profile-id`, `--repo-slug`, `--repo-root`, `--agent-root`, `--worktree-root`, `--coding-worker`. |
 | `doctor` | Inspect runtime and source installation health. |

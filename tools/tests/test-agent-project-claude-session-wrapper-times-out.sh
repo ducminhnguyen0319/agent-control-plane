@@ -68,6 +68,6 @@ grep -q '^DETAIL=worker-exit-124$' "$run_dir/result.env"
 grep -q '^RUNNER_STATE=failed$' "$run_dir/runner.env"
 grep -q '^LAST_EXIT_CODE=124$' "$run_dir/runner.env"
 grep -q '^LAST_FAILURE_REASON=timeout$' "$run_dir/runner.env"
-grep -q '__CLAUDE_EXIT__:124' "$run_dir/$session.log"
+grep -q '__CODEX_EXIT__:124' "$run_dir/$session.log"
 
 echo "agent-project claude timeout wrapper test passed"

@@ -71,6 +71,10 @@ PI_MODEL="${ACP_PI_MODEL:-${F_LOSNING_PI_MODEL:-openrouter/qwen/qwen3.6-plus:fre
 PI_THINKING="${ACP_PI_THINKING:-${F_LOSNING_PI_THINKING:-low}}"
 PI_TIMEOUT_SECONDS="${ACP_PI_TIMEOUT_SECONDS:-${F_LOSNING_PI_TIMEOUT_SECONDS:-900}}"
 PI_STALL_SECONDS="${ACP_PI_STALL_SECONDS:-${F_LOSNING_PI_STALL_SECONDS:-300}}"
+OPENCODE_MODEL="${ACP_OPENCODE_MODEL:-${F_LOSNING_OPENCODE_MODEL:-anthropic/claude-sonnet-4-20250514}}"
+OPENCODE_TIMEOUT_SECONDS="${ACP_OPENCODE_TIMEOUT_SECONDS:-${F_LOSNING_OPENCODE_TIMEOUT_SECONDS:-900}}"
+KILO_MODEL="${ACP_KILO_MODEL:-${F_LOSNING_KILO_MODEL:-anthropic/claude-sonnet-4-20250514}}"
+KILO_TIMEOUT_SECONDS="${ACP_KILO_TIMEOUT_SECONDS:-${F_LOSNING_KILO_TIMEOUT_SECONDS:-900}}"
 printf -v SESSION_Q '%q' "$SESSION"
 printf -v CONFIG_YAML_Q '%q' "$CONFIG_YAML"
 printf -v ADAPTER_ID_Q '%q' "$ADAPTER_ID"
@@ -239,9 +243,17 @@ case "$CODING_WORKER" in
     bash "${FLOW_TOOLS_DIR}/agent-project-run-openclaw-session" "${ARGS[@]}"
     ;;
   opencode)
+    ARGS+=(
+      --opencode-model "${OPENCODE_MODEL}"
+      --opencode-timeout-seconds "${OPENCODE_TIMEOUT_SECONDS}"
+    )
     bash "${FLOW_TOOLS_DIR}/agent-project-run-opencode-session" "${ARGS[@]}"
     ;;
   kilo)
+    ARGS+=(
+      --kilo-model "${KILO_MODEL}"
+      --kilo-timeout-seconds "${KILO_TIMEOUT_SECONDS}"
+    )
     bash "${FLOW_TOOLS_DIR}/agent-project-run-kilo-session" "${ARGS[@]}"
     ;;
   ollama)

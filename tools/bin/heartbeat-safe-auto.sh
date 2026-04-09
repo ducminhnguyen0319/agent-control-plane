@@ -604,59 +604,78 @@ else
   exit "${loop_status}"
 fi
 
-printf '[%s] merged-pr catchup start\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-if run_with_timeout "${CATCHUP_TIMEOUT_SECONDS}" \
-  env \
-    ACP_RUNS_ROOT="$RUNS_ROOT" \
-    F_LOSNING_RUNS_ROOT="$RUNS_ROOT" \
-    bash "${FLOW_TOOLS_DIR}/agent-project-catch-up-merged-prs" \
-      --repo-slug "$REPO_SLUG" \
-      --state-root "$STATE_ROOT" \
-      --hook-file "$HOOK_FILE" \
-      --limit 100; then
-  printf '[%s] merged-pr catchup end status=0\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-else
-  catchup_status=$?
-  if [[ "${catchup_status}" -eq 124 ]]; then
-    printf 'CATCHUP_TIMEOUT=yes\n'
-  fi
-  printf '[%s] merged-pr catchup end status=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "${catchup_status}"
+# ── Throttled catch-up passes ──────────────────────────────────────────────────
+# These scripts fetch merged/closed PRs and linked issues which change rarely.
+# Run them at most once every CATCHUP_INTERVAL_SECONDS (default 300 = 5 min)
+# to avoid burning API quota on every heartbeat cycle.
+CATCHUP_INTERVAL_SECONDS="${ACP_CATCHUP_INTERVAL_SECONDS:-${F_LOSNING_CATCHUP_INTERVAL_SECONDS:-300}}"
+CATCHUP_STAMP_FILE="${STATE_ROOT}/last-catchup-timestamp"
+_catchup_now="$(date +%s)"
+_catchup_last="0"
+if [[ -f "${CATCHUP_STAMP_FILE}" ]]; then
+  _catchup_last="$(cat "${CATCHUP_STAMP_FILE}" 2>/dev/null || echo 0)"
 fi
+_catchup_age=$(( _catchup_now - _catchup_last ))
 
-printf '[%s] linked-pr issue catchup start\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-if run_with_timeout "${CATCHUP_TIMEOUT_SECONDS}" \
-  env \
-    ACP_RUNS_ROOT="$RUNS_ROOT" \
-    F_LOSNING_RUNS_ROOT="$RUNS_ROOT" \
-    bash "${FLOW_TOOLS_DIR}/agent-project-catch-up-issue-pr-links" \
-      --repo-slug "$REPO_SLUG" \
-      --state-root "$STATE_ROOT" \
-      --hook-file "$HOOK_FILE" \
-      --limit 100; then
-  printf '[%s] linked-pr issue catchup end status=0\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-else
-  linked_issue_catchup_status=$?
-  if [[ "${linked_issue_catchup_status}" -eq 124 ]]; then
-    printf 'LINKED_ISSUE_CATCHUP_TIMEOUT=yes\n'
+if [[ "${_catchup_age}" -ge "${CATCHUP_INTERVAL_SECONDS}" ]]; then
+  printf '[%s] merged-pr catchup start\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  if run_with_timeout "${CATCHUP_TIMEOUT_SECONDS}" \
+    env \
+      ACP_RUNS_ROOT="$RUNS_ROOT" \
+      F_LOSNING_RUNS_ROOT="$RUNS_ROOT" \
+      bash "${FLOW_TOOLS_DIR}/agent-project-catch-up-merged-prs" \
+        --repo-slug "$REPO_SLUG" \
+        --state-root "$STATE_ROOT" \
+        --hook-file "$HOOK_FILE" \
+        --limit 100; then
+    printf '[%s] merged-pr catchup end status=0\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  else
+    catchup_status=$?
+    if [[ "${catchup_status}" -eq 124 ]]; then
+      printf 'CATCHUP_TIMEOUT=yes\n'
+    fi
+    printf '[%s] merged-pr catchup end status=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "${catchup_status}"
   fi
-  printf '[%s] linked-pr issue catchup end status=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "${linked_issue_catchup_status}"
-fi
 
-printf '[%s] scheduled-issue retry catchup start\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-if run_with_timeout "${CATCHUP_TIMEOUT_SECONDS}" \
-  env \
-    ACP_RUNS_ROOT="$RUNS_ROOT" \
-    F_LOSNING_RUNS_ROOT="$RUNS_ROOT" \
-    bash "${FLOW_TOOLS_DIR}/agent-project-catch-up-scheduled-issue-retries" \
-      --repo-slug "$REPO_SLUG" \
-      --state-root "$STATE_ROOT" \
-      --hook-file "$HOOK_FILE" \
-      --limit 100; then
-  printf '[%s] scheduled-issue retry catchup end status=0\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-else
-  scheduled_issue_catchup_status=$?
-  if [[ "${scheduled_issue_catchup_status}" -eq 124 ]]; then
-    printf 'SCHEDULED_ISSUE_CATCHUP_TIMEOUT=yes\n'
+  printf '[%s] linked-pr issue catchup start\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  if run_with_timeout "${CATCHUP_TIMEOUT_SECONDS}" \
+    env \
+      ACP_RUNS_ROOT="$RUNS_ROOT" \
+      F_LOSNING_RUNS_ROOT="$RUNS_ROOT" \
+      bash "${FLOW_TOOLS_DIR}/agent-project-catch-up-issue-pr-links" \
+        --repo-slug "$REPO_SLUG" \
+        --state-root "$STATE_ROOT" \
+        --hook-file "$HOOK_FILE" \
+        --limit 100; then
+    printf '[%s] linked-pr issue catchup end status=0\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  else
+    linked_issue_catchup_status=$?
+    if [[ "${linked_issue_catchup_status}" -eq 124 ]]; then
+      printf 'LINKED_ISSUE_CATCHUP_TIMEOUT=yes\n'
+    fi
+    printf '[%s] linked-pr issue catchup end status=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "${linked_issue_catchup_status}"
   fi
-  printf '[%s] scheduled-issue retry catchup end status=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "${scheduled_issue_catchup_status}"
+
+  printf '[%s] scheduled-issue retry catchup start\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  if run_with_timeout "${CATCHUP_TIMEOUT_SECONDS}" \
+    env \
+      ACP_RUNS_ROOT="$RUNS_ROOT" \
+      F_LOSNING_RUNS_ROOT="$RUNS_ROOT" \
+      bash "${FLOW_TOOLS_DIR}/agent-project-catch-up-scheduled-issue-retries" \
+        --repo-slug "$REPO_SLUG" \
+        --state-root "$STATE_ROOT" \
+        --hook-file "$HOOK_FILE" \
+        --limit 100; then
+    printf '[%s] scheduled-issue retry catchup end status=0\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  else
+    scheduled_issue_catchup_status=$?
+    if [[ "${scheduled_issue_catchup_status}" -eq 124 ]]; then
+      printf 'SCHEDULED_ISSUE_CATCHUP_TIMEOUT=yes\n'
+    fi
+    printf '[%s] scheduled-issue retry catchup end status=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "${scheduled_issue_catchup_status}"
+  fi
+
+  printf '%s' "${_catchup_now}" >"${CATCHUP_STAMP_FILE}"
+else
+  printf '[%s] catchup skipped (age=%ss, interval=%ss)\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "${_catchup_age}" "${CATCHUP_INTERVAL_SECONDS}"
 fi

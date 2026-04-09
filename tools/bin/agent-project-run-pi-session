@@ -328,14 +328,14 @@ write_state() {
   mv "\${tmp_file}" "\${runner_state_file}"
 }
 
-write_result() {
-  local status="\${1:?status required}"
-  local reason="\${2:-}"
+write_result_fallback() {
+  local detail="\${1:-missing-result-contract}"
   local tmp_file
   tmp_file="\${result_file_path}.tmp.\$\$"
   {
-    printf 'STATUS=%q\n' "\${status}"
-    [[ -n "\${reason}" ]] && printf 'FAILURE_REASON=%q\n' "\${reason}"
+    printf 'OUTCOME=blocked\n'
+    printf 'ACTION=host-comment-blocker\n'
+    printf 'DETAIL=%s\n' "\${detail}"
   } >"\${tmp_file}"
   mv "\${tmp_file}" "\${result_file_path}"
 }
@@ -386,33 +386,67 @@ else
     "@\${prompt_file}" \\
     2>&1 >> "\${output_file}" &
   _pi_bgpid=\$!
+  # Hard timeout watchdog
   ( sleep "\${pi_timeout_seconds}" && kill "\${_pi_bgpid}" 2>/dev/null \\
       && printf '[pi] timed out after %s seconds\n' "\${pi_timeout_seconds}" >> "\${output_file}" ) &
-  _pi_watchdog=\$!
+  _pi_timeout_wd=\$!
+  # Stall watchdog: kill if output file stops growing for pi_stall_seconds
+  if [[ "\${pi_stall_seconds}" -gt 0 ]]; then
+    (
+      _prev_size=-1
+      while kill -0 "\${_pi_bgpid}" 2>/dev/null; do
+        _cur_size="\$(wc -c < "\${output_file}" 2>/dev/null || echo 0)"
+        if [[ "\${_cur_size}" -eq "\${_prev_size}" ]]; then
+          if [[ -z "\${_idle_since:-}" ]]; then _idle_since="\$(date +%s)"; fi
+          if (( \$(date +%s) - _idle_since >= pi_stall_seconds )); then
+            printf '[pi] no output for %s seconds — aborting stalled worker\n' "\${pi_stall_seconds}" >> "\${output_file}"
+            kill "\${_pi_bgpid}" 2>/dev/null
+            break
+          fi
+        else
+          _idle_since=""
+          _prev_size="\${_cur_size}"
+        fi
+        sleep 5
+      done
+    ) &
+    _pi_stall_wd=\$!
+  fi
   wait "\${_pi_bgpid}" || pi_exit_code=\$?
-  kill "\${_pi_watchdog}" 2>/dev/null || true
-  wait "\${_pi_watchdog}" 2>/dev/null || true
+  kill "\${_pi_timeout_wd}" 2>/dev/null || true
+  wait "\${_pi_timeout_wd}" 2>/dev/null || true
+  if [[ -n "\${_pi_stall_wd:-}" ]]; then
+    kill "\${_pi_stall_wd}" 2>/dev/null || true
+    wait "\${_pi_stall_wd}" 2>/dev/null || true
+  fi
   if [[ "\${pi_exit_code}" -eq 143 ]]; then
     pi_exit_code=124
   fi
 fi
 
 if [[ "\${pi_exit_code}" -eq 0 ]]; then
-  write_result success
-  write_state success 0
+  # Pi runs in --print mode and cannot write result.env itself.
+  # If the result file is missing, write a blocked fallback so reconcile
+  # sees a valid contract instead of an invalid-result-contract failure.
+  if [[ ! -f "\${result_file_path}" ]]; then
+    write_result_fallback "missing-result-contract"
+  fi
+  write_state succeeded 0
 else
   failure_reason="pi-exit-\${pi_exit_code}"
   if [[ "\${pi_exit_code}" -eq 124 ]]; then
     failure_reason="timeout"
   fi
-  write_result failure "\${failure_reason}"
-  write_state failure "\${pi_exit_code}" "\${failure_reason}"
+  if [[ ! -f "\${result_file_path}" ]]; then
+    write_result_fallback "\${failure_reason}"
+  fi
+  write_state failed "\${pi_exit_code}" "\${failure_reason}"
 fi
 
 record_final_git_state
 
 ${collect_copy_snippet}
-
+printf '\n__CODEX_EXIT__:%s\n' "\${pi_exit_code}" | tee -a "\${output_file}"
 exit "\${pi_exit_code}"
 EOF
 

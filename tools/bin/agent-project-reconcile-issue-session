@@ -640,6 +640,9 @@ try {
 
 const changedFilesLower = gitChangedFiles.map((file) => file.toLowerCase());
 const repoHasScript = (scriptName) => Boolean(packageJson?.scripts && Object.prototype.hasOwnProperty.call(packageJson.scripts, scriptName));
+const rootTestScript = String(packageJson?.scripts?.test || '').trim();
+const rootTestScriptUsesNodeTest = /^node\s+--test(?:\s|$)/.test(rootTestScript);
+const rootTestScriptLooksWatchMode = /\B--watch(?:All)?(?:[=\s]|$)|(?:^|\s)vitest\s+watch(?:\s|$)/.test(rootTestScript);
 const commandLooksRunnable = (command) => {
   if (/^npm test(?:\s|$)?/.test(command)) return repoHasScript('test');
   if (/^pnpm test(?:\s|$)?/.test(command)) return repoHasScript('test');
@@ -647,6 +650,14 @@ const commandLooksRunnable = (command) => {
   if (/^pnpm run\s+([a-z0-9:_-]+)/i.test(command)) return repoHasScript(command.match(/^pnpm run\s+([a-z0-9:_-]+)/i)[1]);
   if (/^node\s+--test(?:\s|$)/.test(command)) return true;
   return true;
+};
+const rootTestFallbackCommand = () => {
+  if (!rootTestScript) return '';
+  if (rootTestScriptUsesNodeTest) return 'npm test';
+  if (!rootTestScriptLooksWatchMode) return 'npm test';
+  if (/\bjest\b/i.test(rootTestScript)) return 'npx jest --runInBand --watchAll=false';
+  if (/\bvitest\b/i.test(rootTestScript)) return 'npx vitest run';
+  return '';
 };
 
 if (promptFile && fs.existsSync(promptFile)) {
@@ -678,15 +689,17 @@ if (promptFile && fs.existsSync(promptFile)) {
 }
 
 const changedTestFiles = [...new Set(gitChangedFiles.filter((file) => /\.(?:spec|test)\.[cm]?[jt]sx?$/.test(file)))];
-const rootTestScript = String(packageJson?.scripts?.test || '').trim();
-if (/^node\s+--test(?:\s|$)/.test(rootTestScript)) {
+if (rootTestScriptUsesNodeTest) {
   for (const file of changedTestFiles) {
     addCommand(`node --test ${file}`);
   }
 }
 
-if (commands.length === 0 && rootTestScript) {
-  addCommand('npm test');
+if (commands.length === 0) {
+  const fallbackCommand = rootTestFallbackCommand();
+  if (fallbackCommand) {
+    addCommand(fallbackCommand);
+  }
 }
 
 const filtered = commands.filter((command) => !recordedPassCommands.has(command));
@@ -1382,19 +1395,18 @@ case "$status" in
     failure_reason="$(normalize_issue_failure_reason "${failure_reason:-worker-exit-failed}")"
     schedule_provider_quota_cooldown "${failure_reason}"
     normalize_issue_runner_state "failed" "${LAST_EXIT_CODE:-}" "${failure_reason}"
-    if [[ "${result_outcome:-}" == "blocked" && "${result_action:-}" == "host-comment-blocker" ]] \
-      || [[ "${failure_reason}" == "provider-quota-limit" ]]; then
-      if [[ -z "${result_outcome:-}" ]]; then
-        result_outcome="blocked"
-      fi
-      if [[ -z "${result_action:-}" ]]; then
-        result_action="host-comment-blocker"
-      fi
+    if [[ "${result_outcome:-}" == "blocked" && "${result_action:-}" == "host-comment-blocker" ]]; then
       if [[ ! -s "${run_dir}/issue-comment.md" ]]; then
         write_issue_comment_artifact "$(build_issue_runtime_blocker_comment "${failure_reason}")" || true
       fi
       post_issue_comment_if_present
       issue_set_reconcile_summary "$status" "$result_outcome" "$result_action" "$failure_reason"
+    elif [[ "${failure_reason}" == "provider-quota-limit" ]]; then
+      if [[ ! -s "${run_dir}/issue-comment.md" ]]; then
+        write_issue_comment_artifact "$(build_issue_runtime_blocker_comment "${failure_reason}")" || true
+      fi
+      post_issue_comment_if_present
+      issue_set_reconcile_summary "$status" "" "" "$failure_reason"
     else
       issue_set_reconcile_summary "$status" "" "" "$failure_reason"
     fi

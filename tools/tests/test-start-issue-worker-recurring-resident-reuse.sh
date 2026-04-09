@@ -93,6 +93,10 @@ chmod +x "$shim_dir/tmux"
 cat >"$shim_dir/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${1:-}" == "api" && "${2:-}" == "rate_limit" ]]; then
+  printf '5000\n'
+  exit 0
+fi
 if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then
   issue_id="${3:-0}"
   cat <<JSON
@@ -199,7 +203,7 @@ grep -q "^ACP_RESIDENT_WORKER_KEY=$lane_key$" "$capture_dir/runner-2.env"
 grep -q '^ACP_RESIDENT_LANE_KIND=recurring$' "$capture_dir/runner-2.env"
 grep -q '^ACP_RESIDENT_LANE_VALUE=general$' "$capture_dir/runner-2.env"
 grep -q '^ACP_RESIDENT_OPENCLAW_AGENT_ID=demo-resident-issue-lane-recurring-general-openclaw-safe$' "$capture_dir/runner-2.env"
-grep -q '^ACP_RESIDENT_OPENCLAW_SESSION_ID=demo-resident-session-issue-441$' "$capture_dir/runner-2.env"
+grep -q '^ACP_RESIDENT_OPENCLAW_SESSION_ID=demo-resident-session-issue-441-cycle-2$' "$capture_dir/runner-2.env"
 grep -q '## Resident Worker Context' "$capture_dir/prompt-2.md"
 grep -q 'Resident task count for this lane: 2\.' "$capture_dir/prompt-2.md"
 grep -q 'Worktree reused from a prior cycle: yes\.' "$capture_dir/prompt-2.md"

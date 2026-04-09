@@ -42,7 +42,7 @@ Common options:
   --worktree-root <path>             Worktree parent root
   --retained-repo-root <path>        Retained/manual checkout root
   --vscode-workspace-file <path>     VS Code workspace file
-  --coding-worker <codex|openclaw|claude>
+  --coding-worker <codex|openclaw|claude|ollama|pi|opencode|kilo>
   --claude-model <model>
   --claude-permission-mode <mode>
   --claude-effort <level>

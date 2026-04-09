@@ -54,7 +54,7 @@ build_launchd_base_path() {
   local tool_name=""
   local tool_dir=""
 
-  for tool_name in node gh git python3 openclaw codex claude; do
+  for tool_name in node gh git python3 openclaw codex claude ollama pi crush kilo; do
     tool_dir="$(resolved_tool_dir "${tool_name}" || true)"
     append_path_dir path_value "${tool_dir}"
   done

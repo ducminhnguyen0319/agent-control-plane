@@ -774,12 +774,12 @@ fi
 
 ${collect_copy_snippet}
 if [[ "\${status}" -eq 0 ]]; then
-  write_state completed "\${status}" '' "\${attempt}" "\$((attempt - 1))"
+  write_state succeeded "\${status}" '' "\${attempt}" "\$((attempt - 1))"
 else
   write_state failed "\${status}" "\${failure_reason}" "\${attempt}" "\$((attempt - 1))"
 fi
 ${reconcile_snippet}
-printf '\n__CLAUDE_EXIT__:%s\n' "\${status}" | tee -a "\${output_file}"
+printf '\n__CODEX_EXIT__:%s\n' "\${status}" | tee -a "\${output_file}"
 exit "\${status}"
 EOF
 
