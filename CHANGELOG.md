@@ -5,7 +5,7 @@ All notable changes to `agent-control-plane` should be documented in this file.
 The format is inspired by Keep a Changelog and uses a simple project-focused
 layout for public releases.
 
-## [Unreleased]
+## [0.2.0] - 2026-04-10
 
 ### Added
 
