@@ -111,6 +111,9 @@ jobs:
       - name: Check package tarball
         run: npm pack --dry-run
 
+      - name: Verify package smoke command
+        run: bash tools/tests/test-package-smoke-command.sh
+
       - name: Publish to npm
         shell: bash
         run: |
