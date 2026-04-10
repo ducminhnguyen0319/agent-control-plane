@@ -59,6 +59,7 @@ chmod +x "$bin_dir/gh"
 
 TEST_CAPTURE_FILE="$tmpdir/update.txt" \
 PATH="$bin_dir:$PATH" \
+FLOW_GITHUB_GRAPHQL_AVAILABLE_CACHE="yes" \
 bash "$SCRIPT" --repo-slug example/demo --issue-id 6 >"$tmpdir/out.txt"
 
 grep -q '^CHECKLIST_SYNC_STATUS=updated$' "$tmpdir/out.txt"

@@ -21,19 +21,31 @@ cat >"$bin_dir/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${1:-}" == "auth" ]]; then exit 0; fi
+
 if [[ "${1:-}" == "api" ]]; then
   route="${2:-}"
+  shift 2 || true
+
+  input_file=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --input) input_file="${2:-}"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+
   if [[ "$route" == "repos/example/demo/issues/42" ]]; then
     echo '{"message":"Not Found"}' >&2
     exit 1
   fi
-  if [[ "$route" == user/repos\?* ]]; then
+  if [[ "$route" == user/repos* ]]; then
     printf '[[{"id":123,"full_name":"example/demo"}]]\n'
     exit 0
   fi
   if [[ "$route" == "repositories/123/issues/42" ]]; then
-    if [[ " $* " == *" --method PATCH "* ]]; then
-      cat >"${TEST_PAYLOAD_FILE:?}"
+    if [[ -n "$input_file" && -f "$input_file" ]]; then
+      cp "$input_file" "${TEST_PAYLOAD_FILE:?}"
       exit 0
     fi
     printf '{"labels":[{"name":"agent-blocked"}]}\n'

@@ -28,19 +28,19 @@ EOF
 
 write_stub "${check_stub}" "check"
 write_stub "${profile_stub}" "profile"
-write_stub "${runtimectl_stub}" "runtimectl"
+write_stub "${runtimectl_stub}" "runtimectl" "printf 'PROFILE_ID=smoke-runtime\nRUNTIME_STATUS=ok\n'"
 write_stub "${fail_stub}" "fail" "exit 23"
 
 success_output="$(
   ACP_TEST_SMOKE_CHECK_CONTRACTS_SCRIPT="${check_stub}" \
-  ACP_TEST_SMOKE_PROFILE_TEST_SCRIPT="${profile_stub}" \
-  ACP_TEST_SMOKE_RUNTIMECTL_TEST_SCRIPT="${runtimectl_stub}" \
+  ACP_TEST_SMOKE_PROFILE_SMOKE_SCRIPT="${profile_stub}" \
+  ACP_TEST_SMOKE_RUNTIMECTL_SCRIPT="${runtimectl_stub}" \
     bash "${SMOKE_BIN}"
 )"
 
 grep -q '^SMOKE_STEP=check-skill-contracts$' <<<"${success_output}"
-grep -q '^SMOKE_STEP=test-profile-smoke$' <<<"${success_output}"
-grep -q '^SMOKE_STEP=test-project-runtimectl$' <<<"${success_output}"
+grep -q '^SMOKE_STEP=profile-smoke$' <<<"${success_output}"
+grep -q '^SMOKE_STEP=project-runtimectl$' <<<"${success_output}"
 [[ "$(grep -c '^SMOKE_STEP_STATUS=ok$' <<<"${success_output}")" -eq 3 ]]
 grep -q '^SMOKE_TEST_STATUS=ok$' <<<"${success_output}"
 grep -q '^check$' "${call_log}"
@@ -60,8 +60,8 @@ done <"${call_log}"
 set +e
 failure_output="$(
   ACP_TEST_SMOKE_CHECK_CONTRACTS_SCRIPT="${check_stub}" \
-  ACP_TEST_SMOKE_PROFILE_TEST_SCRIPT="${fail_stub}" \
-  ACP_TEST_SMOKE_RUNTIMECTL_TEST_SCRIPT="${runtimectl_stub}" \
+  ACP_TEST_SMOKE_PROFILE_SMOKE_SCRIPT="${fail_stub}" \
+  ACP_TEST_SMOKE_RUNTIMECTL_SCRIPT="${runtimectl_stub}" \
     bash "${SMOKE_BIN}" 2>&1
 )"
 failure_status=$?
@@ -69,9 +69,9 @@ set -e
 
 [[ "${failure_status}" -eq 23 ]]
 grep -q '^SMOKE_STEP=check-skill-contracts$' <<<"${failure_output}"
-grep -q '^SMOKE_STEP=test-profile-smoke$' <<<"${failure_output}"
+grep -q '^SMOKE_STEP=profile-smoke$' <<<"${failure_output}"
 grep -q '^SMOKE_STEP_STATUS=failed$' <<<"${failure_output}"
-grep -q '^FAILED_STEP=test-profile-smoke$' <<<"${failure_output}"
+grep -q '^FAILED_STEP=profile-smoke$' <<<"${failure_output}"
 grep -q '^EXIT_CODE=23$' <<<"${failure_output}"
 grep -q '^SMOKE_TEST_STATUS=failed$' <<<"${failure_output}"
 

@@ -117,13 +117,6 @@ if [[ "$status" == "UNKNOWN" && -f "$output_file" ]]; then
   fi
 fi
 
-if [[ "$status" == "UNKNOWN" && -z "$failure_reason" ]]; then
-  failure_reason="$(failure_reason_from_output || true)"
-  if [[ -n "$failure_reason" ]]; then
-    status="FAILED"
-  fi
-fi
-
 if [[ "$status" == "UNKNOWN" && -n "$runner_state" ]]; then
   case "$runner_state" in
     running|waiting-auth-refresh|switching-account)
@@ -133,6 +126,7 @@ if [[ "$status" == "UNKNOWN" && -n "$runner_state" ]]; then
       # Check BEFORE stale result.env to avoid false SUCCEEDED when a prior
       # cycle's result.env happens to exist.
       status="FAILED"
+      failure_reason="$(failure_reason_from_output || true)"
       if [[ -z "$failure_reason" ]]; then
         failure_reason="runner-aborted-before-completion"
       fi
@@ -146,8 +140,17 @@ fi
 if [[ "$status" == "UNKNOWN" && -f "$result_file" ]]; then
   # A worker that managed to persist result.env already completed its contract,
   # even if the tmux session disappeared before the exit marker was flushed.
+  # Check BEFORE failure_reason_from_output so that a completed result.env
+  # is not overridden by transient failure text in the log.
   status="SUCCEEDED"
   result_only_completion="yes"
+fi
+
+if [[ "$status" == "UNKNOWN" && -z "$failure_reason" ]]; then
+  failure_reason="$(failure_reason_from_output || true)"
+  if [[ -n "$failure_reason" ]]; then
+    status="FAILED"
+  fi
 fi
 
 if [[ "$status" == "UNKNOWN" && -f "$output_file" ]]; then

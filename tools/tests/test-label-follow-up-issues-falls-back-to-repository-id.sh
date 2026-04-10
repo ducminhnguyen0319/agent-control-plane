@@ -80,6 +80,8 @@ cat >"$shim_dir/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${1:-}" == "auth" ]]; then exit 0; fi
+
 if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then
   issue_id="${3:-0}"
   cat <<JSON
@@ -119,6 +121,9 @@ out="$(
   PATH="$shim_dir:$PATH" \
   ACP_PROJECT_ID="demo" \
   ACP_PROFILE_REGISTRY_ROOT="$profile_registry_root" \
+  ACP_REPO_ID="123" \
+  ACP_REPO_SLUG="example/demo" \
+  FLOW_GITHUB_GRAPHQL_AVAILABLE_CACHE=yes \
   TEST_RUN_DIR="$run_dir" \
   TEST_CAPTURE_FILE="$capture_file" \
   GITHUB_ACTOR="tester" \

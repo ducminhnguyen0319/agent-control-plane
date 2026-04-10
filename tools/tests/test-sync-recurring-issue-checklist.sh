@@ -79,6 +79,7 @@ chmod +x "$bin_dir/gh"
 out="$(
   PATH="$bin_dir:$PATH" \
   TEST_PATCHED_BODY_FILE="$patched_body_file" \
+  FLOW_GITHUB_GRAPHQL_AVAILABLE_CACHE="yes" \
   bash "$SCRIPT" --repo-slug example/demo --issue-id 42
 )"
 

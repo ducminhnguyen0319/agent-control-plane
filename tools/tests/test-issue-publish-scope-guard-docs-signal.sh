@@ -26,6 +26,8 @@ cat >"$bin_dir/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${1:-}" == "auth" ]]; then exit 0; fi
+
 if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then
   issue_id="${3:-}"
   case "$issue_id" in
@@ -54,11 +56,15 @@ EOF
 chmod +x "$bin_dir/gh"
 
 PATH="$bin_dir:$node_bin_dir:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+  ACP_REPO_SLUG="example/demo" \
+  FLOW_GITHUB_GRAPHQL_AVAILABLE_CACHE=yes \
   bash "$SCOPE_GUARD_BIN" --worktree "$repo" --base-ref main --issue-id 100 >/dev/null
 
 set +e
 blocked_output="$(
   PATH="$bin_dir:$node_bin_dir:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+  ACP_REPO_SLUG="example/demo" \
+  FLOW_GITHUB_GRAPHQL_AVAILABLE_CACHE=yes \
   bash "$SCOPE_GUARD_BIN" --worktree "$repo" --base-ref main --issue-id 101 2>&1
 )"
 blocked_status=$?

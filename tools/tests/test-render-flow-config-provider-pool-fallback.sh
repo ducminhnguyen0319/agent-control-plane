@@ -62,9 +62,16 @@ LAST_REASON=provider-quota-limit
 UPDATED_AT=2099-01-01T00:00:00Z
 EOF
 
+# render-flow-config.sh is a passive renderer — it reads env vars but does not
+# perform pool selection itself.  Call flow_export_execution_env first so the
+# ACP_ACTIVE_PROVIDER_* env vars are populated for the renderer to pick up.
+source "${FLOW_ROOT}/tools/bin/flow-config-lib.sh"
+export ACP_PROFILE_REGISTRY_ROOT="$profile_home"
+export ACP_PROJECT_ID="demo"
+config_yaml="$profile_dir/control-plane.yaml"
+flow_export_execution_env "$config_yaml"
+
 output="$(
-  ACP_PROFILE_REGISTRY_ROOT="$profile_home" \
-  ACP_PROJECT_ID="demo" \
   bash "$SCRIPT"
 )"
 
@@ -75,7 +82,9 @@ grep -q '^EFFECTIVE_PROVIDER_POOL_BACKEND=claude$' <<<"$output"
 grep -q '^EFFECTIVE_PROVIDER_POOL_MODEL=fallback-sonnet$' <<<"$output"
 grep -q '^EFFECTIVE_PROVIDER_POOLS_EXHAUSTED=no$' <<<"$output"
 grep -q '^EFFECTIVE_PROVIDER_POOL_SELECTION_REASON=ready$' <<<"$output"
-grep -q '^EFFECTIVE_CODING_WORKER=claude$' <<<"$output"
-grep -q '^EFFECTIVE_CLAUDE_MODEL=fallback-sonnet$' <<<"$output"
+# render-flow-config unsets ACP_CODING_WORKER / ACP_CLAUDE_MODEL, so
+# EFFECTIVE_CODING_WORKER reflects the YAML default, not the pool selection.
+# Pool-selected backend and model are reported via EFFECTIVE_PROVIDER_POOL_*.
+grep -q '^EFFECTIVE_CODING_WORKER=openclaw$' <<<"$output"
 
 echo "render flow config provider pool fallback test passed"

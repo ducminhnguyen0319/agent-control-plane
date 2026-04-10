@@ -12,7 +12,10 @@ FLOW_CONFIG_LIB="${FLOW_ROOT}/tools/bin/flow-config-lib.sh"
 FLOW_SHELL_LIB="${FLOW_ROOT}/tools/bin/flow-shell-lib.sh"
 
 tmpdir="$(mktemp -d)"
-trap 'rm -rf "$tmpdir"' EXIT
+# Clean stale runtime directory from prior test runs so assertions on the
+# workspace file start from a known-empty state.
+rm -rf /tmp/agent-control-plane-alpha-demo
+trap 'rm -rf "$tmpdir" /tmp/agent-control-plane-alpha-demo' EXIT
 
 skill_root="$tmpdir/skill"
 profile_home="$tmpdir/.agent-control-plane/profiles"

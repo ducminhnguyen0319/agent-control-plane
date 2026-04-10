@@ -26,6 +26,8 @@ state_file="$host_run_dir/runner.env"
 
 mkdir -p "$bin_dir" "$host_run_dir" "$sandbox_run_dir" "$worktree_dir"
 cp "$RUNNER_SRC" "$runner_copy"
+cp "${FLOW_ROOT}/tools/bin/flow-config-lib.sh" "$tmpdir/flow-config-lib.sh"
+cp "${FLOW_ROOT}/tools/bin/flow-shell-lib.sh" "$tmpdir/flow-shell-lib.sh"
 chmod +x "$runner_copy"
 echo "resume me later" >"$prompt_file"
 

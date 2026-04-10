@@ -41,12 +41,15 @@ execution:
   bypass_profile: "demo_bypass"
 EOF
 
-cat >"$cache_root/codex-quota-manager/rotation-state.json" <<'EOF'
+# admin1 must have a future next_retry_at so the dashboard sees it as
+# "deferred" rather than "ready" — otherwise next_retry_label stays empty.
+admin1_retry_at=$(( $(date +%s) + 86400 ))
+cat >"$cache_root/codex-quota-manager/rotation-state.json" <<EOF
 {
   "accounts": {
     "mihanh": { "removed": false, "next_retry_at": 1775176192, "last_reason": "usage-limit" },
     "mihanh1": { "removed": false, "next_retry_at": 0, "last_reason": "switched" },
-    "admin1": { "removed": false, "next_retry_at": 1775651997, "last_reason": "usage-limit" }
+    "admin1": { "removed": false, "next_retry_at": ${admin1_retry_at}, "last_reason": "usage-limit" }
   }
 }
 EOF

@@ -254,6 +254,7 @@ F_LOSNING_AGENT_ROOT="$agent_root" \
 F_LOSNING_REPO_SLUG="example/repo" \
 F_LOSNING_REPO_ROOT="$repo_root" \
 F_LOSNING_DEPENDENCY_SOURCE_ROOT="$repo_root" \
+FLOW_GITHUB_GRAPHQL_AVAILABLE_CACHE="yes" \
 bash "$bin_dir/start-pr-fix-worker.sh" 601 safe fix
 )"
 
