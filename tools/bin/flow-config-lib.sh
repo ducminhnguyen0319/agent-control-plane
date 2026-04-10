@@ -1741,6 +1741,34 @@ flow_provider_pool_pi_timeout_seconds() {
   flow_provider_pool_value "${config_file}" "${pool_name}" "pi.timeout_seconds"
 }
 
+flow_provider_pool_opencode_model() {
+  local config_file="${1:?config file required}"
+  local pool_name="${2:?pool name required}"
+
+  flow_provider_pool_value "${config_file}" "${pool_name}" "opencode.model"
+}
+
+flow_provider_pool_opencode_timeout_seconds() {
+  local config_file="${1:?config file required}"
+  local pool_name="${2:?pool name required}"
+
+  flow_provider_pool_value "${config_file}" "${pool_name}" "opencode.timeout_seconds"
+}
+
+flow_provider_pool_kilo_model() {
+  local config_file="${1:?config file required}"
+  local pool_name="${2:?pool name required}"
+
+  flow_provider_pool_value "${config_file}" "${pool_name}" "kilo.model"
+}
+
+flow_provider_pool_kilo_timeout_seconds() {
+  local config_file="${1:?config file required}"
+  local pool_name="${2:?pool name required}"
+
+  flow_provider_pool_value "${config_file}" "${pool_name}" "kilo.timeout_seconds"
+}
+
 flow_sanitize_provider_key() {
   local raw_key="${1:?raw key required}"
 
@@ -1770,6 +1798,12 @@ flow_provider_pool_model_identity() {
       ;;
     pi)
       flow_provider_pool_pi_model "${config_file}" "${pool_name}"
+      ;;
+    opencode)
+      flow_provider_pool_opencode_model "${config_file}" "${pool_name}"
+      ;;
+    kilo)
+      flow_provider_pool_kilo_model "${config_file}" "${pool_name}"
       ;;
     *)
       printf '\n'
@@ -1810,6 +1844,10 @@ flow_provider_pool_state_get() {
   local pi_model=""
   local pi_thinking=""
   local pi_timeout_seconds=""
+  local opencode_model=""
+  local opencode_timeout_seconds=""
+  local kilo_model=""
+  local kilo_timeout_seconds=""
 
   backend="$(flow_provider_pool_backend "${config_file}" "${pool_name}")"
   safe_profile="$(flow_provider_pool_safe_profile "${config_file}" "${pool_name}")"
@@ -1829,6 +1867,10 @@ flow_provider_pool_state_get() {
   pi_model="$(flow_provider_pool_pi_model "${config_file}" "${pool_name}")"
   pi_thinking="$(flow_provider_pool_pi_thinking "${config_file}" "${pool_name}")"
   pi_timeout_seconds="$(flow_provider_pool_pi_timeout_seconds "${config_file}" "${pool_name}")"
+  opencode_model="$(flow_provider_pool_opencode_model "${config_file}" "${pool_name}")"
+  opencode_timeout_seconds="$(flow_provider_pool_opencode_timeout_seconds "${config_file}" "${pool_name}")"
+  kilo_model="$(flow_provider_pool_kilo_model "${config_file}" "${pool_name}")"
+  kilo_timeout_seconds="$(flow_provider_pool_kilo_timeout_seconds "${config_file}" "${pool_name}")"
   model="$(flow_provider_pool_model_identity "${config_file}" "${pool_name}")"
 
   case "${backend}" in
@@ -1846,6 +1888,12 @@ flow_provider_pool_state_get() {
       ;;
     pi)
       [[ -n "${pi_model}" ]] || valid="no"
+      ;;
+    opencode)
+      [[ -n "${opencode_model}" && -n "${opencode_timeout_seconds}" ]] || valid="no"
+      ;;
+    kilo)
+      [[ -n "${kilo_model}" && -n "${kilo_timeout_seconds}" ]] || valid="no"
       ;;
     *)
       valid="no"
@@ -1905,6 +1953,10 @@ flow_provider_pool_state_get() {
   printf 'PI_MODEL=%s\n' "${pi_model}"
   printf 'PI_THINKING=%s\n' "${pi_thinking}"
   printf 'PI_TIMEOUT_SECONDS=%s\n' "${pi_timeout_seconds}"
+  printf 'OPENCODE_MODEL=%s\n' "${opencode_model}"
+  printf 'OPENCODE_TIMEOUT_SECONDS=%s\n' "${opencode_timeout_seconds}"
+  printf 'KILO_MODEL=%s\n' "${kilo_model}"
+  printf 'KILO_TIMEOUT_SECONDS=%s\n' "${kilo_timeout_seconds}"
 }
 
 flow_selected_provider_pool_env() {
@@ -2118,6 +2170,10 @@ flow_export_execution_env() {
   local pi_model=""
   local pi_thinking=""
   local pi_timeout=""
+  local opencode_model=""
+  local opencode_timeout=""
+  local kilo_model=""
+  local kilo_timeout=""
 
   repo_id="$(flow_resolve_repo_id "${config_file}")"
   provider_quota_cooldowns="$(flow_resolve_provider_quota_cooldowns "${config_file}")"
@@ -2157,6 +2213,10 @@ flow_export_execution_env() {
     pi_model="$(flow_kv_get "${provider_pool_selection}" "PI_MODEL")"
     pi_thinking="$(flow_kv_get "${provider_pool_selection}" "PI_THINKING")"
     pi_timeout="$(flow_kv_get "${provider_pool_selection}" "PI_TIMEOUT_SECONDS")"
+    opencode_model="$(flow_kv_get "${provider_pool_selection}" "OPENCODE_MODEL")"
+    opencode_timeout="$(flow_kv_get "${provider_pool_selection}" "OPENCODE_TIMEOUT_SECONDS")"
+    kilo_model="$(flow_kv_get "${provider_pool_selection}" "KILO_MODEL")"
+    kilo_timeout="$(flow_kv_get "${provider_pool_selection}" "KILO_TIMEOUT_SECONDS")"
   else
     if [[ -n "${explicit_coding_worker}" ]]; then
       active_provider_selection_reason="env-override"
@@ -2180,6 +2240,10 @@ flow_export_execution_env() {
     pi_model="$(flow_env_or_config "${config_file}" "ACP_PI_MODEL F_LOSNING_PI_MODEL" "execution.pi.model" "")"
     pi_thinking="$(flow_env_or_config "${config_file}" "ACP_PI_THINKING F_LOSNING_PI_THINKING" "execution.pi.thinking" "")"
     pi_timeout="$(flow_env_or_config "${config_file}" "ACP_PI_TIMEOUT_SECONDS F_LOSNING_PI_TIMEOUT_SECONDS" "execution.pi.timeout_seconds" "")"
+    opencode_model="$(flow_env_or_config "${config_file}" "ACP_OPENCODE_MODEL F_LOSNING_OPENCODE_MODEL" "execution.opencode.model" "")"
+    opencode_timeout="$(flow_env_or_config "${config_file}" "ACP_OPENCODE_TIMEOUT_SECONDS F_LOSNING_OPENCODE_TIMEOUT_SECONDS" "execution.opencode.timeout_seconds" "")"
+    kilo_model="$(flow_env_or_config "${config_file}" "ACP_KILO_MODEL F_LOSNING_KILO_MODEL" "execution.kilo.model" "")"
+    kilo_timeout="$(flow_env_or_config "${config_file}" "ACP_KILO_TIMEOUT_SECONDS F_LOSNING_KILO_TIMEOUT_SECONDS" "execution.kilo.timeout_seconds" "")"
   fi
 
   if [[ -n "${coding_worker}" ]]; then
@@ -2286,6 +2350,22 @@ flow_export_execution_env() {
   if [[ -n "${pi_timeout}" ]]; then
     export F_LOSNING_PI_TIMEOUT_SECONDS="${pi_timeout}"
     export ACP_PI_TIMEOUT_SECONDS="${pi_timeout}"
+  fi
+  if [[ -n "${opencode_model}" ]]; then
+    export F_LOSNING_OPENCODE_MODEL="${opencode_model}"
+    export ACP_OPENCODE_MODEL="${opencode_model}"
+  fi
+  if [[ -n "${opencode_timeout}" ]]; then
+    export F_LOSNING_OPENCODE_TIMEOUT_SECONDS="${opencode_timeout}"
+    export ACP_OPENCODE_TIMEOUT_SECONDS="${opencode_timeout}"
+  fi
+  if [[ -n "${kilo_model}" ]]; then
+    export F_LOSNING_KILO_MODEL="${kilo_model}"
+    export ACP_KILO_MODEL="${kilo_model}"
+  fi
+  if [[ -n "${kilo_timeout}" ]]; then
+    export F_LOSNING_KILO_TIMEOUT_SECONDS="${kilo_timeout}"
+    export ACP_KILO_TIMEOUT_SECONDS="${kilo_timeout}"
   fi
 
   flow_export_github_cli_auth_env "$(flow_resolve_repo_slug "${config_file}")"
