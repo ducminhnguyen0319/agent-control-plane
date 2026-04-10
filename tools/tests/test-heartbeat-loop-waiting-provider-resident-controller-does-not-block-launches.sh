@@ -118,7 +118,12 @@ chmod +x \
   "$shared_home/tools/bin/agent-project-cleanup-session" \
   "$bin_dir/tmux"
 
-(sleep 30) &
+cat >"$tmpdir/fake-start-resident-issue-loop.sh" <<'FAKE'
+#!/usr/bin/env bash
+sleep 30
+FAKE
+chmod +x "$tmpdir/fake-start-resident-issue-loop.sh"
+"$tmpdir/fake-start-resident-issue-loop.sh" &
 controller_pid="$!"
 printf '%s\n' "${controller_pid}" >"$state_root/pending-launches/issue-101.pid"
 cat >"$state_root/resident-workers/issues/101/controller.env" <<EOF

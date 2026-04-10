@@ -51,6 +51,7 @@ export TEST_LABELS_LOG="$labels_log"
 export F_LOSNING_REPO_SLUG="example/repo"
 
 # shellcheck source=/dev/null
+export FLOW_GITHUB_GRAPHQL_AVAILABLE_CACHE="yes"
 source "$HOOKS_FILE"
 FLOW_TOOLS_DIR="$tools_dir"
 REPO_SLUG="example/repo"

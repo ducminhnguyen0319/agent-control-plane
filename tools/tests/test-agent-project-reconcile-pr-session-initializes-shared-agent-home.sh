@@ -16,6 +16,7 @@ mkdir -p "$shared_bin" "$shared_assets" "$runs_root/fl-pr-999" "$history_root" "
 printf '{}\n' >"$shared_assets/workflow-catalog.json"
 
 cp tools/bin/agent-project-reconcile-pr-session "$shared_bin/agent-project-reconcile-pr-session"
+cp tools/bin/reconcile-bootstrap-lib.sh "$shared_bin/reconcile-bootstrap-lib.sh"
 cp tools/bin/flow-shell-lib.sh "$shared_bin/flow-shell-lib.sh"
 cp tools/bin/flow-config-lib.sh "$shared_bin/flow-config-lib.sh"
 

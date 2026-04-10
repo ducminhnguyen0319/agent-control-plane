@@ -31,6 +31,7 @@ lane_key="issue-lane-recurring-general-openclaw-safe"
 
 mkdir -p "$bin_dir" "$hooks_dir" "$assets_dir" "$profile_dir" "$shim_dir" "$agent_root" "$repo_root" "$capture_dir"
 cp "$REAL_LOOP" "$bin_dir/start-resident-issue-loop.sh"
+cp "$FLOW_ROOT/tools/bin/resident-issue-controller-lib.sh" "$bin_dir/resident-issue-controller-lib.sh"
 cp "$REAL_CONFIG_LIB" "$bin_dir/flow-config-lib.sh"
 cp "$REAL_SHELL_LIB" "$bin_dir/flow-shell-lib.sh"
 cp "$REAL_RESIDENT_LIB" "$bin_dir/flow-resident-worker-lib.sh"
@@ -118,7 +119,12 @@ EOF
 chmod +x "$bin_dir/reconcile-issue-worker.sh"
 
 mkdir -p "$agent_root/state/resident-workers/issues/440"
-(sleep 30) &
+cat >"$tmpdir/fake-start-resident-issue-loop.sh" <<'FAKE'
+#!/usr/bin/env bash
+sleep 30
+FAKE
+chmod +x "$tmpdir/fake-start-resident-issue-loop.sh"
+"$tmpdir/fake-start-resident-issue-loop.sh" &
 controller_pid="$!"
 cat >"$agent_root/state/resident-workers/issues/440/controller.env" <<EOF
 ISSUE_ID=440
@@ -127,6 +133,7 @@ CONTROLLER_STATE=waiting-worker
 ACTIVE_RESIDENT_WORKER_KEY=${lane_key}
 EOF
 
+FLOW_GITHUB_GRAPHQL_AVAILABLE_CACHE="yes" \
 PATH="$shim_dir:$PATH" \
 ACP_PROJECT_ID="demo" \
 ACP_PROFILE_REGISTRY_ROOT="$profile_registry_root" \

@@ -24,6 +24,7 @@ git -C "$repo_root" add README.md
 git -C "$repo_root" commit -q -m "init" >/dev/null 2>&1
 
 cp "$FLOW_ROOT/tools/bin/agent-project-reconcile-pr-session" "$bin_dir/"
+cp "$FLOW_ROOT/tools/bin/reconcile-bootstrap-lib.sh" "$bin_dir/"
 cp "$FLOW_ROOT/tools/bin/flow-config-lib.sh" "$bin_dir/"
 cp "$FLOW_ROOT/tools/bin/flow-shell-lib.sh" "$bin_dir/"
 cp "$FLOW_ROOT/tools/bin/flow-resident-worker-lib.sh" "$bin_dir/"

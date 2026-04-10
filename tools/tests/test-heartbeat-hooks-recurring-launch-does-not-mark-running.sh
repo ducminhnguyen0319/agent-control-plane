@@ -90,6 +90,7 @@ EOF
 chmod +x "$bin_dir/agent-project-detached-launch" "$bin_dir/agent-github-update-labels"
 
 PATH="$shim_dir:$PATH" \
+FLOW_GITHUB_GRAPHQL_AVAILABLE_CACHE="yes" \
 ACP_PROJECT_ID="demo" \
 ACP_PROFILE_REGISTRY_ROOT="$profile_registry_root" \
 TEST_CAPTURE_FILE="$capture_file" \

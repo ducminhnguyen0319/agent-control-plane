@@ -107,6 +107,7 @@ ACTIVE_RESIDENT_WORKER_KEY=${lane_key}
 EOF
 
 PATH="$shim_dir:$PATH" \
+FLOW_GITHUB_GRAPHQL_AVAILABLE_CACHE="yes" \
 ACP_PROJECT_ID="demo" \
 ACP_PROFILE_REGISTRY_ROOT="$profile_registry_root" \
 TEST_CAPTURE_FILE="$capture_file" \

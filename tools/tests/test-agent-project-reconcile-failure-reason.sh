@@ -33,6 +33,7 @@ mkdir -p \
 
 cp "$ISSUE_RECONCILE_SRC" "$shared_bin/agent-project-reconcile-issue-session"
 cp "$PR_RECONCILE_SRC" "$shared_bin/agent-project-reconcile-pr-session"
+cp "$FLOW_ROOT/tools/bin/reconcile-bootstrap-lib.sh" "$shared_bin/reconcile-bootstrap-lib.sh"
 cp "$FLOW_SHELL_LIB" "$shared_bin/flow-shell-lib.sh"
 cp "$RESIDENT_LIB" "$shared_bin/flow-resident-worker-lib.sh"
 cp "$FLOW_CONFIG_LIB" "$shared_bin/flow-config-lib.sh"

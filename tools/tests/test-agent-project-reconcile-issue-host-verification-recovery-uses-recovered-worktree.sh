@@ -23,6 +23,7 @@ capture_file="$tmpdir/publish-attempts.log"
 
 mkdir -p "$shared_bin" "$runs_root" "$repo_root" "$run_dir"
 cp "$SOURCE_SCRIPT" "$shared_bin/agent-project-reconcile-issue-session"
+cp "$FLOW_ROOT/tools/bin/reconcile-bootstrap-lib.sh" "$shared_bin/reconcile-bootstrap-lib.sh"
 cp "$RECORD_VERIFICATION_SCRIPT" "$shared_bin/record-verification.sh"
 cp "$RESIDENT_LIB" "$shared_bin/flow-resident-worker-lib.sh"
 cp "$FLOW_CONFIG_LIB" "$shared_bin/flow-config-lib.sh"

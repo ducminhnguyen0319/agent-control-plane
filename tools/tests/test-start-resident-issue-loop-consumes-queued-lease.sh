@@ -23,6 +23,7 @@ capture_dir="$tmpdir/capture"
 
 mkdir -p "$bin_dir" "$hooks_dir" "$assets_dir" "$profile_dir" "$shim_dir" "$agent_root" "$repo_root" "$capture_dir"
 cp "$REAL_LOOP" "$bin_dir/start-resident-issue-loop.sh"
+cp "$FLOW_ROOT/tools/bin/resident-issue-controller-lib.sh" "$bin_dir/resident-issue-controller-lib.sh"
 cp "$REAL_CONFIG_LIB" "$bin_dir/flow-config-lib.sh"
 cp "$REAL_SHELL_LIB" "$bin_dir/flow-shell-lib.sh"
 cp "$REAL_RESIDENT_LIB" "$bin_dir/flow-resident-worker-lib.sh"
@@ -165,6 +166,7 @@ QUEUED_BY=test
 QUEUED_AT=2026-03-26T00:00:00Z
 EOF
 
+FLOW_GITHUB_GRAPHQL_AVAILABLE_CACHE="yes" \
 PATH="$shim_dir:$PATH" \
 ACP_PROJECT_ID="demo" \
 ACP_PROFILE_REGISTRY_ROOT="$profile_registry_root" \

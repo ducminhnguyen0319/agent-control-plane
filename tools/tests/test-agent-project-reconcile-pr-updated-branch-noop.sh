@@ -21,6 +21,7 @@ pr_worktree="$tmpdir/pr-worktree"
 mkdir -p "$shared_bin" "$runs_root/fl-pr-200" "$history_root" "$bin_dir"
 
 cp "$PR_RECONCILE_SRC" "$shared_bin/agent-project-reconcile-pr-session"
+cp "$FLOW_ROOT/tools/bin/reconcile-bootstrap-lib.sh" "$shared_bin/reconcile-bootstrap-lib.sh"
 cp "$FLOW_SHELL_LIB" "$shared_bin/flow-shell-lib.sh"
 cp "$FLOW_CONFIG_LIB" "$shared_bin/flow-config-lib.sh"
 

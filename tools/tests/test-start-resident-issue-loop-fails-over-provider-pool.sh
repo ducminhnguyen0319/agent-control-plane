@@ -29,6 +29,7 @@ primary_cooldown_file="$state_root/retries/providers/openclaw-primary-model.env"
 
 mkdir -p "$bin_dir" "$hooks_dir" "$assets_dir" "$profile_dir" "$shim_dir" "$agent_root" "$repo_root" "$capture_dir"
 cp "$REAL_LOOP" "$bin_dir/start-resident-issue-loop.sh"
+cp "$FLOW_ROOT/tools/bin/resident-issue-controller-lib.sh" "$bin_dir/resident-issue-controller-lib.sh"
 cp "$REAL_CONFIG_LIB" "$bin_dir/flow-config-lib.sh"
 cp "$REAL_SHELL_LIB" "$bin_dir/flow-shell-lib.sh"
 cp "$REAL_RESIDENT_LIB" "$bin_dir/flow-resident-worker-lib.sh"
@@ -186,6 +187,7 @@ fi
 EOF
 chmod +x "$bin_dir/reconcile-issue-worker.sh"
 
+FLOW_GITHUB_GRAPHQL_AVAILABLE_CACHE="yes" \
 PATH="$shim_dir:$PATH" \
 ACP_PROJECT_ID="demo" \
 ACP_PROFILE_REGISTRY_ROOT="$profile_registry_root" \

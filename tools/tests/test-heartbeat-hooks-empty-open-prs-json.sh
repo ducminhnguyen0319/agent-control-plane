@@ -55,6 +55,7 @@ chmod +x "$bin_dir/gh" "$tools_dir/retry-state.sh"
 export PATH="$bin_dir:$node_bin_dir:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export F_LOSNING_REPO_SLUG="example/repo"
 export ACP_MANAGED_PR_BRANCH_GLOBS="agent/example/* codex/* openclaw/*"
+export FLOW_GITHUB_GRAPHQL_AVAILABLE_CACHE="yes"
 
 # shellcheck source=/dev/null
 source "$HOOKS_FILE"

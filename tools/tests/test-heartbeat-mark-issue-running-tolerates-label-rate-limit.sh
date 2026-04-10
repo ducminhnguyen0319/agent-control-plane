@@ -54,6 +54,7 @@ export ACP_PROJECT_ID="alpha"
 export ACP_PROFILE_REGISTRY_ROOT="$profile_registry_root"
 
 # shellcheck source=/dev/null
+export FLOW_GITHUB_GRAPHQL_AVAILABLE_CACHE="yes"
 source "$HOOKS_FILE"
 FLOW_TOOLS_DIR="$tools_dir"
 REPO_SLUG="example/repo"

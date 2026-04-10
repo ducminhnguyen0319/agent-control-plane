@@ -89,7 +89,12 @@ printf 'LAUNCH_MODE=detached\n'
 EOF
 chmod +x "$bin_dir/agent-project-detached-launch"
 
-(sleep 30) &
+cat >"$tmpdir/fake-start-resident-issue-loop.sh" <<'FAKE'
+#!/usr/bin/env bash
+sleep 30
+FAKE
+chmod +x "$tmpdir/fake-start-resident-issue-loop.sh"
+"$tmpdir/fake-start-resident-issue-loop.sh" &
 controller_pid="$!"
 cat >"$state_root/resident-workers/issues/440/controller.env" <<EOF
 ISSUE_ID=440
@@ -98,6 +103,7 @@ CONTROLLER_STATE=idle
 EOF
 
 PATH="$shim_dir:$PATH" \
+FLOW_GITHUB_GRAPHQL_AVAILABLE_CACHE="yes" \
 ACP_PROJECT_ID="demo" \
 ACP_PROFILE_REGISTRY_ROOT="$profile_registry_root" \
 TEST_CAPTURE_FILE="$capture_file" \

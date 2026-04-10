@@ -35,6 +35,7 @@ chmod +x "$bin_dir/gh"
 export PATH="$bin_dir:$node_bin_dir:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export TEST_GH_LOG="$gh_log"
 export F_LOSNING_REPO_SLUG="example/repo"
+export FLOW_GITHUB_GRAPHQL_AVAILABLE_CACHE="yes"
 
 # shellcheck source=/dev/null
 source "$HOOKS_FILE"
