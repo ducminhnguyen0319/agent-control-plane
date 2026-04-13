@@ -259,7 +259,7 @@ SESSION=demo-issue-6
 UPDATED_AT=2026-03-27T11:13:30Z
 EOF
 
-cat >"${state_root}/resident-workers/issue-queue/claims/issue-7.env" <<'EOF'
+cat >"${state_root}/resident-workers/issue-queue/claims/issue-7.issue-lane-recurring-general-openclaw-safe.999" <<'EOF'
 ISSUE_ID=7
 SESSION=demo-issue-7
 UPDATED_AT=2026-03-27T11:14:00Z

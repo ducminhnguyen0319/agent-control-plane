@@ -13,8 +13,14 @@ from typing import Any
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 TOOLS_BIN_DIR = ROOT_DIR / "tools" / "bin"
+DASHBOARD_DIR = ROOT_DIR / "tools" / "dashboard"
 RENDER_FLOW_CONFIG = TOOLS_BIN_DIR / "render-flow-config.sh"
 WORKER_STATUS_TOOL = TOOLS_BIN_DIR / "agent-project-worker-status"
+
+if str(DASHBOARD_DIR) not in sys.path:
+    sys.path.insert(0, str(DASHBOARD_DIR))
+
+from issue_queue_state import collect_issue_queue
 
 
 def utc_now_iso() -> str:
@@ -701,53 +707,6 @@ def resolve_history_root(render_env: dict[str, str], yaml_env: dict[str, str], r
     if runs_root.name == "runs":
         return runs_root.parent / "history"
     return Path(".")
-
-
-def collect_issue_queue(state_root: Path) -> dict[str, list[dict[str, Any]]]:
-    queue_root = state_root / "resident-workers" / "issue-queue"
-    pending_root = queue_root / "pending"
-    claims_root = queue_root / "claims"
-
-    def collect_files(root: Path) -> list[dict[str, Any]]:
-        if not root.is_dir():
-            return []
-        items: list[dict[str, Any]] = []
-        for path in sorted(root.glob("*.env"), key=lambda item: item.stat().st_mtime, reverse=True):
-            env = read_env_file(path)
-            issue_id = env.get("ISSUE_ID", path.stem.removeprefix("issue-"))
-            claim_file = env.get("CLAIM_FILE", "")
-            in_claims = root.name == "claims"
-            if not claim_file and in_claims:
-                claim_file = str(path)
-            claimer = ""
-            if claim_file:
-                claim_base = Path(claim_file).name
-                if claim_base.startswith(f"issue-{issue_id}."):
-                    if claim_base.endswith(".env"):
-                        claim_base = claim_base.removesuffix(".env")
-                    claim_token = claim_base.split(".", 1)[1]
-                    if "." in claim_token:
-                        tail = claim_token.rsplit(".", 1)[1]
-                        if tail.isdigit():
-                            claim_token = claim_token.rsplit(".", 1)[0]
-                    claimer = claim_token
-            item = {
-                "issue_id": issue_id,
-                "session": env.get("SESSION", ""),
-                "queued_by": env.get("QUEUED_BY", ""),
-                "claim_file": claim_file,
-                "claimer": claimer,
-                "updated_at": env.get("UPDATED_AT", "") or file_mtime_iso(path),
-                "state_file": str(path),
-            }
-            items.append(item)
-        return items
-
-    return {
-        "pending": collect_files(pending_root),
-        "claims": collect_files(claims_root),
-    }
-
 
 def build_profile_snapshot(profile_id: str, registry_root: Path) -> dict[str, Any]:
     env = env_with_profile(profile_id, registry_root)

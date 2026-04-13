@@ -285,6 +285,22 @@ flow_resident_issue_queue_file() {
   printf '%s/issue-%s.env\n' "$(flow_resident_issue_queue_pending_dir "${config_file}")" "${issue_id}"
 }
 
+flow_resident_issue_claim_file() {
+  local config_file="${1:-}"
+  local issue_id="${2:?issue id required}"
+  local claimer_key="${3:?claimer key required}"
+
+  if [[ -z "${config_file}" ]]; then
+    config_file="$(resolve_flow_config_yaml "${BASH_SOURCE[1]:-${BASH_SOURCE[0]}}")"
+  fi
+
+  printf '%s/issue-%s.%s.%s.env\n' \
+    "$(flow_resident_issue_queue_claims_dir "${config_file}")" \
+    "${issue_id}" \
+    "${claimer_key}" \
+    "$$"
+}
+
 flow_resident_issue_controller_file() {
   local config_file="${1:-}"
   local issue_id="${2:?issue id required}"
@@ -342,8 +358,11 @@ flow_resident_issue_enqueue() {
 
   tmp_file="${queue_file}.tmp.$$"
   flow_resident_write_metadata "${tmp_file}" \
+    "STATE_FORMAT_VERSION=1" \
+    "STATE_KIND=pending" \
     "ISSUE_ID=${issue_id}" \
     "QUEUED_BY=${queued_by}" \
+    "UPDATED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
     "QUEUED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   mv "${tmp_file}" "${queue_file}"
 
@@ -361,6 +380,9 @@ flow_resident_issue_claim_next() {
   local issue_id=""
   local claim_file=""
   local claim_key=""
+  local queued_by=""
+  local queued_at=""
+  local claimed_at=""
 
   if [[ -z "${config_file}" ]]; then
     config_file="$(resolve_flow_config_yaml "${BASH_SOURCE[1]:-${BASH_SOURCE[0]}}")"
@@ -378,8 +400,22 @@ flow_resident_issue_claim_next() {
     [[ -n "${issue_id}" ]] || continue
     [[ "${issue_id}" != "${skip_issue_id}" ]] || continue
 
-    claim_file="${claims_dir}/issue-${issue_id}.${claim_key}.$$"
+    queued_by="$(flow_resident_metadata_value "${queue_file}" "QUEUED_BY" || true)"
+    queued_at="$(flow_resident_metadata_value "${queue_file}" "QUEUED_AT" || true)"
+    claimed_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    claim_file="$(flow_resident_issue_claim_file "${config_file}" "${issue_id}" "${claim_key}")"
     if mv "${queue_file}" "${claim_file}" 2>/dev/null; then
+      flow_resident_write_metadata "${claim_file}" \
+        "STATE_FORMAT_VERSION=1" \
+        "STATE_KIND=claim" \
+        "ISSUE_ID=${issue_id}" \
+        "QUEUED_BY=${queued_by}" \
+        "QUEUED_AT=${queued_at}" \
+        "SESSION=${claimer_key}" \
+        "CLAIMED_BY=${claim_key}" \
+        "CLAIMED_AT=${claimed_at}" \
+        "UPDATED_AT=${claimed_at}" \
+        "CLAIM_FILE=${claim_file}"
       printf 'ISSUE_ID=%s\n' "${issue_id}"
       printf 'CLAIM_FILE=%s\n' "${claim_file}"
       return 0
