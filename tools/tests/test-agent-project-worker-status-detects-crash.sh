@@ -163,7 +163,30 @@ assert_status "FAILED"
 assert_failure_reason "no-codex-progress-before-stall-threshold"
 
 # ============================================================
-# Test 6: Runner succeeded (normal path unchanged)
+# Test 6: Running runner with OpenClaw-style stall marker preserves reason
+# ============================================================
+
+cat >"$runner_state_file" <<'EOF'
+RUNNER_STATE=running
+THREAD_ID=openclaw-thread
+ATTEMPT=2
+RESUME_COUNT=0
+LAST_EXIT_CODE=
+LAST_FAILURE_REASON=""
+LAST_TRIGGER_REASON=schedule
+UPDATED_AT=2025-01-01T00:00:00Z
+EOF
+
+cat >"$session_log" <<'EOF'
+[2026-01-01T00:00:00Z] starting openclaw session
+[openclaw] stale-run no-agent-progress-before-stall-threshold elapsed=180s idle=180s
+EOF
+
+assert_status "FAILED"
+assert_failure_reason "no-agent-progress-before-stall-threshold"
+
+# ============================================================
+# Test 7: Runner succeeded (normal path unchanged)
 # ============================================================
 
 # Remove stale state
@@ -183,7 +206,7 @@ EOF
 assert_status "SUCCEEDED"
 
 # ============================================================
-# Test 7: Runner failed (normal path unchanged)
+# Test 8: Runner failed (normal path unchanged)
 # ============================================================
 
 cat >"$runner_state_file" <<'EOF'
@@ -201,7 +224,7 @@ assert_status "FAILED"
 assert_failure_reason "syntax-error"
 
 # ============================================================
-# Test 8: Unknown state with stale result.env and no runner crash
+# Test 9: Unknown state with stale result.env and no runner crash
 # → SUCCEEDED via result.env (still works for valid completions)
 # ============================================================
 

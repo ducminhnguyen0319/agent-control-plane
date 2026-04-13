@@ -57,8 +57,18 @@ failure_reason_from_output() {
     return 0
   fi
 
+  if rg -qi 'stale-run no-agent-output-before-stall-threshold|no-agent-output-before-stall-threshold' "$output_file"; then
+    printf 'no-agent-output-before-stall-threshold\n'
+    return 0
+  fi
+
   if rg -qi 'stale-run no-codex-progress-before-stall-threshold|no-codex-progress-before-stall-threshold' "$output_file"; then
     printf 'no-codex-progress-before-stall-threshold\n'
+    return 0
+  fi
+
+  if rg -qi 'stale-run no-agent-progress-before-stall-threshold|no-agent-progress-before-stall-threshold' "$output_file"; then
+    printf 'no-agent-progress-before-stall-threshold\n'
     return 0
   fi
 
