@@ -24,6 +24,7 @@ const fs = require("fs");
 const reportPath = process.argv[2];
 const pack = JSON.parse(fs.readFileSync(reportPath, "utf8"))[0];
 const paths = new Set((pack.files || []).map((entry) => entry.path));
+const entriesByPath = new Map((pack.files || []).map((entry) => [entry.path, entry]));
 
 function fail(message) {
   console.error(message);
@@ -63,6 +64,21 @@ for (const requiredPath of [
 ]) {
   if (!paths.has(requiredPath)) {
     fail(`required tarball path missing: ${requiredPath}`);
+  }
+}
+
+for (const executablePath of [
+  "bin/agent-control-plane",
+  "bin/issue-resource-class.sh",
+  "bin/label-follow-up-issues.sh",
+  "bin/pr-risk.sh",
+  "bin/sync-pr-labels.sh",
+  "npm/bin/agent-control-plane.js",
+  "tools/bin/test-smoke.sh",
+]) {
+  const entry = entriesByPath.get(executablePath);
+  if (!entry || (entry.mode & 0o111) === 0) {
+    fail(`required executable tarball path missing or non-executable: ${executablePath}`);
   }
 }
 
