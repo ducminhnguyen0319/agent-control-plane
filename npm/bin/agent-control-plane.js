@@ -1827,8 +1827,14 @@ async function collectSetupConfig(options, context) {
   let profileId = suggestedProfileId;
   let codingWorker = suggestedWorker;
 
-  if (!fs.existsSync(detectedRepoRoot)) {
+  const detectedRepoRootExists = fs.existsSync(detectedRepoRoot);
+  if (!detectedRepoRootExists && !options.allowMissingRepo) {
     throw new Error(`setup repo root does not exist: ${detectedRepoRoot}`);
+  }
+
+  if (options.allowMissingRepo && !detectedRepoRootExists) {
+    console.log(`\nSource repo root not found yet: ${detectedRepoRoot}`);
+    console.log("- continuing because --allow-missing-repo was set; profile adopt will run in missing-repo mode.");
   }
 
   if (!options.interactive) {

@@ -312,6 +312,28 @@ grep -q '^RUNTIME_START_REASON=not-requested$' <<<"${setup_output}"
 test -f "${platform_home}/control-plane/profiles/setup-demo/control-plane.yaml"
 test -d "${platform_home}/projects/setup-demo/repo"
 
+missing_repo_path="${tmpdir}/missing-setup-repo"
+setup_missing_repo_output="$(
+  HOME="${home_dir}" \
+  AGENT_PLATFORM_HOME="${platform_home}" \
+  PATH="${fake_bin}:${PATH}" \
+  run_with_timeout 30 node "${CLI_SCRIPT}" setup \
+    --non-interactive \
+    --repo-root "${missing_repo_path}" \
+    --repo-slug "example-owner/missing-repo-demo" \
+    --profile-id missing-repo-demo \
+    --allow-missing-repo \
+    --no-start-runtime \
+    --skip-anchor-sync \
+    --skip-workspace-sync
+)"
+
+grep -q '^SETUP_STATUS=ok$' <<<"${setup_missing_repo_output}"
+grep -q '^PROFILE_ID=missing-repo-demo$' <<<"${setup_missing_repo_output}"
+grep -q '^ANCHOR_SYNC_STATUS=skipped$' <<<"${setup_missing_repo_output}"
+test -f "${platform_home}/control-plane/profiles/missing-repo-demo/control-plane.yaml"
+test -d "${platform_home}/projects/missing-repo-demo/repo"
+
 custom_agent_root="${tmpdir}/custom-agent-root"
 custom_agent_repo_root="${tmpdir}/custom-anchor-repo"
 custom_worktree_root="${tmpdir}/custom-worktrees"
