@@ -456,6 +456,48 @@ printf '%s' "${setup_dry_run_json_output}" | node -e '
 
 test ! -e "${platform_home}/control-plane/profiles/dry-run-json/control-plane.yaml"
 
+apk_bin="${tmpdir}/apk-bin"
+mkdir -p "${apk_bin}"
+cat >"${apk_bin}/bash" <<'EOF'
+#!/bin/sh
+exec /bin/bash "$@"
+EOF
+cat >"${apk_bin}/apk" <<'EOF'
+#!/bin/sh
+echo "apk stub"
+exit 0
+EOF
+chmod +x "${apk_bin}/bash" "${apk_bin}/apk"
+apk_home="${tmpdir}/apk-home"
+mkdir -p "${apk_home}"
+cat >"${apk_home}/.bash_profile" <<EOF
+export PATH="${apk_bin}"
+EOF
+
+setup_apk_dry_run_output="$(
+  AGENT_PLATFORM_HOME="${platform_home}" \
+  HOME="${apk_home}" \
+  PATH="${apk_bin}:${PATH}" \
+  run_with_timeout 30 node "${CLI_SCRIPT}" setup \
+    --json \
+    --dry-run \
+    --non-interactive \
+    --repo-root "${setup_repo}" \
+    --repo-slug test-owner/alpine-distro \
+    --no-start-runtime \
+    --skip-anchor-sync \
+    --skip-workspace-sync
+)"
+
+printf '%s' "${setup_apk_dry_run_output}" | node -e '
+  const fs = require("fs");
+  const data = JSON.parse(fs.readFileSync(0, "utf8"));
+  if (data.setupStatus !== "dry-run") process.exit(1);
+  if (data.dependencyInstall.status !== "would-prompt") process.exit(1);
+  if (data.dependencyInstall.installer !== "apk") process.exit(1);
+  if (!data.dependencyInstall.command.includes("apk")) process.exit(1);
+'
+
 # onboard alias maps to setup
 onboard_output="$(
   HOME="${home_dir}" \

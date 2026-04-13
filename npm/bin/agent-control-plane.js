@@ -774,6 +774,9 @@ function detectPackageManager() {
   if (commandExists("brew")) {
     return { name: "brew" };
   }
+  if (commandExists("apt")) {
+    return { name: "apt" };
+  }
   if (commandExists("apt-get")) {
     return { name: "apt-get" };
   }
@@ -788,6 +791,9 @@ function detectPackageManager() {
   }
   if (commandExists("zypper")) {
     return { name: "zypper" };
+  }
+  if (commandExists("apk")) {
+    return { name: "apk" };
   }
   return null;
 }
@@ -804,6 +810,24 @@ function dependencyPackageMap(managerName) {
         tmux: "tmux"
       };
     case "apt-get":
+      return {
+        bash: "bash",
+        git: "git",
+        gh: "gh",
+        jq: "jq",
+        python3: "python3",
+        tmux: "tmux"
+      };
+    case "apt":
+      return {
+        bash: "bash",
+        git: "git",
+        gh: "gh",
+        jq: "jq",
+        python3: "python3",
+        tmux: "tmux"
+      };
+    case "apk":
       return {
         bash: "bash",
         git: "git",
@@ -870,6 +894,10 @@ function buildDependencyInstallPlan(missingTools) {
       commands.push([...prefix, "apt-get", "update"]);
       commands.push([...prefix, "apt-get", "install", "-y", ...packages]);
       break;
+    case "apt":
+      commands.push([...prefix, "apt", "update"]);
+      commands.push([...prefix, "apt", "install", "-y", ...packages]);
+      break;
     case "dnf":
       commands.push([...prefix, "dnf", "install", "-y", ...packages]);
       break;
@@ -881,6 +909,9 @@ function buildDependencyInstallPlan(missingTools) {
       break;
     case "zypper":
       commands.push([...prefix, "zypper", "install", "-y", ...packages]);
+      break;
+    case "apk":
+      commands.push([...prefix, "apk", "add", "--no-cache", ...packages]);
       break;
     default:
       return null;
@@ -923,7 +954,7 @@ async function maybeInstallMissingDependencies(options, prereq) {
   if (!plan) {
     console.log("\nACP found missing core dependencies but cannot install them automatically on this machine.");
     console.log(`- missing tools: ${prereq.missingRequired.join(", ")}`);
-    console.log("- supported auto-install package managers today: brew, apt-get, dnf, yum, pacman, zypper");
+    console.log("- supported auto-install package managers today: brew, apt, apt-get, dnf, yum, pacman, zypper, apk");
     return {
       status: "unavailable",
       reason: "no-supported-package-manager",
