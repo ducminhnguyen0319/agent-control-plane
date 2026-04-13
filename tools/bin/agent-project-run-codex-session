@@ -39,10 +39,16 @@ declare -a context_items=()
 declare -a collect_files=()
 
 resolve_codex_bin() {
-  local configured_bin="${CODEX_BIN:-}"
+  local configured_bin="${CODEX_BIN:-${ACP_CODEX_BIN:-${F_LOSNING_CODEX_BIN:-}}}"
   local best_version=""
   local best_bin=""
   local candidate version_line version
+  local -a fallback_paths=(
+    "${HOME}/.local/bin/codex"
+    "${HOME}/.codex/local/bin/codex"
+    "/usr/local/bin/codex"
+    "/opt/homebrew/bin/codex"
+  )
 
   if [[ -n "$configured_bin" && -x "$configured_bin" ]]; then
     printf '%s\n' "$configured_bin"
@@ -50,11 +56,16 @@ resolve_codex_bin() {
   fi
 
   if command -v codex >/dev/null 2>&1; then
-    candidate="$(command -v codex)"
-    if [[ -x "$candidate" ]]; then
-      best_bin="$candidate"
-    fi
+    command -v codex
+    return 0
   fi
+
+  for candidate in "${fallback_paths[@]}"; do
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
 
   if [[ -d "${HOME:-}/.nvm/versions/node" ]]; then
     while IFS= read -r candidate; do
@@ -347,7 +358,7 @@ find_logged_artifact_path() {
     if [[ "\$(basename "\${candidate}")" == "\${artifact_name}" && -f "\${candidate}" ]]; then
       printf '%s\n' "\${candidate}"
     fi
-  done < <(grep -oE '/(Users|Volumes|tmp)/[^[:space:])"]+' ${output_q} 2>/dev/null || true)
+  done < <(grep -oE '/[^[:space:])"]+' ${output_q} 2>/dev/null || true)
 }
 recover_logged_artifact() {
   local artifact_name="\${1:?artifact name required}"

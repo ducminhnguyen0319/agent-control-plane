@@ -38,6 +38,23 @@ auth_refresh_poll_seconds="${ACP_CODEX_AUTH_REFRESH_POLL_SECONDS:-${F_LOSNING_CO
 max_quota_autoswitch_attempts="${ACP_CODEX_MAX_AUTOSWITCH_ATTEMPTS:-${F_LOSNING_CODEX_MAX_AUTOSWITCH_ATTEMPTS:-1}}"
 codex_progress_heartbeat_seconds="${ACP_CODEX_PROGRESS_HEARTBEAT_SECONDS:-${F_LOSNING_CODEX_PROGRESS_HEARTBEAT_SECONDS:-30}}"
 codex_stall_seconds="${ACP_CODEX_STALL_SECONDS:-${F_LOSNING_CODEX_STALL_SECONDS:-300}}"
+python_bin=""
+
+resolve_python_bin() {
+  if command -v python3 >/dev/null 2>&1; then
+    command -v python3
+    return 0
+  fi
+  if [[ -x /opt/homebrew/bin/python3 ]]; then
+    printf '%s\n' "/opt/homebrew/bin/python3"
+    return 0
+  fi
+  if command -v python >/dev/null 2>&1; then
+    command -v python
+    return 0
+  fi
+  return 1
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -91,6 +108,12 @@ esac
 case "$codex_stall_seconds" in
   ''|*[!0-9]*) echo "ACP_CODEX_STALL_SECONDS must be numeric" >&2; exit 1 ;;
 esac
+
+python_bin="$(resolve_python_bin || true)"
+if [[ -z "$python_bin" || ! -x "$python_bin" ]]; then
+  echo "unable to resolve a runnable python interpreter for codex supervision" >&2
+  exit 1
+fi
 
 FLOW_SKILL_DIR="$(resolve_flow_skill_dir "${BASH_SOURCE[0]}")"
 state_file="${host_run_dir}/runner.env"
@@ -177,7 +200,7 @@ run_with_timeout() {
   local timeout_seconds="${1:?timeout seconds required}"
   shift
 
-  /opt/homebrew/bin/python3 - "$timeout_seconds" "$@" <<'PY'
+  "$python_bin" - "$timeout_seconds" "$@" <<'PY'
 import os
 import signal
 import subprocess
@@ -220,6 +243,60 @@ sys.exit(proc.returncode)
 PY
 }
 
+stat_file_size() {
+  local path="${1:?path required}"
+  local value=""
+
+  value="$(stat -f %z "$path" 2>/dev/null || true)"
+  if [[ "$value" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$value"
+    return 0
+  fi
+
+  value="$(stat -c %s "$path" 2>/dev/null || true)"
+  if [[ "$value" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$value"
+    return 0
+  fi
+
+  "$python_bin" - "$path" <<'PY'
+import os
+import sys
+
+try:
+    print(os.path.getsize(sys.argv[1]))
+except OSError:
+    print("0")
+PY
+}
+
+stat_file_mtime() {
+  local path="${1:?path required}"
+  local value=""
+
+  value="$(stat -f %m "$path" 2>/dev/null || true)"
+  if [[ "$value" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$value"
+    return 0
+  fi
+
+  value="$(stat -c %Y "$path" 2>/dev/null || true)"
+  if [[ "$value" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$value"
+    return 0
+  fi
+
+  "$python_bin" - "$path" <<'PY'
+import os
+import sys
+
+try:
+    print(int(os.path.getmtime(sys.argv[1])))
+except OSError:
+    print("0")
+PY
+}
+
 auth_fingerprint() {
   if [[ ! -f "$auth_file" ]]; then
     printf 'missing\n'
@@ -227,8 +304,8 @@ auth_fingerprint() {
   fi
 
   local mtime size sha
-  mtime="$(stat -f %m "$auth_file" 2>/dev/null || printf '0')"
-  size="$(stat -f %z "$auth_file" 2>/dev/null || printf '0')"
+  mtime="$(stat_file_mtime "$auth_file" 2>/dev/null || printf '0')"
+  size="$(stat_file_size "$auth_file" 2>/dev/null || printf '0')"
   sha="$(shasum -a 256 "$auth_file" | awk '{print $1}')"
   printf '%s:%s:%s\n' "$mtime" "$size" "$sha"
 }
@@ -256,8 +333,8 @@ quota_switch_signature() {
   fi
 
   local mtime size sha
-  mtime="$(stat -f %m "$quota_switch_state_file" 2>/dev/null || printf '0')"
-  size="$(stat -f %z "$quota_switch_state_file" 2>/dev/null || printf '0')"
+  mtime="$(stat_file_mtime "$quota_switch_state_file" 2>/dev/null || printf '0')"
+  size="$(stat_file_size "$quota_switch_state_file" 2>/dev/null || printf '0')"
   sha="$(shasum -a 256 "$quota_switch_state_file" | awk '{print $1}')"
   printf '%s:%s:%s\n' "$mtime" "$size" "$sha"
 }
@@ -390,7 +467,7 @@ run_quota_autoswitch() {
 new_output_since() {
   local start_size="${1:?start size required}"
   local file_size
-  file_size="$(stat -f %z "$output_file" 2>/dev/null || printf '0')"
+  file_size="$(stat_file_size "$output_file" 2>/dev/null || printf '0')"
   if (( file_size <= start_size )); then
     return 0
   fi
@@ -456,7 +533,7 @@ stream_codex_exec() {
   local progress_file=""
   local line=""
 
-  last_attempt_start_size="$(stat -f %z "$output_file" 2>/dev/null || printf '0')"
+  last_attempt_start_size="$(stat_file_size "$output_file" 2>/dev/null || printf '0')"
   last_attempt_started_epoch="$(date +%s)"
   progress_file="${host_run_dir}/.codex-progress.$$"
   rm -f "$progress_file"
@@ -514,7 +591,7 @@ stream_codex_exec() {
             break
           fi
         else
-          last_progress_epoch="$(stat -f %m "$progress_file" 2>/dev/null || printf '0')"
+          last_progress_epoch="$(stat_file_mtime "$progress_file" 2>/dev/null || printf '0')"
           if [[ -n "$last_progress_epoch" && "$last_progress_epoch" != "0" ]]; then
             idle_for=$((now - last_progress_epoch))
             if (( idle_for >= codex_stall_seconds )); then
@@ -556,7 +633,7 @@ stream_codex_exec() {
 }
 
 extract_thread_id() {
-  /opt/homebrew/bin/python3 -c '
+  "$python_bin" -c '
 import json
 import sys
 
