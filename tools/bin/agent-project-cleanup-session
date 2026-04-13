@@ -95,6 +95,7 @@ cleanup_error=""
 cleanup_mode="noop"
 orphan_fallback_used="false"
 active_tmux_session="false"
+archived_dir=""
 
 if [[ -n "$session" ]]; then
   meta_file="${runs_root}/${session}/run.env"
@@ -390,6 +391,47 @@ cleanup_orphan_worktree_dir() {
   git -C "$repo_root" worktree prune >/dev/null 2>&1 || true
 }
 
+worktree_path_is_registered() {
+  local candidate_path="${1:-}"
+  [[ -n "${candidate_path}" ]] || return 1
+
+  git -C "$repo_root" worktree list --porcelain 2>/dev/null \
+    | grep -F -x -q -- "worktree ${candidate_path}"
+}
+
+write_cleanup_warning_artifact() {
+  local target_dir=""
+  local notice_file=""
+  local cleanup_error_line=""
+  local recorded_at=""
+
+  [[ "${cleanup_status}" != "0" ]] || return 0
+
+  if [[ -n "${archived_dir}" && -d "${archived_dir}" ]]; then
+    target_dir="${archived_dir}"
+  elif [[ -n "${session}" && -n "${runs_root}" && -d "${runs_root}/${session}" ]]; then
+    target_dir="${runs_root}/${session}"
+  fi
+
+  [[ -n "${target_dir}" && -d "${target_dir}" ]] || return 0
+
+  cleanup_error_line="$(printf '%s' "${cleanup_error}" | tr '\n' ' ' | sed 's/  */ /g')"
+  recorded_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  notice_file="${target_dir}/cleanup-warning.txt"
+  {
+    printf 'recorded_at=%s\n' "${recorded_at}"
+    printf 'session=%s\n' "${session}"
+    printf 'mode=%s\n' "${mode}"
+    printf 'worktree=%s\n' "${worktree_path}"
+    printf 'branch=%s\n' "${branch_name}"
+    printf 'cleanup_mode=%s\n' "${cleanup_mode}"
+    printf 'cleanup_status=%s\n' "${cleanup_status}"
+    if [[ -n "${cleanup_error_line}" ]]; then
+      printf 'cleanup_error=%s\n' "${cleanup_error_line}"
+    fi
+  } >"${notice_file}"
+}
+
 if [[ "$active_tmux_session" == "true" ]]; then
   cleanup_mode="deferred-active-session"
 elif [[ "$skip_worktree_cleanup" != "true" && -n "${worktree_path}" ]] \
@@ -413,7 +455,7 @@ elif [[ "$skip_worktree_cleanup" != "true" && -n "$branch_name" ]]; then
       fi
     fi
   fi
-elif [[ "$skip_worktree_cleanup" != "true" && -n "$worktree_path" ]] && git -C "$repo_root" worktree list --porcelain | rg -F -q "worktree $worktree_path"; then
+elif [[ "$skip_worktree_cleanup" != "true" && -n "$worktree_path" ]] && worktree_path_is_registered "$worktree_path"; then
   git -C "$repo_root" worktree remove "$worktree_path" --force || true
   git -C "$repo_root" worktree prune
   cleanup_mode="worktree"
@@ -433,16 +475,14 @@ if [[ -n "$session" && "$active_tmux_session" != "true" ]]; then
       --session "$session" \
       --remove-file "${remove_file:-}"
   )"
+  archived_dir="$(awk -F= '/^ARCHIVED_DIR=/{print substr($0, index($0, "=") + 1); exit}' <<<"${archive_output}")"
 fi
 
 if [[ "$skip_worktree_cleanup" != "true" && -n "$worktree_path" && ! -d "$worktree_path" ]]; then
   clear_resident_worktree_realpath_references "$worktree_path"
 fi
 
-if [[ "$cleanup_status" != "0" && -z "$session" ]]; then
-  [[ -n "$cleanup_error" ]] && printf '%s\n' "$cleanup_error" >&2
-  exit "$cleanup_status"
-fi
+write_cleanup_warning_artifact
 
 printf 'SESSION=%s\n' "$session"
 printf 'MODE=%s\n' "$mode"
@@ -466,4 +506,8 @@ if [[ -n "$cleanup_warning" ]]; then
 fi
 if [[ "$cleanup_status" != "0" && -n "$cleanup_error" ]]; then
   printf 'CLEANUP_ERROR=%s\n' "$(printf '%s' "$cleanup_error" | tr '\n' ' ' | sed 's/  */ /g')"
+fi
+
+if [[ "$cleanup_status" != "0" ]]; then
+  exit "$cleanup_status"
 fi

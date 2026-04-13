@@ -186,6 +186,40 @@ if [[ "$status" == "RUNNING" && "$pr_state" != "MERGED" && "$pr_state" != "CLOSE
   exit 0
 fi
 
+cleanup_output_value() {
+  local cleanup_output="${1:-}"
+  local key="${2:?key required}"
+  awk -F= -v target_key="${key}" '$1 == target_key { print substr($0, index($0, "=") + 1); exit }' <<<"${cleanup_output}"
+}
+
+warn_cleanup_pr_session() {
+  local cleanup_output="${1:-}"
+  local cleanup_exit="${2:-0}"
+  local cleanup_status=""
+  local cleanup_mode=""
+  local cleanup_error=""
+
+  cleanup_status="$(cleanup_output_value "${cleanup_output}" "CLEANUP_STATUS")"
+  if [[ -z "${cleanup_status}" ]]; then
+    cleanup_status="${cleanup_exit}"
+  fi
+  [[ "${cleanup_status}" != "0" ]] || return 0
+
+  cleanup_mode="$(cleanup_output_value "${cleanup_output}" "CLEANUP_MODE")"
+  cleanup_error="$(cleanup_output_value "${cleanup_output}" "CLEANUP_ERROR")"
+  printf '[%s] pr cleanup warning session=%s status=%s mode=%s\n' \
+    "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+    "${session}" \
+    "${cleanup_status}" \
+    "${cleanup_mode:-unknown}" >&2
+  if [[ -n "${cleanup_error}" ]]; then
+    printf '[%s] pr cleanup detail session=%s %s\n' \
+      "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+      "${session}" \
+      "${cleanup_error}" >&2
+  fi
+}
+
 review_pass_action_from_result_action() {
   case "${1:-}" in
     host-advance-double-check-2)
@@ -877,13 +911,24 @@ approve_and_merge() {
 }
 
 cleanup_pr_session() {
-  "${shared_tools_dir}/agent-project-cleanup-session" \
-    --repo-root "$repo_root" \
-    --runs-root "$runs_root" \
-    --history-root "$history_root" \
-    --session "$session" \
-    --worktree "$pr_worktree" \
-    --mode pr >/dev/null || true
+  local cleanup_output=""
+  local cleanup_exit="0"
+
+  if cleanup_output="$(
+    "${shared_tools_dir}/agent-project-cleanup-session" \
+      --repo-root "$repo_root" \
+      --runs-root "$runs_root" \
+      --history-root "$history_root" \
+      --session "$session" \
+      --worktree "$pr_worktree" \
+      --mode pr 2>&1
+  )"; then
+    cleanup_exit="0"
+  else
+    cleanup_exit="$?"
+  fi
+
+  warn_cleanup_pr_session "${cleanup_output}" "${cleanup_exit}"
 }
 
 notify_pr_reconciled() {

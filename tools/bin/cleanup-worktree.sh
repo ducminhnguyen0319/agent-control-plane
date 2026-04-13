@@ -37,11 +37,16 @@ if [[ -n "$SESSION" ]]; then
   ARGS+=(--session "$SESSION")
 fi
 
+cleanup_exit=0
 AGENT_PROJECT_WORKTREE_ROOT="$WORKTREE_ROOT" \
 F_LOSNING_WORKTREE_ROOT="$WORKTREE_ROOT" \
-  bash "${FLOW_TOOLS_DIR}/agent-project-cleanup-session" "${ARGS[@]}" >/dev/null
+  bash "${FLOW_TOOLS_DIR}/agent-project-cleanup-session" "${ARGS[@]}" >/dev/null || cleanup_exit=$?
 
 F_LOSNING_AGENT_REPO_ROOT="$AGENT_REPO_ROOT" \
 F_LOSNING_RETAINED_REPO_ROOT="$RETAINED_REPO_ROOT" \
 F_LOSNING_VSCODE_WORKSPACE_FILE="$VSCODE_WORKSPACE_FILE" \
   "${FLOW_TOOLS_DIR}/sync-vscode-workspace.sh" >/dev/null 2>&1 || true
+
+if [[ "$cleanup_exit" -ne 0 ]]; then
+  exit "$cleanup_exit"
+fi

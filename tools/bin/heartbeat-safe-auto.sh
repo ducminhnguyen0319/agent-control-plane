@@ -72,8 +72,14 @@ SHARED_LOOP_PID_FILE="${STATE_ROOT}/shared-heartbeat-loop.pid"
 SHARED_LOOP_STATUS_FILE="${STATE_ROOT}/shared-heartbeat-loop.env"
 QUOTA_LOCK_DIR="${STATE_ROOT}/quota-preflight.lock"
 QUOTA_PID_FILE="${QUOTA_LOCK_DIR}/pid"
+python_bin="$(flow_resolve_python_bin || true)"
 
 mkdir -p "${AGENT_ROOT}" "${RUNS_ROOT}" "${STATE_ROOT}" "${HISTORY_ROOT}" "${WORKTREE_ROOT}" "${MEMORY_DIR}"
+
+if [[ -z "${python_bin}" || ! -x "${python_bin}" ]]; then
+  echo "unable to resolve a runnable python interpreter for heartbeat-safe-auto.sh" >&2
+  exit 1
+fi
 
 acquire_lock() {
   mkdir -p "${STATE_ROOT}"
@@ -156,7 +162,7 @@ run_with_timeout() {
   local timeout_seconds="${1:?timeout seconds required}"
   shift
 
-  /opt/homebrew/bin/python3 - "${timeout_seconds}" "$@" <<'PY'
+  "${python_bin}" - "${timeout_seconds}" "$@" <<'PY'
 import os
 from pathlib import Path
 import signal
@@ -330,7 +336,7 @@ EFFECTIVE_QUOTA_POOLS=""
 
   local quota_cache_age_seconds=""
   quota_cache_age_seconds="$(
-    /opt/homebrew/bin/python3 - "${CODEX_QUOTA_FULL_CACHE_FILE}" <<'PY' 2>/dev/null || true
+    "${python_bin}" - "${CODEX_QUOTA_FULL_CACHE_FILE}" <<'PY' 2>/dev/null || true
 import os
 import sys
 import time

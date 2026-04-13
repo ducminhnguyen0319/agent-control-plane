@@ -5,6 +5,30 @@ flow_canonical_skill_name() {
   printf '%s\n' "${AGENT_CONTROL_PLANE_SKILL_NAME:-agent-control-plane}"
 }
 
+flow_resolve_python_bin() {
+  if [[ -n "${PYTHON_BIN:-}" && -x "${PYTHON_BIN:-}" ]]; then
+    printf '%s\n' "${PYTHON_BIN}"
+    return 0
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    command -v python3
+    return 0
+  fi
+
+  if [[ -x /opt/homebrew/bin/python3 ]]; then
+    printf '%s\n' "/opt/homebrew/bin/python3"
+    return 0
+  fi
+
+  if command -v python >/dev/null 2>&1; then
+    command -v python
+    return 0
+  fi
+
+  return 1
+}
+
 flow_compat_skill_alias() {
   printf '%s\n' "${AGENT_CONTROL_PLANE_COMPAT_ALIAS:-}"
 }

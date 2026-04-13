@@ -2,14 +2,25 @@
 set -euo pipefail
 
 FLOW_TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FLOW_SHELL_LIB="${FLOW_TOOLS_DIR}/flow-shell-lib.sh"
 TEST_DIR="${FLOW_TOOLS_DIR%/bin}/tests"
 TEST_TIMEOUT_SECONDS="${F_LOSNING_HEARTBEAT_PREFLIGHT_TEST_TIMEOUT_SECONDS:-120}"
+python_bin=""
+
+# shellcheck source=/dev/null
+source "${FLOW_SHELL_LIB}"
+
+python_bin="$(flow_resolve_python_bin || true)"
+if [[ -z "${python_bin}" || ! -x "${python_bin}" ]]; then
+  echo "unable to resolve a runnable python interpreter for heartbeat-recovery-preflight.sh" >&2
+  exit 1
+fi
 
 run_with_timeout() {
   local timeout_seconds="${1:?timeout seconds required}"
   shift
 
-  /opt/homebrew/bin/python3 - "$timeout_seconds" "$@" <<'PY'
+  "${python_bin}" - "$timeout_seconds" "$@" <<'PY'
 import os
 import signal
 import subprocess
