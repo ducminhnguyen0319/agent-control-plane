@@ -20,10 +20,11 @@ mkdir -p \
   "$history_dir" \
   "$state_root/resident-workers/issues/1" \
   "$state_root/resident-workers/issues/issue-lane-recurring-general-openclaw-safe" \
-  "$state_root/retries/providers" \
-  "$state_root/retries/prs" \
-  "$state_root/scheduled-issues" \
-  "$state_root/resident-workers/issue-queue/pending"
+    "$state_root/retries/providers" \
+    "$state_root/retries/prs" \
+    "$state_root/scheduled-issues" \
+    "$state_root/resident-workers/issue-queue/pending" \
+    "$state_root/resident-workers/issue-queue/claims"
 
 cat >"$profile_dir/control-plane.yaml" <<EOF
 schema_version: "1"
@@ -112,6 +113,8 @@ RESIDENT_WORKER_SCOPE=lane
 RESIDENT_WORKER_KEY=issue-lane-recurring-general-openclaw-safe
 ISSUE_ID=1
 CODING_WORKER=openclaw
+RESIDENT_LANE_KIND=recurring
+RESIDENT_LANE_VALUE=general
 TASK_COUNT=7
 LAST_STATUS=running
 LAST_STARTED_AT=2026-03-26T15:00:00Z
@@ -144,7 +147,14 @@ EOF
 cat >"$state_root/resident-workers/issue-queue/pending/issue-2.env" <<'EOF'
 ISSUE_ID=2
 SESSION=demo-issue-2
+QUEUED_BY=heartbeat
 UPDATED_AT=2026-03-26T15:04:00Z
+EOF
+
+cat >"$state_root/resident-workers/issue-queue/claims/issue-7.issue-lane-recurring-general-openclaw-safe.999.env" <<'EOF'
+ISSUE_ID=7
+SESSION=demo-issue-7
+UPDATED_AT=2026-03-26T15:14:00Z
 EOF
 
 cat >"$history_dir/run.env" <<'EOF'
@@ -177,7 +187,7 @@ What I ran:
 Exact failure: `request to https://registry.npmjs.org/-/npm/v1/security/audits failed, reason: getaddrinfo ENOTFOUND registry.npmjs.org`
 EOF
 
-snapshot="$(ACP_PROFILE_REGISTRY_ROOT="$profile_registry_root" python3 "$SNAPSHOT_BIN" --pretty)"
+snapshot="$(ACP_PROFILE_REGISTRY_ROOT="$profile_registry_root" ACP_STATE_ROOT="$state_root" ACP_RUNS_ROOT="$runs_root" python3 "$SNAPSHOT_BIN" --pretty)"
 
 grep -q '"profile_count": 1' <<<"$snapshot"
 grep -q '"id": "demo"' <<<"$snapshot"
@@ -194,6 +204,10 @@ grep -q '"controller_live": false' <<<"$snapshot"
 grep -q '"result_kind": "implemented"' <<<"$snapshot"
 grep -q '"result_label": "Implemented"' <<<"$snapshot"
 grep -q '"recent_history_runs": 1' <<<"$snapshot"
+grep -q '"resident_lane_kind": "recurring"' <<<"$snapshot"
+grep -q '"resident_lane_value": "general"' <<<"$snapshot"
+grep -q '"queued_by": "heartbeat"' <<<"$snapshot"
+grep -q '"claimer": "issue-lane-recurring-general-openclaw-safe"' <<<"$snapshot"
 grep -q '"session": "demo-pr-9"' <<<"$snapshot"
 grep -q '"pr_number": "9"' <<<"$snapshot"
 grep -q '"last_reason": "github-api-rate-limit"' <<<"$snapshot"

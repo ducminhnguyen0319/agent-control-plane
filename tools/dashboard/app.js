@@ -283,6 +283,7 @@ function renderProfile(profile) {
     [
       { label: "Issue", key: "issue_id" },
       { label: "State", render: renderControllerState },
+      { label: "Lane", render: (row) => `${row.lane_kind || "n/a"} / ${row.lane_value || "n/a"}` },
       { label: "Reason", render: (row) => row.reason || "n/a" },
       { label: "Provider", render: (row) => `${row.provider_backend || "n/a"} ${row.provider_model || ""}`.trim() },
       { label: "Failover", render: (row) => `${row.provider_failover_count} failovers / ${row.provider_switch_count} switches` },
@@ -323,6 +324,7 @@ function renderProfile(profile) {
       { label: "Scope", key: "scope" },
       { label: "Worker", key: "coding_worker" },
       { label: "Issue", render: (row) => row.issue_id || "n/a" },
+      { label: "Lane", render: (row) => `${row.resident_lane_kind || "n/a"} / ${row.resident_lane_value || "n/a"}` },
       { label: "Tasks", key: "task_count" },
       { label: "Last status", render: (row) => row.last_status || "n/a" },
       { label: "Last started", render: (row) => row.last_started_at ? `${relativeTime(row.last_started_at)}<div class="muted">${row.last_started_at}</div>` : "n/a" },
@@ -358,6 +360,7 @@ function renderProfile(profile) {
     [
       { label: "Issue", key: "issue_id" },
       { label: "Session", render: (row) => row.session ? `<div class="mono">${row.session}</div>` : "n/a" },
+      { label: "Queued by", key: "queued_by" },
       { label: "Updated", render: (row) => row.updated_at ? `${relativeTime(row.updated_at)}<div class="muted">${row.updated_at}</div>` : "n/a" },
     ],
     profile.issue_queue.pending,
@@ -368,6 +371,7 @@ function renderProfile(profile) {
     [
       { label: "Issue", key: "issue_id" },
       { label: "Session", render: (row) => row.session ? `<div class="mono">${row.session}</div>` : "n/a" },
+      { label: "Claimed by", key: "claimer" },
       { label: "Updated", render: (row) => row.updated_at ? `${relativeTime(row.updated_at)}<div class="muted">${row.updated_at}</div>` : "n/a" },
     ],
     profile.issue_queue.claims || [],
