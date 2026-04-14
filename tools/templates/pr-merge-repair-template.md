@@ -11,6 +11,7 @@ PR metadata:
 - PR: {PR_NUMBER} - {PR_TITLE}
 - URL: {PR_URL}
 - Base branch: {PR_BASE_REF}
+- Base tracking ref: {PR_BASE_TRACKING_REF}
 - Head branch: {PR_HEAD_REF}
 - Linked issue: {PR_LINKED_ISSUE_ID}
 - Risk classification: {PR_RISK}
@@ -43,7 +44,7 @@ PR body:
 Required flow:
 
 1. Treat this worktree as an already-prepared merge repair state from host control-plane.
-   - `origin/{PR_BASE_REF}` has already been merged into this worktree locally.
+   - `{PR_BASE_TRACKING_REF}` has already been merged into this worktree locally.
    - if `Current unresolved merge-conflict paths` is not `- none detected after host merge preparation`, resolve those files first.
 2. Never run Git control commands from inside the worker:
    - do not run `git fetch`, `git pull`, `git merge`, `git rebase`, `git commit`, `git push`, or any command that writes Git metadata

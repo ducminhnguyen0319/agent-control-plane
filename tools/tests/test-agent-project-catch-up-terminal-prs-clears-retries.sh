@@ -107,9 +107,9 @@ if grep -q '^ISSUE_CLOSE:502$' "$events_file"; then
   exit 1
 fi
 
-test -f "$state_root/merged-pr-catchup/101.env"
-test -f "$state_root/closed-pr-catchup/102.env"
-grep -q '^PR_STATE=merged$' "$state_root/merged-pr-catchup/101.env"
-grep -q '^PR_STATE=closed$' "$state_root/closed-pr-catchup/102.env"
+test -f "$state_root/merged-pr-catchup-github/101.env"
+test -f "$state_root/closed-pr-catchup-github/102.env"
+grep -q '^PR_STATE=merged$' "$state_root/merged-pr-catchup-github/101.env"
+grep -q '^PR_STATE=closed$' "$state_root/closed-pr-catchup-github/102.env"
 
 echo "agent-project-catch-up terminal PRs clears retries test passed"

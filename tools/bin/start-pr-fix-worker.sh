@@ -255,12 +255,17 @@ PR_LOCAL_HOST_BLOCKER_SUMMARY_TEXT="$(latest_history_artifact_content "host-bloc
 
 WORKTREE_OUT="$("${WORKSPACE_DIR}/bin/new-pr-worktree.sh" "$PR_NUMBER" "$PR_HEAD_REF")"
 WORKTREE="$(awk -F= '/^WORKTREE=/{print $2}' <<<"$WORKTREE_OUT")"
+PR_BASE_REMOTE="$(flow_resolve_forge_primary_remote "${WORKTREE}" "${REPO_SLUG}" 2>/dev/null || true)"
+if [[ -z "${PR_BASE_REMOTE}" ]]; then
+  PR_BASE_REMOTE="origin"
+fi
+PR_BASE_TRACKING_REF="${PR_BASE_REMOTE}/${PR_BASE_REF}"
 PR_HOST_MERGE_STATUS="not-applicable"
 PR_HOST_MERGE_SUMMARY_TEXT="- not-applicable"
 
 materialize_host_merge_repair() {
   local merge_output=""
-  if merge_output="$(git -C "$WORKTREE" merge --no-commit --no-ff "origin/${PR_BASE_REF}" 2>&1)"; then
+  if merge_output="$(git -C "$WORKTREE" merge --no-commit --no-ff "${PR_BASE_TRACKING_REF}" 2>&1)"; then
     PR_HOST_MERGE_STATUS="clean"
     if [[ -n "$merge_output" ]]; then
       PR_HOST_MERGE_SUMMARY_TEXT="$(printf '%s\n' "$merge_output")"
@@ -301,14 +306,14 @@ else
   PR_CONFLICT_PATHS_TEXT="$(
     (
       cd "$WORKTREE"
-      base_sha="$(git merge-base HEAD "origin/${PR_BASE_REF}" 2>/dev/null || true)"
+      base_sha="$(git merge-base HEAD "${PR_BASE_TRACKING_REF}" 2>/dev/null || true)"
       if [[ -z "$base_sha" ]]; then
         printf '%s\n' "- unable to compute merge-base"
         exit 0
       fi
 
       conflict_paths="$(
-        git merge-tree "$base_sha" HEAD "origin/${PR_BASE_REF}" \
+        git merge-tree "$base_sha" HEAD "${PR_BASE_TRACKING_REF}" \
           | awk '
               /^changed in both$/ { capture=1; next }
               capture && /^(  base|  our|  their)  / {
@@ -363,6 +368,7 @@ PR_HOST_MERGE_SUMMARY_TEXT="$PR_HOST_MERGE_SUMMARY_TEXT" \
 PR_REPO_ROOT="$PR_REPO_ROOT" \
 PR_DEPENDENCY_SOURCE_ROOT="$PR_DEPENDENCY_SOURCE_ROOT" \
 PR_WORKTREE="$WORKTREE" \
+PR_BASE_TRACKING_REF="$PR_BASE_TRACKING_REF" \
 PR_WEB_PLAYWRIGHT_COMMAND="$WEB_PLAYWRIGHT_COMMAND" \
 REPO_SLUG="$REPO_SLUG" \
 TEMPLATE_FILE="$TEMPLATE_FILE" \
@@ -389,11 +395,11 @@ let requiredTargetedVerificationText = '- none';
 let preApprovedVerificationFallbacksText = '- none';
 try {
   const worktree = process.env.PR_WORKTREE || '';
-  const baseRef = process.env.PR_BASE_REF || 'main';
+  const baseTrackingRef = process.env.PR_BASE_TRACKING_REF || `origin/${process.env.PR_BASE_REF || 'main'}`;
   if (worktree) {
     const changedFiles = execFileSync(
       'git',
-      ['-C', worktree, 'diff', '--name-only', '--diff-filter=ACMR', `origin/${baseRef}...HEAD`],
+      ['-C', worktree, 'diff', '--name-only', '--diff-filter=ACMR', `${baseTrackingRef}...HEAD`],
       { encoding: 'utf8' },
     )
       .split('\n')
@@ -453,6 +459,7 @@ const replacements = {
   '{PR_URL}': process.env.PR_URL || '',
   '{PR_HEAD_REF}': process.env.PR_HEAD_REF || '',
   '{PR_BASE_REF}': process.env.PR_BASE_REF || '',
+  '{PR_BASE_TRACKING_REF}': process.env.PR_BASE_TRACKING_REF || '',
   '{PR_BODY}': process.env.PR_BODY || '',
   '{REPO_SLUG}': process.env.REPO_SLUG || '',
   '{PR_RISK}': process.env.PR_RISK || '',
