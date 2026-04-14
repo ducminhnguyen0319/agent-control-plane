@@ -169,11 +169,11 @@ PR_MISSING_REASONS_TEXT="$(jq -r '.missingReasons[]? | "- " + .' <<<"$RISK_JSON"
 if [[ -z "$PR_MISSING_REASONS_TEXT" ]]; then
   PR_MISSING_REASONS_TEXT="- none"
 fi
-PR_PULL_JSON="$(flow_github_api_repo "${REPO_SLUG}" "pulls/${PR_NUMBER}")"
-PR_HEAD_SHA="$(jq -r '.head.sha' <<<"$PR_PULL_JSON")"
-PR_MERGEABLE_STATUS="$(jq -r 'if .mergeable == null then "UNKNOWN" else (.mergeable | tostring | ascii_upcase) end' <<<"$PR_PULL_JSON")"
+PR_PULL_JSON="$(flow_github_api_repo "${REPO_SLUG}" "pulls/${PR_NUMBER}" 2>/dev/null || printf '{}\n')"
+PR_HEAD_SHA="$(jq -r '.head.sha // .headRefOid // ""' <<<"$PR_PULL_JSON")"
+PR_MERGEABLE_STATUS="$(jq -r 'if .mergeable == null then "UNKNOWN" else (.mergeable | tostring | ascii_upcase) end' <<<"$PR_PULL_JSON" 2>/dev/null || printf 'UNKNOWN\n')"
 PR_REVIEW_FINDINGS_TEXT="$(
-  flow_github_api_repo "${REPO_SLUG}" "pulls/${PR_NUMBER}/comments" \
+  (flow_github_api_repo "${REPO_SLUG}" "pulls/${PR_NUMBER}/comments" 2>/dev/null || printf '[]\n') \
     | jq -r --arg head_sha "$PR_HEAD_SHA" '
         map(select(
           (.user.login == "chatgpt-codex-connector[bot]")
@@ -195,7 +195,7 @@ PR_REVIEW_FINDINGS_TEXT="$(
       '
 )"
 PR_BLOCKER_SUMMARY_TEXT="$(
-  flow_github_api_repo "${REPO_SLUG}" "issues/${PR_NUMBER}/comments" \
+  (flow_github_api_repo "${REPO_SLUG}" "issues/${PR_NUMBER}/comments" 2>/dev/null || printf '[]\n') \
     | jq -r '
         map(select((.body // "") | startswith("## PR final review blocker")))
         | if length == 0 then

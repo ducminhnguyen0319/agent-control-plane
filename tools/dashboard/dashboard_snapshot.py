@@ -697,6 +697,57 @@ def collect_pr_retries(state_root: Path) -> list[dict[str, Any]]:
     return items
 
 
+def collect_github_outbox(state_root: Path) -> dict[str, Any]:
+    outbox_root = state_root / "github-outbox"
+    pending_root = outbox_root / "pending"
+    sent_root = outbox_root / "sent"
+    failed_root = outbox_root / "failed"
+
+    def list_items(root: Path, limit: int | None = None) -> list[dict[str, Any]]:
+        if not root.is_dir():
+            return []
+
+        items: list[dict[str, Any]] = []
+        for path in sorted(root.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
+            payload = read_json_file(path)
+            items.append(
+                {
+                    "type": str(payload.get("type", "")),
+                    "repo_slug": str(payload.get("repo_slug", "")),
+                    "number": str(payload.get("number", "")),
+                    "kind": str(payload.get("kind", "")),
+                    "created_at": str(payload.get("created_at", "")),
+                    "updated_at": file_mtime_iso(path),
+                    "file": str(path),
+                    "add_count": len(payload.get("add", []) or []),
+                    "remove_count": len(payload.get("remove", []) or []),
+                    "body_preview": summarize_whitespace(str(payload.get("body", "")))[:120],
+                }
+            )
+            if limit is not None and len(items) >= limit:
+                break
+        return items
+
+    all_pending_items = list_items(pending_root)
+    pending_items = all_pending_items[:20]
+    sent_items = list_items(sent_root, limit=5)
+    failed_items = list_items(failed_root, limit=5)
+
+    return {
+        "pending": pending_items,
+        "sent_recent": sent_items,
+        "failed_recent": failed_items,
+        "counts": {
+            "pending": len(all_pending_items),
+            "sent": len(list(sent_root.glob("*.json"))) if sent_root.is_dir() else 0,
+            "failed": len(list(failed_root.glob("*.json"))) if failed_root.is_dir() else 0,
+            "pending_comments": sum(1 for item in all_pending_items if item["type"] == "comment"),
+            "pending_approvals": sum(1 for item in all_pending_items if item["type"] == "approval"),
+            "pending_label_updates": sum(1 for item in all_pending_items if item["type"] == "labels"),
+        },
+    }
+
+
 def resolve_history_root(render_env: dict[str, str], yaml_env: dict[str, str], runs_root: Path) -> Path:
     configured = (
         render_env.get("EFFECTIVE_HISTORY_ROOT", "").strip()
@@ -726,6 +777,7 @@ def build_profile_snapshot(profile_id: str, registry_root: Path) -> dict[str, An
     retries = collect_issue_retries(state_root)
     pr_retries = collect_pr_retries(state_root)
     queue = collect_issue_queue(state_root)
+    github_outbox = collect_github_outbox(state_root)
     alerts = [alert for run in (runs + recent_history) for alert in run.get("alerts", [])]
     codex_rotation = collect_codex_rotation(render_env)
 
@@ -773,6 +825,8 @@ def build_profile_snapshot(profile_id: str, registry_root: Path) -> dict[str, An
             "active_retries": sum(1 for item in retries if not item.get("ready", True)),
             "scheduled_issues": len(scheduled),
             "alerts": len(alerts),
+            "pending_github_writes": github_outbox["counts"]["pending"],
+            "failed_github_writes": github_outbox["counts"]["failed"],
         },
         "runs": runs,
         "recent_history": recent_history,
@@ -784,6 +838,7 @@ def build_profile_snapshot(profile_id: str, registry_root: Path) -> dict[str, An
         "issue_retries": retries,
         "pr_retries": pr_retries,
         "issue_queue": queue,
+        "github_outbox": github_outbox,
     }
 
 

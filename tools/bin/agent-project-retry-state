@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  agent-project-retry-state --state-root <path> --kind issue|pr|provider --item-id <id> --action get|schedule|clear [--reason <text>] [--cooldowns <csv>]
+  agent-project-retry-state --state-root <path> --kind issue|pr|provider|github --item-id <id> --action get|schedule|clear [--reason <text>] [--cooldowns <csv>] [--next-at-epoch <unix-seconds>]
 
 Generic retry/cooldown state manager for project adapters.
 
@@ -12,6 +12,7 @@ Examples:
   agent-project-retry-state --state-root /tmp/state --kind issue --item-id 123 --action get
   agent-project-retry-state --state-root /tmp/state --kind pr --item-id 77 --action schedule --reason worker-exit-failed
   agent-project-retry-state --state-root /tmp/state --kind provider --item-id openclaw-stepfun-free --action schedule --reason provider-quota-limit
+  agent-project-retry-state --state-root /tmp/state --kind github --item-id core-api --action schedule --reason github-api-rate-limit --next-at-epoch 4102444800
 EOF
 }
 
@@ -21,6 +22,7 @@ item_id=""
 action=""
 reason=""
 cooldowns_csv="${AGENT_PROJECT_RETRY_COOLDOWNS:-300,900,1800,3600}"
+next_at_epoch_override=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -30,6 +32,7 @@ while [[ $# -gt 0 ]]; do
     --action) action="${2:-}"; shift 2 ;;
     --reason) reason="${2:-}"; shift 2 ;;
     --cooldowns) cooldowns_csv="${2:-}"; shift 2 ;;
+    --next-at-epoch) next_at_epoch_override="${2:-}"; shift 2 ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -41,8 +44,8 @@ if [[ -z "$state_root" || -z "$kind" || -z "$item_id" || -z "$action" ]]; then
 fi
 
 case "$kind" in
-  issue|pr|provider) ;;
-  *) echo "--kind must be issue, pr, or provider" >&2; exit 1 ;;
+  issue|pr|provider|github) ;;
+  *) echo "--kind must be issue, pr, provider, or github" >&2; exit 1 ;;
 esac
 
 case "$action" in
@@ -115,8 +118,12 @@ case "$action" in
     ;;
   schedule)
     attempts=$((attempts + 1))
-    cooldown_seconds="$(cooldown_seconds_for_attempt "$attempts")"
-    next_attempt_epoch=$((now_epoch + cooldown_seconds))
+    if [[ "${next_at_epoch_override}" =~ ^[0-9]+$ ]] && (( next_at_epoch_override > now_epoch )); then
+      next_attempt_epoch="${next_at_epoch_override}"
+    else
+      cooldown_seconds="$(cooldown_seconds_for_attempt "$attempts")"
+      next_attempt_epoch=$((now_epoch + cooldown_seconds))
+    fi
     write_state "$attempts" "$next_attempt_epoch" "$reason"
     next_attempt_at="$(date -u -r "$next_attempt_epoch" +"%Y-%m-%dT%H:%M:%SZ")"
     last_reason="$reason"

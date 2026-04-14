@@ -36,13 +36,115 @@ HEARTBEAT_SNAPSHOT_CACHE_DIR="${TMPDIR:-/tmp}/heartbeat-snapshot.$$"
 # pipes), so in-memory variables would be lost immediately.  We rely exclusively
 # on the PID-scoped disk cache under HEARTBEAT_SNAPSHOT_CACHE_DIR.
 
+heartbeat_github_mirror_dir() {
+  [[ -n "${STATE_ROOT:-}" ]] || return 1
+  printf '%s/github-mirror/heartbeat\n' "${STATE_ROOT}"
+}
+
+heartbeat_github_mirror_file() {
+  local mirror_key="${1:?mirror key required}"
+  local mirror_dir=""
+  mirror_dir="$(heartbeat_github_mirror_dir)" || return 1
+  printf '%s/%s.json\n' "${mirror_dir}" "${mirror_key}"
+}
+
+heartbeat_json_matches_kind() {
+  local payload="${1:-}"
+  local expected_kind="${2:-}"
+
+  [[ -n "${payload}" && -n "${expected_kind}" ]] || return 1
+  jq -e --arg kind "${expected_kind}" 'type == $kind' >/dev/null <<<"${payload}"
+}
+
+heartbeat_write_json_mirror() {
+  local mirror_key="${1:?mirror key required}"
+  local payload="${2:-}"
+  local expected_kind="${3:?expected kind required}"
+  local source_mode="${4:-live}"
+  local mirror_file=""
+  local mirror_dir=""
+  local meta_file=""
+  local tmp_file=""
+  local meta_tmp_file=""
+  local updated_at=""
+
+  heartbeat_json_matches_kind "${payload}" "${expected_kind}" || return 1
+  mirror_dir="$(heartbeat_github_mirror_dir)" || return 1
+  mirror_file="${mirror_dir}/${mirror_key}.json"
+  meta_file="${mirror_dir}/${mirror_key}.env"
+  mkdir -p "${mirror_dir}"
+  updated_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  tmp_file="${mirror_file}.tmp.$$"
+  meta_tmp_file="${meta_file}.tmp.$$"
+  printf '%s' "${payload}" >"${tmp_file}"
+  {
+    printf 'MIRROR_KEY=%s\n' "${mirror_key}"
+    printf 'JSON_KIND=%s\n' "${expected_kind}"
+    printf 'SOURCE=%s\n' "${source_mode}"
+    printf 'UPDATED_AT=%s\n' "${updated_at}"
+  } >"${meta_tmp_file}"
+  mv "${tmp_file}" "${mirror_file}"
+  mv "${meta_tmp_file}" "${meta_file}"
+}
+
+heartbeat_read_json_mirror() {
+  local mirror_key="${1:?mirror key required}"
+  local expected_kind="${2:?expected kind required}"
+  local default_json="${3:-}"
+  local mirror_file=""
+  local payload=""
+
+  mirror_file="$(heartbeat_github_mirror_file "${mirror_key}" 2>/dev/null || true)"
+  if [[ -n "${mirror_file}" && -f "${mirror_file}" ]]; then
+    payload="$(cat "${mirror_file}" 2>/dev/null || true)"
+    if heartbeat_json_matches_kind "${payload}" "${expected_kind}"; then
+      printf '%s\n' "${payload}"
+      return 0
+    fi
+  fi
+
+  printf '%s\n' "${default_json}"
+}
+
+heartbeat_cached_json_with_local_mirror() {
+  local cache_file="${1:?cache file required}"
+  local mirror_key="${2:?mirror key required}"
+  local expected_kind="${3:?expected kind required}"
+  local default_json="${4:-}"
+  local live_fetch_fn="${5:?live fetch function required}"
+  local payload=""
+
+  shift 5
+
+  if [[ -f "${cache_file}" ]]; then
+    cat "${cache_file}"
+    return 0
+  fi
+
+  if payload="$("${live_fetch_fn}" "$@" 2>/dev/null)" && heartbeat_json_matches_kind "${payload}" "${expected_kind}"; then
+    heartbeat_write_json_mirror "${mirror_key}" "${payload}" "${expected_kind}" "live" || true
+  else
+    payload="$(heartbeat_read_json_mirror "${mirror_key}" "${expected_kind}" "${default_json}")"
+  fi
+
+  printf '%s' "${payload}" >"${cache_file}"
+  printf '%s\n' "${payload}"
+}
+
 heartbeat_cached_issue_list_json() {
   mkdir -p "${HEARTBEAT_SNAPSHOT_CACHE_DIR}"
   local cache_file="${HEARTBEAT_SNAPSHOT_CACHE_DIR}/issues.json"
   if [[ ! -f "${cache_file}" ]]; then
-    local snapshot
-    snapshot="$(flow_github_issue_list_json "$REPO_SLUG" open 100 2>/dev/null || true)"
-    printf '%s' "${snapshot}" >"${cache_file}"
+    heartbeat_cached_json_with_local_mirror \
+      "${cache_file}" \
+      "issues-open-100" \
+      "array" \
+      '[]' \
+      flow_github_issue_list_json_live \
+      "$REPO_SLUG" \
+      open \
+      100
+    return 0
   fi
   cat "${cache_file}"
 }
@@ -51,9 +153,16 @@ heartbeat_cached_pr_list_json() {
   mkdir -p "${HEARTBEAT_SNAPSHOT_CACHE_DIR}"
   local cache_file="${HEARTBEAT_SNAPSHOT_CACHE_DIR}/prs.json"
   if [[ ! -f "${cache_file}" ]]; then
-    local snapshot
-    snapshot="$(flow_github_pr_list_json "$REPO_SLUG" open 100 2>/dev/null || true)"
-    printf '%s' "${snapshot}" >"${cache_file}"
+    heartbeat_cached_json_with_local_mirror \
+      "${cache_file}" \
+      "prs-open-100" \
+      "array" \
+      '[]' \
+      flow_github_pr_list_json_live \
+      "$REPO_SLUG" \
+      open \
+      100
+    return 0
   fi
   cat "${cache_file}"
 }
@@ -111,7 +220,6 @@ heartbeat_retry_reason_is_baseline_blocked() {
 heartbeat_issue_json_cached() {
   local issue_id="${1:?issue id required}"
   local cache_file=""
-  local issue_json=""
 
   if [[ ! -d "${HEARTBEAT_ISSUE_JSON_CACHE_DIR}" ]]; then
     mkdir -p "${HEARTBEAT_ISSUE_JSON_CACHE_DIR}"
@@ -123,9 +231,14 @@ heartbeat_issue_json_cached() {
     return 0
   fi
 
-  issue_json="$(flow_github_issue_view_json "$REPO_SLUG" "$issue_id" 2>/dev/null || true)"
-  printf '%s' "${issue_json}" >"${cache_file}"
-  printf '%s\n' "${issue_json}"
+  heartbeat_cached_json_with_local_mirror \
+    "${cache_file}" \
+    "issue-${issue_id}" \
+    "object" \
+    '{}' \
+    flow_github_issue_view_json_live \
+    "$REPO_SLUG" \
+    "$issue_id"
 }
 
 heartbeat_open_agent_pr_issue_ids() {

@@ -111,9 +111,10 @@ function renderOverview(snapshot) {
       acc.cooldowns += profile.counts.provider_cooldowns;
       acc.queue += profile.counts.queued_issues;
       acc.alerts += profile.counts.alerts || 0;
+      acc.pendingGithubWrites += profile.counts.pending_github_writes || 0;
       return acc;
     },
-    { activeRuns: 0, runningRuns: 0, implementedRuns: 0, reportedRuns: 0, blockedRuns: 0, controllers: 0, cooldowns: 0, queue: 0, alerts: 0 },
+    { activeRuns: 0, runningRuns: 0, implementedRuns: 0, reportedRuns: 0, blockedRuns: 0, controllers: 0, cooldowns: 0, queue: 0, alerts: 0, pendingGithubWrites: 0 },
   );
 
   overviewNode.innerHTML = [
@@ -125,6 +126,7 @@ function renderOverview(snapshot) {
     ["Blocked", totals.blockedRuns],
     ["Live Controllers", totals.controllers],
     ["Provider Cooldowns", totals.cooldowns],
+    ["Pending GitHub Writes", totals.pendingGithubWrites],
     ["Alerts", totals.alerts],
     ["Queued Issues", totals.queue],
   ]
@@ -237,6 +239,8 @@ function renderProfile(profile) {
     ["Live controllers", profile.counts.live_resident_controllers],
     ["Stale controllers", profile.counts.stale_resident_controllers],
     ["Provider cooldowns", profile.counts.provider_cooldowns],
+    ["Pending GitHub writes", profile.counts.pending_github_writes || 0],
+    ["Failed GitHub writes", profile.counts.failed_github_writes || 0],
     ["Alerts", profile.counts.alerts || 0],
     ["Issue retries", profile.counts.active_retries],
     ["Queued issues", profile.counts.queued_issues],
@@ -378,6 +382,26 @@ function renderProfile(profile) {
     "No claimed issues.",
   );
 
+  const githubOutbox = profile.github_outbox || { counts: {}, pending: [] };
+  const githubOutboxTable = renderTable(
+    [
+      { label: "Type", render: (row) => row.type || "n/a" },
+      { label: "Target", render: (row) => `${row.kind || row.type || "write"} #${row.number || "?"}` },
+      {
+        label: "Payload",
+        render: (row) => {
+          if (row.type === "labels") {
+            return `+${row.add_count || 0} / -${row.remove_count || 0}`;
+          }
+          return row.body_preview || "n/a";
+        },
+      },
+      { label: "Created", render: (row) => row.created_at ? `${relativeTime(row.created_at)}<div class="muted">${row.created_at}</div>` : "n/a" },
+    ],
+    githubOutbox.pending || [],
+    "No pending GitHub write intents.",
+  );
+
   const codexRotationPanel =
     profile.coding_worker === "codex"
       ? `
@@ -451,6 +475,11 @@ function renderProfile(profile) {
         <section class="panel half">
           <h3>Claimed Issues</h3>
           ${claimsTable}
+        </section>
+        <section class="panel">
+          <h3>GitHub Outbox</h3>
+          <p class="panel-subtitle">Local write intents queued while ACP defers or retries GitHub sync. Pending ${githubOutbox.counts?.pending || 0}, sent ${githubOutbox.counts?.sent || 0}, failed ${githubOutbox.counts?.failed || 0}.</p>
+          ${githubOutboxTable}
         </section>
       </section>
     </article>

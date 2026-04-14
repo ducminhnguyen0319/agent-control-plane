@@ -615,6 +615,28 @@ else
   exit "${loop_status}"
 fi
 
+# ── Flush local GitHub write outbox ────────────────────────────────────────────
+GITHUB_OUTBOX_FLUSH_LIMIT="${ACP_GITHUB_OUTBOX_FLUSH_LIMIT:-${F_LOSNING_GITHUB_OUTBOX_FLUSH_LIMIT:-25}}"
+GITHUB_OUTBOX_FLUSH_TIMEOUT_SECONDS="${ACP_GITHUB_OUTBOX_FLUSH_TIMEOUT_SECONDS:-${F_LOSNING_GITHUB_OUTBOX_FLUSH_TIMEOUT_SECONDS:-30}}"
+if [[ -x "${FLOW_TOOLS_DIR}/github-write-outbox.sh" ]]; then
+  printf '[%s] github-outbox flush start\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  if run_with_timeout "${GITHUB_OUTBOX_FLUSH_TIMEOUT_SECONDS}" \
+    env \
+      ACP_STATE_ROOT="$STATE_ROOT" \
+      F_LOSNING_STATE_ROOT="$STATE_ROOT" \
+      ACP_RUNS_ROOT="$RUNS_ROOT" \
+      F_LOSNING_RUNS_ROOT="$RUNS_ROOT" \
+      bash "${FLOW_TOOLS_DIR}/github-write-outbox.sh" flush --limit "${GITHUB_OUTBOX_FLUSH_LIMIT}"; then
+    printf '[%s] github-outbox flush end status=0\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  else
+    github_outbox_status=$?
+    if [[ "${github_outbox_status}" -eq 124 ]]; then
+      printf 'GITHUB_OUTBOX_FLUSH_TIMEOUT=yes\n'
+    fi
+    printf '[%s] github-outbox flush end status=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "${github_outbox_status}"
+  fi
+fi
+
 # ── Throttled catch-up passes ──────────────────────────────────────────────────
 # These scripts fetch merged/closed PRs and linked issues which change rarely.
 # Run them at most once every CATCHUP_INTERVAL_SECONDS (default 300 = 5 min)

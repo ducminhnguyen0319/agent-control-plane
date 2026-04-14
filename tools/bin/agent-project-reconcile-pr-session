@@ -151,6 +151,9 @@ if [[ -n "$hook_file" && -f "$hook_file" ]]; then
 fi
 
 provider_cooldown_script="${shared_tools_dir}/provider-cooldown-state.sh"
+github_core_rate_limit_script="${shared_tools_dir}/github-core-rate-limit-state.sh"
+github_write_outbox_script="${shared_tools_dir}/github-write-outbox.sh"
+automated_pr_approval_body="Automated final review passed. Safe low-risk scope, green checks, and host-side merge approved."
 
 schedule_provider_quota_cooldown() {
   local reason="${1:-provider-quota-limit}"
@@ -171,6 +174,26 @@ clear_provider_quota_cooldown() {
 blocked_runtime_reason=""
 host_github_rate_limited="no"
 host_github_rate_limit_detail=""
+
+host_github_rate_limit_state_active() {
+  local state_out=""
+  local ready=""
+  local next_attempt_at=""
+
+  [[ -x "${github_core_rate_limit_script}" ]] || return 1
+  state_out="$("${github_core_rate_limit_script}" get 2>/dev/null || true)"
+  ready="$(awk -F= '/^READY=/{print $2; exit}' <<<"${state_out}")"
+  [[ "${ready}" == "no" ]] || return 1
+
+  next_attempt_at="$(awk -F= '/^NEXT_ATTEMPT_AT=/{print $2; exit}' <<<"${state_out}")"
+  host_github_rate_limited="yes"
+  if [[ -n "${next_attempt_at}" ]]; then
+    host_github_rate_limit_detail="GitHub core API rate limit cooldown is active and resets at ${next_attempt_at}."
+  else
+    host_github_rate_limit_detail="GitHub core API rate limit cooldown is active."
+  fi
+  return 0
+}
 
 owner="${repo_slug%%/*}"
 repo="${repo_slug#*/}"
@@ -365,9 +388,27 @@ post_pr_comment_if_present() {
   if pr_comment_already_posted; then
     return 0
   fi
-  if ! host_github_post_issue_comment "${pr_number}" "$(cat "$comment_file")"; then
-    return 1
+  if host_github_post_issue_comment "${pr_number}" "$(cat "$comment_file")"; then
+    return 0
   fi
+  if [[ -x "${github_write_outbox_script}" ]]; then
+    if "${github_write_outbox_script}" enqueue-comment \
+      --repo-slug "${repo_slug}" \
+      --number "${pr_number}" \
+      --kind pr \
+      --body-file "${comment_file}" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+enqueue_pr_approval_intent() {
+  [[ -x "${github_write_outbox_script}" ]] || return 1
+  "${github_write_outbox_script}" enqueue-approval \
+    --repo-slug "${repo_slug}" \
+    --number "${pr_number}" \
+    --body "${automated_pr_approval_body}" >/dev/null 2>&1
 }
 
 pr_comment_already_posted() {
@@ -390,6 +431,9 @@ record_host_github_rate_limit() {
   host_github_rate_limited="yes"
   host_github_rate_limit_detail="${output}"
   printf '%s\n' "${output}" >"${detail_file}"
+  if [[ -x "${github_core_rate_limit_script}" ]]; then
+    "${github_core_rate_limit_script}" schedule "github-api-rate-limit" >/dev/null 2>&1 || true
+  fi
 }
 
 host_github_post_issue_comment() {
@@ -397,9 +441,13 @@ host_github_post_issue_comment() {
   local body="${2:-}"
   local output=""
 
+  if host_github_rate_limit_state_active; then
+    return 1
+  fi
+
   flow_export_github_cli_auth_env "${repo_slug}"
   if output="$(
-    gh api "repos/${repo_slug}/issues/${issue_number}/comments" \
+    flow_github_api_repo "${repo_slug}" "issues/${issue_number}/comments" \
       --method POST \
       -f body="${body}" 2>&1
   )"; then
@@ -418,23 +466,25 @@ host_github_post_issue_comment() {
 host_github_submit_pr_approval() {
   local output=""
 
+  if host_github_rate_limit_state_active; then
+    enqueue_pr_approval_intent || true
+    return 1
+  fi
+
   flow_export_github_cli_auth_env "${repo_slug}"
   if output="$(
-    gh api "repos/${repo_slug}/pulls/${pr_number}/reviews" \
-      --method POST \
-      -f event=APPROVE \
-      -f body="Automated final review passed. Safe low-risk scope, green checks, and host-side merge approved." \
-      2>&1
+    flow_github_pr_review_approve "${repo_slug}" "${pr_number}" "${automated_pr_approval_body}" 2>&1
   )"; then
     return 0
   fi
 
-  if grep -q "Can not approve your own pull request" <<<"${output}"; then
+  if grep -q "Can not approve your own pull request" <<<"${output}" || grep -q "approve your own pull is not allowed" <<<"${output}"; then
     return 0
   fi
 
   if host_github_output_indicates_rate_limit "${output}"; then
     record_host_github_rate_limit "${output}"
+    enqueue_pr_approval_intent || true
     return 1
   fi
 
@@ -843,13 +893,21 @@ merge_state_prepared() {
 }
 
 current_github_login() {
+  if host_github_rate_limit_state_active; then
+    printf '\n'
+    return 0
+  fi
   flow_export_github_cli_auth_env "${repo_slug}"
-  gh api user --jq '.login // ""' 2>/dev/null || true
+  flow_github_current_login
 }
 
 pr_author_login() {
+  if host_github_rate_limit_state_active; then
+    printf '\n'
+    return 0
+  fi
   flow_export_github_cli_auth_env "${repo_slug}"
-  gh pr view "${pr_number}" -R "${repo_slug}" --json author --jq '.author.login // ""' 2>/dev/null || true
+  flow_github_pr_author_login "${repo_slug}" "${pr_number}"
 }
 
 pr_is_self_authored_for_current_actor() {
@@ -862,8 +920,12 @@ pr_is_self_authored_for_current_actor() {
 }
 
 pr_remote_head_oid() {
+  if host_github_rate_limit_state_active; then
+    printf '\n'
+    return 0
+  fi
   flow_export_github_cli_auth_env "${repo_slug}"
-  gh pr view "${pr_number}" -R "${repo_slug}" --json headRefOid --jq '.headRefOid // ""' 2>/dev/null || true
+  flow_github_pr_head_oid "${repo_slug}" "${pr_number}"
 }
 
 pr_remote_already_has_final_head() {
@@ -885,29 +947,25 @@ approve_and_merge() {
     fi
   fi
 
-  flow_export_github_cli_auth_env "${repo_slug}"
-  if ! gh pr merge "${pr_number}" -R "${repo_slug}" --squash --delete-branch --admin >"${run_dir}/host-github-merge.out" 2>"${run_dir}/host-github-merge.err"; then
-    local merge_output=""
-    merge_output="$(cat "${run_dir}/host-github-merge.err" 2>/dev/null || true)"
-    if host_github_output_indicates_rate_limit "${merge_output}"; then
-      record_host_github_rate_limit "${merge_output}"
-      return 2
-    fi
-    if flow_github_pr_merge "$repo_slug" "$pr_number" "squash" "yes" 2>"${run_dir}/host-github-merge.err"; then
-      return 0
-    fi
-    merge_output="$(cat "${run_dir}/host-github-merge.err" 2>/dev/null || true)"
-    if host_github_output_indicates_rate_limit "${merge_output}"; then
-      record_host_github_rate_limit "${merge_output}"
-      return 2
-    fi
-    if [[ -n "${merge_output}" ]]; then
-      printf '%s\n' "${merge_output}" >&2
-    fi
-    return 1
+  if host_github_rate_limit_state_active; then
+    return 2
   fi
 
-  return 0
+  flow_export_github_cli_auth_env "${repo_slug}"
+  if flow_github_pr_merge "$repo_slug" "$pr_number" "squash" "yes" >"${run_dir}/host-github-merge.out" 2>"${run_dir}/host-github-merge.err"; then
+    return 0
+  fi
+
+  local merge_output=""
+  merge_output="$(cat "${run_dir}/host-github-merge.err" 2>/dev/null || true)"
+  if host_github_output_indicates_rate_limit "${merge_output}"; then
+    record_host_github_rate_limit "${merge_output}"
+    return 2
+  fi
+  if [[ -n "${merge_output}" ]]; then
+    printf '%s\n' "${merge_output}" >&2
+  fi
+  return 1
 }
 
 cleanup_pr_session() {

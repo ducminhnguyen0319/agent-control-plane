@@ -34,7 +34,7 @@ runtime copy.
 
 Common options:
   --profile-id <id>                  Profile id, e.g. billing-api
-  --repo-slug <owner/repo>           GitHub repo slug
+  --repo-slug <owner/repo>           Forge repo slug
   --profile-home <path>              Installed profile registry root
   --repo-root <path>                 Canonical repo root
   --agent-repo-root <path>           Agent-owned anchor repo root

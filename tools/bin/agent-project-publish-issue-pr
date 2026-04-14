@@ -186,9 +186,12 @@ fi
 resolve_actor_login() {
   local login=""
 
-  flow_export_github_cli_auth_env "${repo_slug}"
-  login="$(gh api user --jq .login 2>/dev/null || true)"
-  if [[ -z "${login}" ]]; then
+  login="$(flow_github_current_login 2>/dev/null || true)"
+  if [[ -z "${login}" && ! "$(flow_forge_provider)" =~ ^gitea$ ]]; then
+    flow_export_github_cli_auth_env "${repo_slug}"
+    login="$(gh api user --jq .login 2>/dev/null || true)"
+  fi
+  if [[ -z "${login}" && ! "$(flow_forge_provider)" =~ ^gitea$ ]]; then
     login="$(
       gh auth status 2>/dev/null \
         | sed -n 's/^  ✓ Logged in to github.com account \([^ ]*\) (.*/\1/p' \

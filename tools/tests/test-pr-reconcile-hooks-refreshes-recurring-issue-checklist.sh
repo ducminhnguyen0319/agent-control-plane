@@ -88,7 +88,9 @@ cat >"$shim_dir/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "${1:-}" == "api" && "${2:-}" == "rate_limit" ]]; then
-  printf '5000\n'
+  cat <<'JSON'
+{"resources":{"graphql":{"remaining":5000},"core":{"remaining":5000,"reset":4102444800}}}
+JSON
   exit 0
 fi
 if [[ "${1:-}" == "issue" && "${2:-}" == "view" ]]; then

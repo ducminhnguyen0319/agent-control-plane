@@ -518,7 +518,7 @@ clear_running_labels_after_stop() {
   fi
 
   issue_json="$(flow_github_issue_list_json "${REPO_SLUG}" open 100 2>/dev/null || printf '[]\n')"
-  if [[ "${issue_json}" == "[]" ]]; then
+  if [[ "${issue_json}" == "[]" ]] && ! flow_using_gitea; then
     issue_json="$(gh issue list -R "${REPO_SLUG}" --state open --limit 100 --json number,labels 2>/dev/null || printf '[]\n')"
   fi
   while IFS= read -r number; do
@@ -527,7 +527,7 @@ clear_running_labels_after_stop() {
   done < <(jq -r '.[] | select(any(.labels[]?; .name == "agent-running")) | .number' <<<"${issue_json}" 2>/dev/null || true)
 
   pr_json="$(flow_github_pr_list_json "${REPO_SLUG}" open 100 2>/dev/null || printf '[]\n')"
-  if [[ "${pr_json}" == "[]" ]]; then
+  if [[ "${pr_json}" == "[]" ]] && ! flow_using_gitea; then
     pr_json="$(gh pr list -R "${REPO_SLUG}" --state open --limit 100 --json number,labels 2>/dev/null || printf '[]\n')"
   fi
   while IFS= read -r number; do

@@ -231,6 +231,7 @@ if [[ -n "$hook_file" && -f "$hook_file" ]]; then
 fi
 
 provider_cooldown_script="${shared_tools_dir}/provider-cooldown-state.sh"
+github_write_outbox_script="${shared_tools_dir}/github-write-outbox.sh"
 
 schedule_provider_quota_cooldown() {
   local reason="${1:-provider-quota-limit}"
@@ -335,7 +336,17 @@ post_issue_comment_if_present() {
   if issue_latest_comment_matches_artifact; then
     return 0
   fi
-  flow_github_api_repo "${repo_slug}" "issues/${issue_id}/comments" --method POST -f body="$(cat "$comment_file")" >/dev/null || true
+  if flow_github_api_repo "${repo_slug}" "issues/${issue_id}/comments" --method POST -f body="$(cat "$comment_file")" >/dev/null 2>&1; then
+    return 0
+  fi
+  if [[ -x "${github_write_outbox_script}" ]]; then
+    "${github_write_outbox_script}" enqueue-comment \
+      --repo-slug "${repo_slug}" \
+      --number "${issue_id}" \
+      --kind issue \
+      --body-file "${comment_file}" >/dev/null 2>&1 || true
+  fi
+  return 0
 }
 
 issue_latest_comment_matches_artifact() {

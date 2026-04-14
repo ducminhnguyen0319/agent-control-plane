@@ -18,18 +18,19 @@ hook_file="$tmpdir/hooks.sh"
 retry_reason_file="$tmpdir/retry-reason.txt"
 blocked_file="$tmpdir/blocked.txt"
 cleanup_file="$tmpdir/cleanup.txt"
+gh_log="$tmpdir/gh.log"
 
-mkdir -p "$shared_bin" "$runs_root/fl-pr-303" "$history_root" "$repo_root" "$state_root" "$bin_dir"
+mkdir -p "$shared_bin" "$runs_root/fl-pr-404" "$history_root" "$repo_root" "$bin_dir" "$state_root"
 git -C "$repo_root" init -b main >/dev/null 2>&1
 
-cat >"$runs_root/fl-pr-303/run.env" <<'EOF'
-PR_NUMBER=303
-SESSION=fl-pr-303
+cat >"$runs_root/fl-pr-404/run.env" <<'EOF'
+PR_NUMBER=404
+SESSION=fl-pr-404
 WORKTREE=/tmp/nonexistent-pr-worktree
-STARTED_AT=2026-04-02T21:00:00Z
+STARTED_AT=2026-04-14T04:00:00Z
 EOF
 
-cat >"$runs_root/fl-pr-303/result.env" <<'EOF'
+cat >"$runs_root/fl-pr-404/result.env" <<'EOF'
 OUTCOME=approved-local-review-passed
 ACTION=host-approve-and-merge
 EOF
@@ -39,7 +40,7 @@ cat >"$shared_bin/agent-project-worker-status" <<EOF
 set -euo pipefail
 cat <<OUT
 STATUS=SUCCEEDED
-META_FILE=${runs_root}/fl-pr-303/run.env
+META_FILE=${runs_root}/fl-pr-404/run.env
 OUT
 EOF
 
@@ -55,6 +56,13 @@ cat >"$shared_bin/branch-verification-guard.sh" <<'EOF'
 set -euo pipefail
 exit 0
 EOF
+
+cp "${FLOW_ROOT}/tools/bin/reconcile-bootstrap-lib.sh" "$shared_bin/reconcile-bootstrap-lib.sh"
+cp "${FLOW_ROOT}/tools/bin/flow-config-lib.sh" "$shared_bin/flow-config-lib.sh"
+cp "${FLOW_ROOT}/tools/bin/flow-shell-lib.sh" "$shared_bin/flow-shell-lib.sh"
+cp "${FLOW_ROOT}/tools/bin/agent-project-retry-state" "$shared_bin/agent-project-retry-state"
+cp "${FLOW_ROOT}/tools/bin/github-core-rate-limit-state.sh" "$shared_bin/github-core-rate-limit-state.sh"
+cp "${FLOW_ROOT}/tools/bin/github-write-outbox.sh" "$shared_bin/github-write-outbox.sh"
 
 cat >"$hook_file" <<EOF
 #!/usr/bin/env bash
@@ -72,47 +80,38 @@ EOF
 cat >"$bin_dir/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-
-if [[ "${1:-}" == "pr" && "${2:-}" == "view" ]]; then
-  if [[ "$*" == *"--json author"* ]]; then
-    printf '{"author":{"login":"review-author"}}\n'
-  else
-    printf '{"state":"OPEN","baseRefName":"main","comments":[]}\n'
-  fi
-  exit 0
-fi
-
-if [[ "${1:-}" == "api" ]]; then
-  if [[ "${2:-}" == "user" ]]; then
-    printf '{"login":"merge-actor"}\n'
-    exit 0
-  fi
-  echo "gh: API rate limit exceeded for user ID 123. resets at 2026-04-03 01:20:43 CEST. (HTTP 403)" >&2
-  exit 1
-fi
-
-exit 0
+printf '%s\n' "$*" >>"${TEST_GH_LOG:?}"
+echo "gh should not be called while GitHub core cooldown is active" >&2
+exit 97
 EOF
 
 chmod +x \
   "$shared_bin/agent-project-worker-status" \
   "$shared_bin/agent-project-cleanup-session" \
   "$shared_bin/branch-verification-guard.sh" \
+  "$shared_bin/reconcile-bootstrap-lib.sh" \
+  "$shared_bin/flow-config-lib.sh" \
+  "$shared_bin/flow-shell-lib.sh" \
+  "$shared_bin/agent-project-retry-state" \
+  "$shared_bin/github-core-rate-limit-state.sh" \
+  "$shared_bin/github-write-outbox.sh" \
   "$hook_file" \
   "$bin_dir/gh"
 
-cp "${FLOW_ROOT}/tools/bin/flow-config-lib.sh" "$shared_bin/flow-config-lib.sh"
-cp "${FLOW_ROOT}/tools/bin/flow-shell-lib.sh" "$shared_bin/flow-shell-lib.sh"
-cp "${FLOW_ROOT}/tools/bin/github-write-outbox.sh" "$shared_bin/github-write-outbox.sh"
-chmod +x "$shared_bin/flow-config-lib.sh" "$shared_bin/flow-shell-lib.sh" "$shared_bin/github-write-outbox.sh"
+ACP_STATE_ROOT="$state_root" \
+ACP_RETRY_COOLDOWNS="300,900" \
+bash "$shared_bin/github-core-rate-limit-state.sh" schedule "github-api-rate-limit" >/dev/null
 
 output="$(
   PATH="$bin_dir:$PATH" \
+  GH_TOKEN="test-token" \
+  TEST_GH_LOG="$gh_log" \
   SHARED_AGENT_HOME="$shared_home" \
   ACP_STATE_ROOT="$state_root" \
-  F_LOSNING_STATE_ROOT="$state_root" \
+  ACP_RETRY_COOLDOWNS="300,900" \
+  AGENT_CONTROL_PLANE_ROOT="$FLOW_ROOT" \
   bash "$SCRIPT" \
-    --session fl-pr-303 \
+    --session fl-pr-404 \
     --repo-slug example/repo \
     --repo-root "$repo_root" \
     --runs-root "$runs_root" \
@@ -127,13 +126,14 @@ grep -q '^FAILURE_REASON=github-api-rate-limit$' <<<"$output"
 test -f "$retry_reason_file"
 grep -q '^github-api-rate-limit$' "$retry_reason_file"
 test -f "$blocked_file"
-test -f "$cleanup_file"
-test -f "$runs_root/fl-pr-303/reconciled.ok"
-test -f "$runs_root/fl-pr-303/host-github-rate-limit.log"
-grep -Fq 'API rate limit exceeded' "$runs_root/fl-pr-303/host-github-rate-limit.log"
+gh_call_count="0"
+if [[ -f "$gh_log" ]]; then
+  gh_call_count="$(wc -l <"$gh_log" | tr -d ' ')"
+fi
+test "$gh_call_count" = "0"
 pending_file="$(find "$state_root/github-outbox/pending" -type f -name 'approval-*.json' | head -n 1)"
 test -n "$pending_file"
 jq -e '.type == "approval"' "$pending_file" >/dev/null
-jq -e '.number == "303"' "$pending_file" >/dev/null
+jq -e '.number == "404"' "$pending_file" >/dev/null
 
-echo "pr reconcile retries host actions on github rate limit test passed"
+echo "pr reconcile skips host action while github core rate limited test passed"

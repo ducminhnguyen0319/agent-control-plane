@@ -20,6 +20,7 @@ number=""
 add_file="$(mktemp)"
 remove_file="$(mktemp)"
 trap 'rm -f "$add_file" "$remove_file"' EXIT
+github_outbox_script="${SCRIPT_DIR}/github-write-outbox.sh"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -47,12 +48,40 @@ if [[ -z "$repo_slug" || -z "$number" ]]; then
   exit 1
 fi
 
+enqueue_label_update() {
+  local -a args=()
+  local label=""
+
+  [[ "${ACP_GITHUB_OUTBOX_DISABLE_ENQUEUE:-0}" != "1" ]] || return 1
+  [[ -x "${github_outbox_script}" ]] || return 1
+
+  args=(enqueue-labels --repo-slug "${repo_slug}" --number "${number}")
+  while IFS= read -r label; do
+    [[ -n "${label}" ]] || continue
+    args+=(--add "${label}")
+  done <"${add_file}"
+  while IFS= read -r label; do
+    [[ -n "${label}" ]] || continue
+    args+=(--remove "${label}")
+  done <"${remove_file}"
+
+  "${github_outbox_script}" "${args[@]}" >/dev/null
+}
+
 resource="issues/${number}"
+if flow_github_core_rate_limit_active; then
+  enqueue_label_update && exit 0
+  exit 1
+fi
+
 # Use caller-provided cached JSON if available to skip the GET call
 if [[ -n "${ACP_CACHED_ISSUE_JSON:-}" ]]; then
   current_json="${ACP_CACHED_ISSUE_JSON}"
 else
-  current_json="$(flow_github_api_repo "${repo_slug}" "${resource}")"
+  if ! current_json="$(flow_github_api_repo "${repo_slug}" "${resource}")"; then
+    enqueue_label_update && exit 0
+    exit 1
+  fi
 fi
 add_json="$(jq -R . <"$add_file" | jq -s .)"
 remove_json="$(jq -R . <"$remove_file" | jq -s .)"
@@ -68,4 +97,9 @@ process.stdout.write(JSON.stringify({ labels: Array.from(labels).sort() }));
 EOF
 )"
 
-printf '%s' "$payload" | flow_github_api_repo "${repo_slug}" "${resource}" --method PATCH --input - >/dev/null
+if printf '%s' "$payload" | flow_github_api_repo "${repo_slug}" "${resource}" --method PATCH --input - >/dev/null; then
+  exit 0
+fi
+
+enqueue_label_update && exit 0
+exit 1
