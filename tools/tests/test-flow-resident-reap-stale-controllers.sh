@@ -47,9 +47,28 @@ CONTROLLER_STATE=waiting-due
 ACTIVE_RESIDENT_WORKER_KEY=issue-lane-recurring-general-openclaw-safe
 EOF
 
+stale_dead_pid="$(bash -lc '(sleep 0.05 & echo "$!"; wait)' )"
+stale_claim_file="$state_root/resident-workers/issue-queue/claims/issue-303.demo-session.${stale_dead_pid}.env"
+mkdir -p "$(dirname "$stale_claim_file")"
+cat >"$stale_claim_file" <<EOF
+ISSUE_ID=303
+STATE_FORMAT_VERSION=1
+STATE_KIND=claim
+QUEUED_BY=heartbeat
+QUEUED_AT=2026-03-27T11:59:00Z
+CLAIMED_BY=demo-session
+CLAIMED_AT=2026-03-27T12:00:00Z
+UPDATED_AT=2026-03-27T12:00:00Z
+EOF
+
 output="$(
   ACP_PROFILE_REGISTRY_ROOT="$profile_registry_root" \
+  AGENT_CONTROL_PLANE_PROFILE_ROOT="$profile_registry_root" \
   ACP_PROJECT_ID=demo \
+  ACP_STATE_ROOT="$state_root" \
+  F_LOSNING_STATE_ROOT="$state_root" \
+  ACP_AGENT_ROOT="" \
+  F_LOSNING_AGENT_ROOT="" \
   bash -lc '
     source "'"$FLOW_LIB"'"
     flow_resident_issue_reap_stale_state
@@ -59,5 +78,9 @@ output="$(
 grep -q '^1$' <<<"$output"
 test ! -f "$controller_dir/controller.env"
 test ! -f "$pending_dir/issue-101.pid"
+test ! -f "$stale_claim_file"
+test -f "$state_root/resident-workers/issue-queue/pending/issue-303.env"
+grep -q '^STATE_KIND=pending$' "$state_root/resident-workers/issue-queue/pending/issue-303.env"
+grep -q '^ISSUE_ID=303$' "$state_root/resident-workers/issue-queue/pending/issue-303.env"
 
 echo "flow resident reap stale controllers test passed"
