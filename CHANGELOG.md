@@ -7,6 +7,39 @@ layout for public releases.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-14
+
+### Added
+
+- packaged setup dry-run smoke coverage plus tarball-entrypoint regression tests
+  so release builds catch broken executable surfaces before publish
+- dashboard queue snapshot now surfaces issue queueing depth and lane metadata
+  from the resident runtime state
+- setup flows now support dependency installation via `apt`/`apk` and can resume
+  more safely when expected repositories are missing
+- shared resident issue queue readers and versioned queue-state metadata so the
+  dashboard, reconcile paths, and diagnostics read one canonical contract
+
+### Changed
+
+- provider-pool routing now includes opencode and kilo backends, with more
+  defensive `result.env` contracts across non-Codex runners
+
+### Fixed
+
+- Codex wrappers, heartbeat passes, and related runtime helpers no longer
+  assume Homebrew/macOS-only Python or `stat` paths when running on Linux
+- cleanup failures now propagate warning artifacts and non-zero status instead
+  of being silently archived as successful worker runs
+- launchd bootstrap and heartbeat self-sync now preserve the synced
+  `runtime-home` tree instead of deleting the active runtime out from under the
+  supervisor
+- resident issue queue state now handles both legacy extensionless claim files
+  and canonical `.env` claims, and reaps stale claim/controller state more
+  reliably
+- published package metadata now declares trusted-publishing provenance
+  explicitly and excludes the top-level `SKILL.md` from the public tarball
+
 ## [0.2.0] - 2026-04-10
 
 ### Added
