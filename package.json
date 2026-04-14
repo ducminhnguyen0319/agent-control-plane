@@ -19,7 +19,6 @@
   },
   "files": [
     "README.md",
-    "SKILL.md",
     "assets/workflow-catalog.json",
     "bin/agent-control-plane",
     "bin/issue-resource-class.sh",
