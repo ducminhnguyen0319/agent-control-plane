@@ -88,12 +88,13 @@ ACP_FORGE_PROVIDER="gitea" \
 ACP_GITEA_BASE_URL="http://gitea.test" \
 ACP_GITEA_TOKEN="test-token" \
 TEST_CURL_LOG="$log_file" \
-bash <<EOF
+body_file="$body_file" \
+bash <<'EOF'
 set -euo pipefail
 source "$LIB_PATH"
 
-issue_url="\$(flow_github_issue_create "example/repo" "Demo issue" "$body_file")"
-test "\$issue_url" = "http://gitea.test/example/repo/issues/2"
+issue_url="$(flow_github_issue_create "example/repo" "Demo issue" "$body_file")"
+test "$issue_url" = "http://gitea.test/example/repo/issues/2"
 
 flow_github_api_repo "example/repo" "issues/1/comments" --method POST -f body="Queued comment" >/dev/null
 flow_github_issue_update_body "example/repo" "1" "Updated body from ACP"

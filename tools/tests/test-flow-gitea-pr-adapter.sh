@@ -97,23 +97,24 @@ ACP_FORGE_PROVIDER="gitea" \
 ACP_GITEA_BASE_URL="http://gitea.test" \
 ACP_GITEA_TOKEN="test-token" \
 TEST_CURL_LOG="$log_file" \
-bash <<EOF
+body_file="$body_file" \
+bash <<'EOF'
 set -euo pipefail
 source "$LIB_PATH"
 
-pr_list_json="\$(flow_github_pr_list_json "example/repo" open 100)"
-pr_view_json="\$(flow_github_pr_view_json "example/repo" 7)"
-current_login="\$(flow_github_current_login)"
-author_login="\$(flow_github_pr_author_login "example/repo" 7)"
-head_oid="\$(flow_github_pr_head_oid "example/repo" 7)"
-pr_url="\$(flow_github_pr_create "example/repo" "main" "feature/local-pr" "Demo PR" "$body_file")"
+pr_list_json="$(flow_github_pr_list_json "example/repo" open 100)"
+pr_view_json="$(flow_github_pr_view_json "example/repo" 7)"
+current_login="$(flow_github_current_login)"
+author_login="$(flow_github_pr_author_login "example/repo" 7)"
+head_oid="$(flow_github_pr_head_oid "example/repo" 7)"
+pr_url="$(flow_github_pr_create "example/repo" "main" "feature/local-pr" "Demo PR" "$body_file")"
 
-jq -e 'length == 1 and .[0].number == 7 and .[0].headRefName == "feature/local-pr"' >/dev/null <<<"\$pr_list_json"
-jq -e '.number == 7 and .state == "OPEN" and .authorLogin == "author-user" and .headRefOid == "abc123"' >/dev/null <<<"\$pr_view_json"
-test "\$current_login" = "forge-admin"
-test "\$author_login" = "author-user"
-test "\$head_oid" = "abc123"
-test "\$pr_url" = "http://gitea.test/example/repo/pulls/8"
+jq -e 'length == 1 and .[0].number == 7 and .[0].headRefName == "feature/local-pr"' >/dev/null <<<"$pr_list_json"
+jq -e '.number == 7 and .state == "OPEN" and .authorLogin == "author-user" and .headRefOid == "abc123"' >/dev/null <<<"$pr_view_json"
+test "$current_login" = "forge-admin"
+test "$author_login" = "author-user"
+test "$head_oid" = "abc123"
+test "$pr_url" = "http://gitea.test/example/repo/pulls/8"
 
 flow_github_pr_review_approve "example/repo" "7" "LGTM from ACP"
 flow_github_pr_merge "example/repo" "7" "squash" "yes"

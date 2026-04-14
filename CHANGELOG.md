@@ -7,6 +7,14 @@ layout for public releases.
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-04-14
+
+### Fixed
+
+- Gitea adapter regression tests now pass cleanly on GitHub runners without
+  depending on outer-shell heredoc expansion of `LIB_PATH`, `body_file`, or
+  temporary directory variables
+
 ## [0.4.4] - 2026-04-14
 
 ### Fixed
