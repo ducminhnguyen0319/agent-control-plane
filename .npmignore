@@ -16,4 +16,5 @@ tools/dashboard/__pycache__/
 tools/tests/__pycache__/
 *.pyc
 tools/templates/legacy/
+tools/bin/resident-issue-queue-status.py
 tools/bin/render-dashboard-snapshot.py

@@ -31,6 +31,7 @@
     "!tools/bin/audit-*.sh",
     "!tools/bin/check-skill-contracts.sh",
     "!tools/bin/render-dashboard-snapshot.py",
+    "!tools/bin/resident-issue-queue-status.py",
     "tools/dashboard/app.js",
     "tools/dashboard/dashboard_snapshot.py",
     "tools/dashboard/index.html",
