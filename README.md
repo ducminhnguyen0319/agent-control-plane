@@ -290,7 +290,7 @@ system.
 | `bash` | yes | All runtime, profile, and worker orchestration scripts are Bash. | Your login shell can be `zsh`; `bash` just needs to be on `PATH`. |
 | `git` | yes | Manages worktrees, checks branch state, and coordinates repo automation. | Required even if you interact only through forge issues and PRs. |
 | `gh` | for GitHub-first setups | GitHub CLI auth and API access for issues, PRs, labels, and metadata. | Run `gh auth login` before first use when `--forge-provider github`. |
-| `jq` | yes | Parses JSON from forge API output and worker metadata throughout. | Missing `jq` will break GitHub-heavy and Gitea-heavy runtime flows. |
+| `jq` | yes | Parses JSON from `gh` output and worker metadata throughout. | Missing `jq` will break GitHub-heavy and Gitea-heavy runtime flows. |
 | `python3` | yes | Powers the dashboard server, snapshot renderer, and config helpers. | Required for both dashboard use and several internal scripts. |
 | `tmux` | yes | Runs long-lived worker sessions and captures their status. | Missing `tmux` means background worker workflows will not launch. |
 | Worker CLI (backend-specific) | depends on backend | The coding agent for a profile. Supported: `codex`, `claude`, `openclaw` (production); `ollama`, `pi`, `opencode`, `kilo` (experimental). | Install and authenticate your chosen backend before starting background runs. |

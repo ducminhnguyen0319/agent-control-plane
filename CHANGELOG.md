@@ -7,6 +7,37 @@ layout for public releases.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-14
+
+### Added
+
+- local-first Gitea setup options in the setup wizard, profile scaffolding, and
+  runtime environment so ACP can run daily work against a local forge while
+  keeping GitHub as a later publish boundary
+- source-main alignment reporting in runtime status plus automatic local-source
+  sync from forge mainline for Gitea-driven operation
+- regression coverage for forge-aware PR repair base refs, unauthenticated
+  public Gitea read paths, and forge-scoped merged PR catch-up ledgers
+
+### Changed
+
+- heartbeat and scheduler read paths now rely more heavily on local mirrors and
+  outbox state so ACP stays useful when live forge access is degraded
+- PR repair and merge-repair prompts now use an explicit forge tracking ref
+  instead of assuming `origin/main`
+
+### Fixed
+
+- Gitea PR repair workers no longer hardcode `origin/main`, which previously
+  caused false `no merge base` failures and stalled fix lanes
+- public Gitea GET paths now work even when ACP does not need authenticated
+  reads, which restores `pr-risk` and PR scheduling in local-first setups
+- terminal PR catch-up state is now namespaced by forge provider, preventing
+  GitHub and Gitea PR-number collisions from marking live Gitea PRs as already
+  merged
+- Codex PR repair prompts now consistently point workers at the correct forge
+  base ref during conflict analysis
+
 ## [0.3.0] - 2026-04-14
 
 ### Added
