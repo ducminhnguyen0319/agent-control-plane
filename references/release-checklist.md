@@ -23,6 +23,7 @@ Run the core checks:
 ```bash
 bash tools/tests/test-package-public-metadata.sh
 bash tools/tests/test-package-funding-metadata.sh
+bash tools/tests/test-publish-workflow-trust-gates.sh
 bash tools/tests/test-contribution-docs.sh
 bash tools/tests/test-agent-control-plane-npm-cli.sh
 bash tools/bin/test-smoke.sh

@@ -27,7 +27,6 @@
     "bin/sync-pr-labels.sh",
     "hooks",
     "npm/bin",
-    "references",
     "tools/bin",
     "!tools/bin/audit-*.sh",
     "!tools/bin/check-skill-contracts.sh",
