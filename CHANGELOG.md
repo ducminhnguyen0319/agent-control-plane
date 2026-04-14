@@ -11,49 +11,22 @@ layout for public releases.
 
 ### Fixed
 
-- the Gitea PR-fix source-sync-remote regression test now stages a complete ACP
-  skill-root layout, matching the Linux runner environment so the copied worker
-  script can resolve its flow root without relying on local machine state
-
-## [0.4.8] - 2026-04-14
-
-### Fixed
-
-- the Gitea PR-fix fallback regression test now builds a real ACP skill-root
-  layout in its temporary workspace, so clean Linux runners can resolve the
-  copied `start-pr-fix-worker.sh` entrypoint exactly like production
-
-## [0.4.7] - 2026-04-14
-
-### Fixed
-
-- the Gitea `pr-risk` regression test now seeds its managed-branch globs
-  explicitly, so GitHub runners no longer depend on a locally installed ACP
-  profile id to classify managed PR branches correctly
-
-## [0.4.6] - 2026-04-14
-
-### Fixed
-
+- Linux and GitHub Actions runners now format retry and scheduling epochs
+  portably instead of relying on BSD-only `date -r <epoch>` behavior
 - GitHub outbox regression tests now preserve the active runner `PATH` while
   prepending their fake `gh` shim, so replayed label, comment, and approval
   writes still find the `node` binary installed by `actions/setup-node` during
   publish CI
-
-## [0.4.5] - 2026-04-14
-
-### Fixed
-
 - Gitea adapter regression tests now pass cleanly on GitHub runners without
   depending on outer-shell heredoc expansion of `LIB_PATH`, `body_file`, or
   temporary directory variables
-
-## [0.4.4] - 2026-04-14
-
-### Fixed
-
-- Linux and GitHub Actions runners now format retry and scheduling epochs
-  portably instead of relying on BSD-only `date -r <epoch>` behavior
+- the Gitea `pr-risk` regression test now seeds its managed-branch globs
+  explicitly, so GitHub runners no longer depend on a locally installed ACP
+  profile id to classify managed PR branches correctly
+- the Gitea PR-fix fallback and source-sync-remote regression tests now stage a
+  complete ACP skill-root layout, matching the Linux runner environment so the
+  copied worker scripts can resolve their flow root without relying on local
+  machine state
 - added regression coverage for retry-state epoch formatting under a GNU-style
   `date` shim so release CI catches the exact portability bug that blocked
   publish
