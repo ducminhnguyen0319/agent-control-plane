@@ -129,8 +129,23 @@ LABEL="${label_override:-${ACP_PROJECT_RUNTIME_LAUNCHD_LABEL:-ai.agent.project.$
 BASE_PATH="$(build_launchd_base_path)"
 CODING_WORKER_OVERRIDE="${ACP_PROJECT_RUNTIME_CODING_WORKER:-${ACP_CODING_WORKER:-}}"
 SYNC_SCRIPT="${ACP_PROJECT_RUNTIME_SYNC_SCRIPT:-${FLOW_SKILL_DIR}/tools/bin/sync-shared-agent-home.sh}"
-BOOTSTRAP_SCRIPT="${ACP_PROJECT_RUNTIME_BOOTSTRAP_SCRIPT:-${FLOW_SKILL_DIR}/tools/bin/project-launchd-bootstrap.sh}"
-SUPERVISOR_SCRIPT="${ACP_PROJECT_RUNTIME_SUPERVISOR_SCRIPT:-${FLOW_SKILL_DIR}/tools/bin/project-runtime-supervisor.sh}"
+RUNTIME_SKILL_DIR="${RUNTIME_HOME}/skills/openclaw/agent-control-plane"
+BOOTSTRAP_SCRIPT="${ACP_PROJECT_RUNTIME_BOOTSTRAP_SCRIPT:-}"
+if [[ -z "${BOOTSTRAP_SCRIPT}" ]]; then
+  if [[ -x "${RUNTIME_SKILL_DIR}/tools/bin/project-launchd-bootstrap.sh" ]]; then
+    BOOTSTRAP_SCRIPT="${RUNTIME_SKILL_DIR}/tools/bin/project-launchd-bootstrap.sh"
+  else
+    BOOTSTRAP_SCRIPT="${FLOW_SKILL_DIR}/tools/bin/project-launchd-bootstrap.sh"
+  fi
+fi
+SUPERVISOR_SCRIPT="${ACP_PROJECT_RUNTIME_SUPERVISOR_SCRIPT:-}"
+if [[ -z "${SUPERVISOR_SCRIPT}" ]]; then
+  if [[ -x "${RUNTIME_SKILL_DIR}/tools/bin/project-runtime-supervisor.sh" ]]; then
+    SUPERVISOR_SCRIPT="${RUNTIME_SKILL_DIR}/tools/bin/project-runtime-supervisor.sh"
+  else
+    SUPERVISOR_SCRIPT="${FLOW_SKILL_DIR}/tools/bin/project-runtime-supervisor.sh"
+  fi
+fi
 STATE_ROOT="$(flow_resolve_state_root "${CONFIG_YAML}")"
 SUPERVISOR_PID_FILE="${STATE_ROOT}/runtime-supervisor.pid"
 ENV_FILE="${ACP_PROJECT_RUNTIME_ENV_FILE:-${PROFILE_REGISTRY_ROOT}/${PROFILE_ID}/runtime.env}"

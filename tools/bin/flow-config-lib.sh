@@ -661,18 +661,26 @@ flow_gitea_pr_view_json() {
   local pr_number="${2:?pr number required}"
   local pr_json=""
   local comment_pages_json=""
+  local files_json=""
+  local reviews_json=""
 
   pr_json="$(flow_gitea_api_repo "${repo_slug}" "pulls/${pr_number}" 2>/dev/null || true)"
   pr_json="$(flow_json_or_default "${pr_json}" '{}')"
   comment_pages_json="$(flow_gitea_api_repo "${repo_slug}" "issues/${pr_number}/comments" --paginate --slurp 2>/dev/null || true)"
   comment_pages_json="$(flow_json_or_default "${comment_pages_json}" '[]')"
+  files_json="$(flow_gitea_api_repo "${repo_slug}" "pulls/${pr_number}/files" --paginate --slurp 2>/dev/null || true)"
+  files_json="$(flow_json_or_default "${files_json}" '[]')"
+  reviews_json="$(flow_gitea_api_repo "${repo_slug}" "pulls/${pr_number}/reviews" --paginate --slurp 2>/dev/null || true)"
+  reviews_json="$(flow_json_or_default "${reviews_json}" '[]')"
 
-  PR_JSON="${pr_json}" COMMENT_PAGES_JSON="${comment_pages_json}" python3 - <<'PY'
+  PR_JSON="${pr_json}" COMMENT_PAGES_JSON="${comment_pages_json}" FILES_JSON="${files_json}" REVIEWS_JSON="${reviews_json}" python3 - <<'PY'
 import json
 import os
 
 pr = json.loads(os.environ.get("PR_JSON", "{}") or "{}")
 comment_pages = json.loads(os.environ.get("COMMENT_PAGES_JSON", "[]") or "[]")
+file_pages = json.loads(os.environ.get("FILES_JSON", "[]") or "[]")
+review_pages = json.loads(os.environ.get("REVIEWS_JSON", "[]") or "[]")
 comments = []
 for page in comment_pages:
     if isinstance(page, list):
@@ -680,9 +688,34 @@ for page in comment_pages:
     elif isinstance(page, dict):
         comments.append(page)
 
+files = []
+for page in file_pages:
+    if isinstance(page, list):
+        files.extend(page)
+    elif isinstance(page, dict):
+        files.append(page)
+
+reviews = []
+for page in review_pages:
+    if isinstance(page, list):
+        reviews.extend(page)
+    elif isinstance(page, dict):
+        reviews.append(page)
+
 pr_state = str(pr.get("state", "")).upper()
 if pr.get("merged") or pr.get("merged_at"):
     pr_state = "MERGED"
+
+review_states = [
+    str(review.get("state") or "").upper()
+    for review in reviews
+    if isinstance(review, dict)
+]
+review_decision = ""
+if any(state == "APPROVED" for state in review_states):
+    review_decision = "APPROVED"
+elif any(state in {"CHANGES_REQUESTED", "REQUEST_CHANGES"} for state in review_states):
+    review_decision = "CHANGES_REQUESTED"
 
 result = {
     "number": pr.get("number"),
@@ -711,6 +744,17 @@ result = {
     "updatedAt": pr.get("updated_at") or "",
     "mergedAt": pr.get("merged_at") or "",
     "authorLogin": ((pr.get("user") or {}).get("login")) or "",
+    "files": [
+        {"path": file.get("filename") or ""}
+        for file in files
+        if isinstance(file, dict) and (file.get("filename") or "")
+    ],
+    "reviewRequests": [
+        {"login": reviewer.get("login") or ""}
+        for reviewer in (pr.get("requested_reviewers") or [])
+        if isinstance(reviewer, dict)
+    ],
+    "reviewDecision": review_decision,
 }
 
 print(json.dumps(result))

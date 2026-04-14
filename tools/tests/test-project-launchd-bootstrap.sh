@@ -9,6 +9,7 @@ trap 'rm -rf "$tmpdir"' EXIT
 
 home_dir="$tmpdir/home"
 runtime_home="$tmpdir/runtime-home"
+runtime_bootstrap_bin="$runtime_home/skills/openclaw/agent-control-plane/tools/bin/project-launchd-bootstrap.sh"
 profile_registry_root="$tmpdir/profiles"
 profile_dir="$profile_registry_root/demo"
 capture_dir="$tmpdir/capture"
@@ -19,6 +20,8 @@ env_override_heartbeat_script="$tmpdir/env-override-heartbeat.sh"
 env_file="$profile_dir/runtime.env"
 
 mkdir -p "$home_dir" "$profile_dir" "$(dirname "$runtime_heartbeat_script")" "$capture_dir"
+cp "$BOOTSTRAP_BIN" "$runtime_bootstrap_bin"
+chmod +x "$runtime_bootstrap_bin"
 
 cat >"$sync_script" <<'EOF'
 #!/usr/bin/env bash
@@ -135,5 +138,22 @@ grep -q '^ENSURE_ARGS=--force --source-home '"$tmpdir"'/source-home --runtime-ho
 grep -q '^HEARTBEAT_SOURCE=env-file$' "$capture_dir/heartbeat.log"
 grep -q '^PROFILE_ID=demo$' "$capture_dir/heartbeat.log"
 grep -q '^PATH=/custom/bin:/usr/bin:/bin$' "$capture_dir/heartbeat.log"
+
+rm -f "$capture_dir/ensure.log" "$capture_dir/heartbeat.log"
+
+ACP_PROJECT_RUNTIME_HOME_DIR="$home_dir" \
+ACP_PROJECT_RUNTIME_RUNTIME_HOME="$runtime_home" \
+ACP_PROJECT_RUNTIME_PROFILE_REGISTRY_ROOT="$profile_registry_root" \
+ACP_PROJECT_RUNTIME_PROFILE_ID="demo" \
+ACP_PROJECT_RUNTIME_SYNC_SCRIPT="$sync_script" \
+ACP_PROJECT_RUNTIME_ENSURE_SYNC_SCRIPT="$ensure_sync_script" \
+ACP_PROJECT_RUNTIME_CAPTURE_DIR="$capture_dir" \
+bash "$runtime_bootstrap_bin"
+
+if [[ -f "$capture_dir/ensure.log" ]]; then
+  echo "runtime-home bootstrap unexpectedly attempted ensure-runtime-sync" >&2
+  exit 1
+fi
+grep -q '^HEARTBEAT_SOURCE=env-file$' "$capture_dir/heartbeat.log"
 
 echo "project launchd bootstrap test passed"

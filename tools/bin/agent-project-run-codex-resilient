@@ -136,6 +136,15 @@ config_yaml="$(resolve_flow_config_yaml "${BASH_SOURCE[0]}")"
 issue_session_prefix="$(flow_resolve_issue_session_prefix "${config_yaml}")"
 pr_session_prefix="$(flow_resolve_pr_session_prefix "${config_yaml}")"
 
+# Keep npm-backed verification steps isolated from any broken user-global cache state.
+npm_cache_dir="${NPM_CONFIG_CACHE:-${npm_config_cache:-}}"
+if [[ -z "${npm_cache_dir}" ]]; then
+  npm_cache_dir="${ACP_NPM_CACHE_DIR:-${F_LOSNING_NPM_CACHE_DIR:-${HOME}/.agent-runtime/npm-cache}}"
+fi
+export NPM_CONFIG_CACHE="${npm_cache_dir}"
+export npm_config_cache="${npm_cache_dir}"
+mkdir -p "${npm_cache_dir}" 2>/dev/null || true
+
 thread_id=""
 attempt=0
 resume_count=0
