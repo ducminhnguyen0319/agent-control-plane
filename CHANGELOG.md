@@ -7,6 +7,14 @@ layout for public releases.
 
 ## [Unreleased]
 
+## [0.4.9] - 2026-04-14
+
+### Fixed
+
+- the Gitea PR-fix source-sync-remote regression test now stages a complete ACP
+  skill-root layout, matching the Linux runner environment so the copied worker
+  script can resolve its flow root without relying on local machine state
+
 ## [0.4.8] - 2026-04-14
 
 ### Fixed
