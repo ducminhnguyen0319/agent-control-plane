@@ -493,6 +493,13 @@ def collect_resident_workers(state_root: Path) -> list[dict[str, Any]]:
                 "last_action": env.get("LAST_ACTION", ""),
                 "last_failure_reason": env.get("LAST_FAILURE_REASON", ""),
                 "worktree": env.get("WORKTREE", ""),
+                "resident_lane_kind": env.get("RESIDENT_LANE_KIND", ""),
+                "resident_lane_value": env.get("RESIDENT_LANE_VALUE", ""),
+                "resident_lane": (
+                    f"{env.get('RESIDENT_LANE_KIND', '')}/{env.get('RESIDENT_LANE_VALUE', '')}"
+                    if env.get("RESIDENT_LANE_KIND", "") and env.get("RESIDENT_LANE_VALUE", "")
+                    else ""
+                ),
                 "metadata_file": str(path),
             }
         )
@@ -707,15 +714,33 @@ def collect_issue_queue(state_root: Path) -> dict[str, list[dict[str, Any]]]:
         items: list[dict[str, Any]] = []
         for path in sorted(root.glob("*.env"), key=lambda item: item.stat().st_mtime, reverse=True):
             env = read_env_file(path)
-            items.append(
-                {
-                    "issue_id": env.get("ISSUE_ID", path.stem.removeprefix("issue-")),
-                    "session": env.get("SESSION", ""),
-                    "claim_file": env.get("CLAIM_FILE", ""),
-                    "updated_at": env.get("UPDATED_AT", "") or file_mtime_iso(path),
-                    "state_file": str(path),
-                }
-            )
+            issue_id = env.get("ISSUE_ID", path.stem.removeprefix("issue-"))
+            claim_file = env.get("CLAIM_FILE", "")
+            in_claims = root.name == "claims"
+            if not claim_file and in_claims:
+                claim_file = str(path)
+            claimer = ""
+            if claim_file:
+                claim_base = Path(claim_file).name
+                if claim_base.startswith(f"issue-{issue_id}."):
+                    if claim_base.endswith(".env"):
+                        claim_base = claim_base.removesuffix(".env")
+                    claim_token = claim_base.split(".", 1)[1]
+                    if "." in claim_token:
+                        tail = claim_token.rsplit(".", 1)[1]
+                        if tail.isdigit():
+                            claim_token = claim_token.rsplit(".", 1)[0]
+                    claimer = claim_token
+            item = {
+                "issue_id": issue_id,
+                "session": env.get("SESSION", ""),
+                "queued_by": env.get("QUEUED_BY", ""),
+                "claim_file": claim_file,
+                "claimer": claimer,
+                "updated_at": env.get("UPDATED_AT", "") or file_mtime_iso(path),
+                "state_file": str(path),
+            }
+            items.append(item)
         return items
 
     return {
