@@ -45,11 +45,17 @@ Usage:
 
 Guided install/bootstrap flow for one repo profile. It can detect the current
 repo, suggest sane runtime paths, sync ACP into ~/.agent-runtime, scaffold one
-profile, run doctor checks, and optionally start the runtime.
+profile, run doctor checks, and optionally start the runtime. ACP can run
+GitHub-first or local-first with Gitea as the working forge.
 
 Options:
   --profile-id <id>            Profile id to create or refresh
-  --repo-slug <owner/repo>     GitHub repo slug
+  --repo-slug <owner/repo>     Forge repo slug
+  --forge-provider <provider>  One of: github, gitea
+  --gitea-base-url <url>       Base URL for a local/self-hosted Gitea instance
+  --gitea-token <token>        Gitea API token written to profile runtime.env
+  --gitea-username <user>      Gitea username written to profile runtime.env
+  --gitea-password <pass>      Gitea password written to profile runtime.env
   --repo-root <path>           Local checkout to manage (defaults to current git root)
   --agent-root <path>          ACP-managed runtime root for this profile
   --agent-repo-root <path>     Clean ACP-managed anchor repo root
@@ -380,6 +386,11 @@ function parseSetupArgs(args) {
   const options = {
     profileId: "",
     repoSlug: "",
+    forgeProvider: "",
+    giteaBaseUrl: "",
+    giteaToken: "",
+    giteaUsername: "",
+    giteaPassword: "",
     repoRoot: "",
     agentRoot: "",
     agentRepoRoot: "",
@@ -414,6 +425,21 @@ function parseSetupArgs(args) {
         break;
       case "--repo-slug":
         options.repoSlug = args[++index] || "";
+        break;
+      case "--forge-provider":
+        options.forgeProvider = args[++index] || "";
+        break;
+      case "--gitea-base-url":
+        options.giteaBaseUrl = args[++index] || "";
+        break;
+      case "--gitea-token":
+        options.giteaToken = args[++index] || "";
+        break;
+      case "--gitea-username":
+        options.giteaUsername = args[++index] || "";
+        break;
+      case "--gitea-password":
+        options.giteaPassword = args[++index] || "";
         break;
       case "--repo-root":
         options.repoRoot = args[++index] || "";
@@ -656,8 +682,8 @@ async function maybeCreateStarterIssues(options, config, prereq) {
     return result;
   }
 
-  if (!prereq.ghAuthOk) {
-    result.reason = "gh-auth-not-ready";
+  if (!prereq.forgeAuthOk) {
+    result.reason = `${config.forge.provider}-auth-not-ready`;
     return result;
   }
 
@@ -703,21 +729,26 @@ async function maybeCreateStarterIssues(options, config, prereq) {
   const requiredLabels = [
     { name: "agent-keep-open", color: "D4C5F9", description: "Recurring issue — agent works on this continuously" }
   ];
-  for (const label of requiredLabels) {
-    spawnSync("gh", ["label", "create", label.name, "--repo", config.repoSlug, "--description", label.description, "--color", label.color, "--force"], { stdio: "pipe", timeout: 15000 });
+  if (config.forge.provider === "gitea") {
+    for (const label of requiredLabels) {
+      runForgeFlowConfigCommand(config, [
+        "flow_github_label_create",
+        shellQuote(config.repoSlug),
+        shellQuote(label.name),
+        shellQuote(label.description),
+        shellQuote(label.color)
+      ]);
+    }
+  } else {
+    for (const label of requiredLabels) {
+      spawnSync("gh", ["label", "create", label.name, "--repo", config.repoSlug, "--description", label.description, "--color", label.color, "--force"], { stdio: "pipe", timeout: 15000 });
+    }
   }
 
   for (const { issue } of toCreate) {
-    const ghArgs = [
-      "issue", "create",
-      "--repo", config.repoSlug,
-      "--title", issue.title,
-      "--body", issue.body,
-      "--label", issue.labels.join(",")
-    ];
-    const ghResult = spawnSync("gh", ghArgs, { encoding: "utf8", stdio: "pipe", timeout: 30000 });
-    if (ghResult.status === 0) {
-      const url = (ghResult.stdout || "").trim();
+    const createResult = createStarterIssueOnForge(config, issue);
+    if (createResult.status === 0) {
+      const url = (createResult.stdout || "").trim();
       result.created.push({ key: issue.key, title: issue.title, url });
       console.log(`  Created: ${issue.title}`);
       if (url) {
@@ -725,7 +756,7 @@ async function maybeCreateStarterIssues(options, config, prereq) {
       }
     } else {
       console.log(`  Failed to create: ${issue.title}`);
-      const stderr = (ghResult.stderr || "").trim();
+      const stderr = (createResult.stderr || "").trim();
       if (stderr) {
         console.log(`           ${stderr.split("\n")[0]}`);
       }
@@ -736,6 +767,87 @@ async function maybeCreateStarterIssues(options, config, prereq) {
   result.reason = "";
 
   return result;
+}
+
+function buildForgeCommandEnv(config) {
+  const env = { ...process.env };
+  env.ACP_FORGE_PROVIDER = config.forge.provider;
+  env.F_LOSNING_FORGE_PROVIDER = config.forge.provider;
+  if (config.forge.provider === "gitea") {
+    if (config.forge.giteaBaseUrl) {
+      env.ACP_GITEA_BASE_URL = config.forge.giteaBaseUrl;
+      env.GITEA_BASE_URL = config.forge.giteaBaseUrl;
+    }
+    if (config.forge.giteaToken) {
+      env.ACP_GITEA_TOKEN = config.forge.giteaToken;
+      env.GITEA_TOKEN = config.forge.giteaToken;
+    }
+    if (config.forge.giteaUsername) {
+      env.ACP_GITEA_USERNAME = config.forge.giteaUsername;
+      env.GITEA_USERNAME = config.forge.giteaUsername;
+    }
+    if (config.forge.giteaPassword) {
+      env.ACP_GITEA_PASSWORD = config.forge.giteaPassword;
+      env.GITEA_PASSWORD = config.forge.giteaPassword;
+    }
+  }
+  return env;
+}
+
+function runForgeFlowConfigCommand(config, commandParts, extraEnv = {}) {
+  const flowConfigLib = path.join(packageRoot, "tools", "bin", "flow-config-lib.sh");
+  const script = `set -euo pipefail\nsource ${shellQuote(flowConfigLib)}\n${commandParts.join(" ")}\n`;
+  return spawnSync("bash", ["-lc", script], {
+    encoding: "utf8",
+    stdio: "pipe",
+    timeout: 30000,
+    env: {
+      ...buildForgeCommandEnv(config),
+      ...extraEnv
+    }
+  });
+}
+
+function createStarterIssueOnForge(config, issue) {
+  if (config.forge.provider !== "gitea") {
+    const ghArgs = [
+      "issue", "create",
+      "--repo", config.repoSlug,
+      "--title", issue.title,
+      "--body", issue.body,
+      "--label", issue.labels.join(",")
+    ];
+    return spawnSync("gh", ghArgs, { encoding: "utf8", stdio: "pipe", timeout: 30000 });
+  }
+
+  const bodyFile = fs.mkdtempSync(path.join(os.tmpdir(), "acp-starter-issue-"));
+  const bodyPath = path.join(bodyFile, "body.md");
+  fs.writeFileSync(bodyPath, issue.body);
+  try {
+    const createResult = runForgeFlowConfigCommand(
+      config,
+      ["flow_github_issue_create", shellQuote(config.repoSlug), "$ACP_ISSUE_TITLE", "$ACP_ISSUE_BODY_FILE"],
+      {
+        ACP_ISSUE_TITLE: issue.title,
+        ACP_ISSUE_BODY_FILE: bodyPath
+      }
+    );
+    const issueUrl = (createResult.stdout || "").trim();
+    if (createResult.status === 0 && issueUrl && issue.labels.length > 0) {
+      const issueNumber = issueUrl.split("/").pop();
+      for (const labelName of issue.labels) {
+        spawnSync("bash", [path.join(packageRoot, "tools", "bin", "agent-github-update-labels"), "--repo-slug", config.repoSlug, "--number", issueNumber, "--add", labelName], {
+          encoding: "utf8",
+          stdio: "pipe",
+          timeout: 30000,
+          env: buildForgeCommandEnv(config)
+        });
+      }
+    }
+    return createResult;
+  } finally {
+    fs.rmSync(bodyFile, { recursive: true, force: true });
+  }
 }
 
 function buildSetupPaths(platformHome, repoRoot, profileId, overrides) {
@@ -752,12 +864,27 @@ function buildSetupPaths(platformHome, repoRoot, profileId, overrides) {
   };
 }
 
-function collectPrereqStatus(codingWorker) {
-  const requiredTools = ["bash", "git", "gh", "jq", "python3", "tmux"];
+function collectPrereqStatus(codingWorker, forge) {
+  const forgeProvider = (forge && forge.provider) || "github";
+  const requiredTools = ["bash", "git", "jq", "python3", "tmux"];
+  if (forgeProvider !== "gitea") {
+    requiredTools.push("gh");
+  }
   const missingRequired = requiredTools.filter((tool) => !commandExists(tool));
   const workerCommand = codingWorker;
   const workerAvailable = commandExists(workerCommand);
   const ghAuthResult = commandExists("gh") ? runCapture("gh", ["auth", "status"]) : { status: 1, stdout: "", stderr: "" };
+  const giteaAuthOk = forgeProvider !== "gitea"
+    ? false
+    : Boolean(
+        forge &&
+        forge.giteaBaseUrl &&
+        (
+          forge.giteaToken ||
+          (forge.giteaUsername && forge.giteaPassword)
+        )
+      );
+  const forgeAuthOk = forgeProvider === "gitea" ? giteaAuthOk : ghAuthResult.status === 0;
 
   return {
     missingRequired,
@@ -765,6 +892,8 @@ function collectPrereqStatus(codingWorker) {
     workerCommand,
     workerAvailable,
     ghAuthOk: ghAuthResult.status === 0,
+    forgeProvider,
+    forgeAuthOk,
     ghAuthOutput: `${ghAuthResult.stdout}${ghAuthResult.stderr}`.trim()
   };
 }
@@ -1020,6 +1149,9 @@ async function maybeInstallMissingDependencies(options, prereq) {
 }
 
 async function maybeRunGithubAuthLogin(options, prereq) {
+  if (prereq.forgeProvider === "gitea") {
+    return { status: prereq.forgeAuthOk ? "not-needed" : "skipped", reason: prereq.forgeAuthOk ? "" : "gitea-auth-not-ready" };
+  }
   if (prereq.ghAuthOk) {
     return { status: "not-needed", reason: "" };
   }
@@ -1356,7 +1488,7 @@ function printPrereqSummary(prereq) {
   console.log("\nPrerequisite check");
   console.log(`- core tools: ${prereq.coreToolsOk ? "ok" : `missing ${prereq.missingRequired.join(", ")}`}`);
   console.log(`- worker backend (${prereq.workerCommand}): ${prereq.workerAvailable ? "found" : "missing on PATH"}`);
-  console.log(`- GitHub auth: ${prereq.ghAuthOk ? "ok" : "not ready"}`);
+  console.log(`- ${prereq.forgeProvider === "gitea" ? "Gitea auth" : "GitHub auth"}: ${prereq.forgeAuthOk ? "ok" : "not ready"}`);
   console.log(`- backend note: ${backendReadinessHint(prereq.workerCommand)}`);
 }
 
@@ -1464,12 +1596,20 @@ function buildScopedContext(context, profileId) {
 function renderSetupSummary(config) {
   console.log("\nSetup plan");
   console.log(`- profile id: ${config.profileId}`);
+  console.log(`- forge provider: ${config.forge.provider}`);
   console.log(`- repo slug: ${config.repoSlug}`);
+  if (config.forge.provider === "gitea") {
+    console.log(`- gitea base url: ${config.forge.giteaBaseUrl || "(not set)"}`);
+  }
   console.log(`- repo root: ${config.paths.repoRoot}`);
   console.log(`- agent root: ${config.paths.agentRoot}`);
   console.log(`- agent repo root: ${config.paths.agentRepoRoot}`);
   console.log(`- worktree root: ${config.paths.worktreeRoot}`);
   console.log(`- coding worker: ${config.codingWorker}`);
+}
+
+function forgeAuthLabel(config) {
+  return config.forge.provider === "gitea" ? "Gitea auth" : "GitHub auth";
 }
 
 function planStatusWithReason(status, reason = "") {
@@ -1513,8 +1653,10 @@ function buildSetupDryRunPlan(options, context, config) {
   }
 
   let githubAuthAction = planStatusWithReason("not-needed");
-  if (!prereq.ghAuthOk) {
-    if (!commandExists("gh")) {
+  if (!prereq.forgeAuthOk) {
+    if (config.forge.provider === "gitea") {
+      githubAuthAction = planStatusWithReason("blocked", "gitea-auth-not-ready");
+    } else if (!commandExists("gh")) {
       githubAuthAction = planStatusWithReason("blocked", "gh-missing");
     } else if (options.ghAuthLogin === false) {
       githubAuthAction = planStatusWithReason("skipped", "disabled");
@@ -1533,8 +1675,8 @@ function buildSetupDryRunPlan(options, context, config) {
       runtimeStartAction = planStatusWithReason("blocked", `missing-worker:${prereq.workerCommand}`);
     } else if (anchorSync.status !== "ok") {
       runtimeStartAction = planStatusWithReason("blocked", `anchor-sync-${anchorSync.reason}`);
-    } else if (!prereq.ghAuthOk) {
-      runtimeStartAction = planStatusWithReason("blocked", "gh-auth-not-ready");
+    } else if (!prereq.forgeAuthOk) {
+      runtimeStartAction = planStatusWithReason("blocked", `${config.forge.provider}-auth-not-ready`);
     } else {
       runtimeStartAction = planStatusWithReason("would-run");
     }
@@ -1586,9 +1728,13 @@ function printSetupDryRunPlan(context, config, plan) {
   if (plan.workerAction.status !== "not-needed" && plan.workerInstallPlan && plan.workerInstallPlan.commands.length > 0) {
     console.log(`  command preview: ${plan.workerInstallPlan.commands.map(formatCommand).join(" && ")}`);
   }
-  console.log(`- GitHub auth step: ${plan.githubAuthAction.status}${plan.githubAuthAction.reason ? ` (${plan.githubAuthAction.reason})` : ""}`);
+  console.log(`- ${forgeAuthLabel(config)} step: ${plan.githubAuthAction.status}${plan.githubAuthAction.reason ? ` (${plan.githubAuthAction.reason})` : ""}`);
   if (plan.githubAuthAction.status !== "not-needed") {
-    console.log(`  command preview: gh auth login`);
+    if (config.forge.provider === "github") {
+      console.log(`  command preview: gh auth login`);
+    } else {
+      console.log(`  next step: pass --gitea-base-url plus --gitea-token or --gitea-username/--gitea-password`);
+    }
   }
   console.log(`- runtime start: ${plan.runtimeStartAction.status}${plan.runtimeStartAction.reason ? ` (${plan.runtimeStartAction.reason})` : ""}`);
   if (process.platform === "darwin") {
@@ -1602,6 +1748,7 @@ function buildSetupResultPayload(params) {
     setupMode: params.setupMode,
     profileId: params.profileId,
     repoSlug: params.repoSlug,
+    forge: params.forge,
     codingWorker: params.codingWorker,
     profileExists: params.profileExists,
     paths: {
@@ -1678,8 +1825,8 @@ function collectFinalSetupIssues(config, prereq, doctorKv, runtimeStartStatus) {
   if (!prereq.workerAvailable) {
     issues.push(`missing worker backend on PATH: ${prereq.workerCommand}`);
   }
-  if (!prereq.ghAuthOk) {
-    issues.push("GitHub CLI is not authenticated");
+  if (!prereq.forgeAuthOk) {
+    issues.push(config.forge.provider === "gitea" ? "Gitea auth is not configured" : "GitHub CLI is not authenticated");
   }
   if ((doctorKv.DOCTOR_STATUS || "") !== "ok") {
     issues.push(`doctor status is ${doctorKv.DOCTOR_STATUS || "unknown"}`);
@@ -1722,8 +1869,12 @@ async function maybeRunFinalSetupFixups(options, scopedContext, config, currentS
     else if (worker === "claude") console.log("  Fix: npm install -g @anthropic-ai/claude-code && claude auth login");
     else console.log(`  Fix: install ${worker} and add it to PATH`);
   }
-  if (!currentState.prereq.ghAuthOk) {
-    console.log("  Fix: run gh auth login");
+  if (!currentState.prereq.forgeAuthOk) {
+    if (config.forge.provider === "gitea") {
+      console.log("  Fix: pass --gitea-base-url plus --gitea-token or --gitea-username/--gitea-password");
+    } else {
+      console.log("  Fix: run gh auth login");
+    }
   }
 
   if (!options.interactive) {
@@ -1766,19 +1917,19 @@ async function maybeRunFinalSetupFixups(options, scopedContext, config, currentS
   if (!prereq.coreToolsOk) {
     actions.push("install-core-tools");
     dependencyInstall = await maybeInstallMissingDependencies({ ...options, installMissingDeps: true, interactive: false }, prereq);
-    prereq = collectPrereqStatus(config.codingWorker);
+    prereq = collectPrereqStatus(config.codingWorker, config.forge);
   }
 
   if (!prereq.workerAvailable) {
     actions.push("install-worker-backend");
     workerSetupStep = await maybeShowWorkerSetupGuide({ ...options, installMissingBackend: true, interactive: options.interactive }, prereq);
-    prereq = collectPrereqStatus(config.codingWorker);
+    prereq = collectPrereqStatus(config.codingWorker, config.forge);
   }
 
-  if (!prereq.ghAuthOk) {
+  if (!prereq.forgeAuthOk) {
     actions.push("github-auth-login");
     githubAuthStep = await maybeRunGithubAuthLogin({ ...options, ghAuthLogin: true, interactive: false }, prereq);
-    prereq = collectPrereqStatus(config.codingWorker);
+    prereq = collectPrereqStatus(config.codingWorker, config.forge);
   }
 
   if ((doctorKv.DOCTOR_STATUS || "") !== "ok") {
@@ -1798,9 +1949,9 @@ async function maybeRunFinalSetupFixups(options, scopedContext, config, currentS
     } else if (anchorSync && anchorSync.status !== "ok") {
       runtimeStartStatus = "skipped";
       runtimeStartReason = `anchor-sync-${anchorSync.reason}`;
-    } else if (!prereq.ghAuthOk) {
+    } else if (!prereq.forgeAuthOk) {
       runtimeStartStatus = "skipped";
-      runtimeStartReason = "gh-auth-not-ready";
+      runtimeStartReason = `${config.forge.provider}-auth-not-ready`;
     } else if ((doctorKv.DOCTOR_STATUS || "") !== "ok") {
       runtimeStartStatus = "skipped";
       runtimeStartReason = `doctor-${doctorKv.DOCTOR_STATUS || "not-ok"}`;
@@ -1851,11 +2002,18 @@ async function collectSetupConfig(options, context) {
   const detectedRepoSlug = options.repoSlug || detectRepoSlug(detectedRepoRoot);
   const suggestedProfileId = options.profileId || sanitizeProfileId((detectedRepoSlug.split("/").pop() || path.basename(detectedRepoRoot)));
   const suggestedWorker = options.codingWorker || detectPreferredWorker();
+  const detectedForgeProvider = options.forgeProvider || process.env.ACP_FORGE_PROVIDER || "github";
+  const defaultGiteaBaseUrl = options.giteaBaseUrl || process.env.ACP_GITEA_BASE_URL || process.env.GITEA_BASE_URL || "http://127.0.0.1:3000";
 
   let repoRoot = detectedRepoRoot;
   let repoSlug = detectedRepoSlug;
   let profileId = suggestedProfileId;
   let codingWorker = suggestedWorker;
+  let forgeProvider = detectedForgeProvider;
+  let giteaBaseUrl = defaultGiteaBaseUrl;
+  let giteaToken = options.giteaToken || process.env.ACP_GITEA_TOKEN || process.env.GITEA_TOKEN || "";
+  let giteaUsername = options.giteaUsername || process.env.ACP_GITEA_USERNAME || process.env.GITEA_USERNAME || "";
+  let giteaPassword = options.giteaPassword || process.env.ACP_GITEA_PASSWORD || process.env.GITEA_PASSWORD || "";
 
   const detectedRepoRootExists = fs.existsSync(detectedRepoRoot);
   if (!detectedRepoRootExists && !options.allowMissingRepo) {
@@ -1878,7 +2036,22 @@ async function collectSetupConfig(options, context) {
       printWizardStep(1, 4, "Project details");
 
       repoRoot = path.resolve(await promptText(rl, "Local repo root", detectedRepoRoot));
-      repoSlug = await promptText(rl, "GitHub repo slug", repoSlug || "");
+      let forgeInput = forgeProvider;
+      while (!["github", "gitea"].includes(forgeInput)) {
+        forgeInput = await promptText(rl, "Forge provider (github / gitea)", forgeProvider || "github");
+      }
+      forgeProvider = forgeInput;
+      repoSlug = await promptText(rl, "Forge repo slug", repoSlug || "");
+      if (forgeProvider === "gitea") {
+        giteaBaseUrl = await promptText(rl, "Gitea base URL", giteaBaseUrl);
+        giteaToken = await promptText(rl, "Gitea token (Enter to skip)", giteaToken);
+        if (!giteaToken) {
+          giteaUsername = await promptText(rl, "Gitea username (Enter to skip)", giteaUsername);
+          if (giteaUsername) {
+            giteaPassword = await promptText(rl, "Gitea password (Enter to skip)", giteaPassword);
+          }
+        }
+      }
       profileId = sanitizeProfileId(await promptText(rl, "Profile id", profileId));
 
       let workerInput = codingWorker;
@@ -1896,13 +2069,21 @@ async function collectSetupConfig(options, context) {
   }
 
   const paths = buildSetupPaths(context.platformHome, repoRoot, profileId, options);
-  const prereq = collectPrereqStatus(codingWorker);
+  const forge = {
+    provider: forgeProvider,
+    giteaBaseUrl,
+    giteaToken,
+    giteaUsername,
+    giteaPassword
+  };
+  const prereq = collectPrereqStatus(codingWorker, forge);
   const config = {
     profileId,
     repoSlug,
     repoRoot,
     codingWorker,
     paths,
+    forge,
     prereq
   };
 
@@ -1915,7 +2096,7 @@ async function collectSetupConfig(options, context) {
     printPrereqSummary(prereq);
     const rl = createPromptInterface();
     try {
-      if (!prereq.coreToolsOk || !prereq.workerAvailable || !prereq.ghAuthOk) {
+      if (!prereq.coreToolsOk || !prereq.workerAvailable || !prereq.forgeAuthOk) {
         console.log("\nACP can still scaffold the profile now, but runtime start may be skipped until these checks are green.");
       }
       const shouldContinue = await promptYesNo(rl, "Continue with these values", true);
@@ -2062,7 +2243,7 @@ async function runSetupFlow(forwardedArgs) {
         workerBackendInstallExample: plan.workerGuide.installExamples[0] || "",
         workerBackendAuthExample: plan.workerGuide.authExamples[0] || "",
         workerBackendVerifyExample: plan.workerGuide.verifyExamples[0] || "",
-        githubAuthStatus: plan.prereq.ghAuthOk ? "ok" : "not-ready",
+        githubAuthStatus: plan.prereq.forgeAuthOk ? "ok" : "not-ready",
         githubAuthStepStatus: plan.githubAuthAction.status,
         githubAuthStepReason: plan.githubAuthAction.reason || "",
         dependencyInstallStatus: plan.dependencyAction.status,
@@ -2086,6 +2267,7 @@ async function runSetupFlow(forwardedArgs) {
         console.log(`SETUP_STATUS=dry-run`);
         console.log(`SETUP_MODE=dry-run`);
         console.log(`PROFILE_ID=${config.profileId}`);
+        console.log(`FORGE_PROVIDER=${config.forge.provider}`);
         console.log(`REPO_SLUG=${config.repoSlug}`);
         console.log(`REPO_ROOT=${config.paths.repoRoot}`);
         console.log(`AGENT_ROOT=${config.paths.agentRoot}`);
@@ -2104,7 +2286,7 @@ async function runSetupFlow(forwardedArgs) {
         }
         console.log(`WORKER_BACKEND_COMMAND=${plan.prereq.workerCommand}`);
         console.log(`WORKER_BACKEND_STATUS=${plan.prereq.workerAvailable ? "ok" : "missing"}`);
-        console.log(`GITHUB_AUTH_STATUS=${plan.prereq.ghAuthOk ? "ok" : "not-ready"}`);
+        console.log(`GITHUB_AUTH_STATUS=${plan.prereq.forgeAuthOk ? "ok" : "not-ready"}`);
         console.log(`DEPENDENCY_INSTALL_STATUS=${plan.dependencyAction.status}`);
         if (plan.dependencyAction.reason) {
           console.log(`DEPENDENCY_INSTALL_REASON=${plan.dependencyAction.reason}`);
@@ -2170,16 +2352,16 @@ async function runSetupFlow(forwardedArgs) {
       console.error("dependency installation failed");
       return 1;
     }
-    prereq = collectPrereqStatus(config.codingWorker);
+    prereq = collectPrereqStatus(config.codingWorker, config.forge);
 
     let githubAuthStep = await maybeRunGithubAuthLogin(options, prereq);
     if (githubAuthStep.status === "failed") {
-      console.error("GitHub authentication failed");
+      console.error(config.forge.provider === "gitea" ? "Gitea authentication failed" : "GitHub authentication failed");
       return 1;
     }
-    prereq = collectPrereqStatus(config.codingWorker);
+    prereq = collectPrereqStatus(config.codingWorker, config.forge);
     let workerSetupStep = await maybeShowWorkerSetupGuide(options, prereq);
-    prereq = collectPrereqStatus(config.codingWorker);
+    prereq = collectPrereqStatus(config.codingWorker, config.forge);
 
     // Check OpenRouter API key when openclaw or pi is selected
     if ((config.codingWorker === "openclaw" || config.codingWorker === "pi") && !process.env.OPENROUTER_API_KEY) {
@@ -2251,6 +2433,7 @@ async function runSetupFlow(forwardedArgs) {
     const initArgs = [
       "--profile-id", config.profileId,
       "--repo-slug", config.repoSlug,
+      "--forge-provider", config.forge.provider,
       "--repo-root", config.paths.repoRoot,
       "--agent-root", config.paths.agentRoot,
       "--agent-repo-root", config.paths.agentRepoRoot,
@@ -2260,6 +2443,12 @@ async function runSetupFlow(forwardedArgs) {
       "--source-repo-root", config.paths.sourceRepoRoot,
       "--coding-worker", config.codingWorker
     ];
+    if (config.forge.provider === "gitea") {
+      if (config.forge.giteaBaseUrl) initArgs.push("--gitea-base-url", config.forge.giteaBaseUrl);
+      if (config.forge.giteaToken) initArgs.push("--gitea-token", config.forge.giteaToken);
+      if (config.forge.giteaUsername) initArgs.push("--gitea-username", config.forge.giteaUsername);
+      if (config.forge.giteaPassword) initArgs.push("--gitea-password", config.forge.giteaPassword);
+    }
     if (options.force) {
       initArgs.push("--force");
     }
@@ -2293,9 +2482,13 @@ async function runSetupFlow(forwardedArgs) {
       } else if (anchorSync.status !== "ok") {
         runtimeStartReason = `anchor-sync-${anchorSync.reason}`;
         console.log("runtime start skipped: ACP deferred anchor repo sync for this setup run.");
-      } else if (!prereq.ghAuthOk) {
-        runtimeStartReason = "gh-auth-not-ready";
-        console.log("runtime start skipped: GitHub CLI is not authenticated yet. Run `gh auth login` and start the runtime afterwards.");
+      } else if (!prereq.forgeAuthOk) {
+        runtimeStartReason = `${config.forge.provider}-auth-not-ready`;
+        if (config.forge.provider === "gitea") {
+          console.log("runtime start skipped: Gitea auth is not configured yet. Pass --gitea-base-url and --gitea-token (or username/password), then re-run setup or start the runtime afterwards.");
+        } else {
+          console.log("runtime start skipped: GitHub CLI is not authenticated yet. Run `gh auth login` and start the runtime afterwards.");
+        }
       } else {
         runSetupStep(scopedContext, "Start the runtime", "tools/bin/project-runtimectl.sh", ["start", "--profile-id", config.profileId], { useRuntimeCopy: true });
         const runtimeStatusOutput = runSetupStep(scopedContext, "Read back runtime status", "tools/bin/project-runtimectl.sh", ["status", "--profile-id", config.profileId], { useRuntimeCopy: true });
@@ -2401,6 +2594,7 @@ async function runSetupFlow(forwardedArgs) {
       setupMode: "run",
       profileId: config.profileId,
       repoSlug: config.repoSlug,
+      forge: config.forge,
       codingWorker: config.codingWorker,
       profileExists: true,
       repoRoot: config.paths.repoRoot,
@@ -2425,7 +2619,7 @@ async function runSetupFlow(forwardedArgs) {
       workerBackendInstallExample: workerSetupStep.guide.installExamples[0] || "",
       workerBackendAuthExample: workerSetupStep.guide.authExamples[0] || "",
       workerBackendVerifyExample: workerSetupStep.guide.verifyExamples[0] || "",
-      githubAuthStatus: prereq.ghAuthOk ? "ok" : "not-ready",
+      githubAuthStatus: prereq.forgeAuthOk ? "ok" : "not-ready",
       githubAuthStepStatus: githubAuthStep.status,
       githubAuthStepReason: githubAuthStep.reason || "",
       dependencyInstallStatus: dependencyInstall.status,
@@ -2456,7 +2650,10 @@ async function runSetupFlow(forwardedArgs) {
       console.log(`  Runtime : ${context.runtimeHome}`);
 
       const pendingItems = [];
-      if (!prereq.ghAuthOk) pendingItems.push("GitHub CLI not authenticated — run: gh auth login");
+      if (!prereq.forgeAuthOk) {
+        if (config.forge.provider === "gitea") pendingItems.push("Gitea auth not configured — rerun setup with --gitea-base-url and --gitea-token");
+        else pendingItems.push("GitHub CLI not authenticated — run: gh auth login");
+      }
       if (!prereq.workerAvailable) pendingItems.push(`${config.codingWorker} not found on PATH — install it before starting`);
       if (config.codingWorker === "openclaw" && !process.env.OPENROUTER_API_KEY) {
         pendingItems.push("OPENROUTER_API_KEY not set — required for openclaw workers");
@@ -2508,11 +2705,13 @@ async function runSetupFlow(forwardedArgs) {
       // Machine-readable KV output for non-interactive / scripted runs
       console.log("\nSetup complete.");
       console.log(`- profile: ${config.profileId}`);
+      console.log(`- forge provider: ${config.forge.provider}`);
       console.log(`- repo: ${config.repoSlug}`);
       console.log(`- runtime home: ${context.runtimeHome}`);
 
       console.log(`SETUP_STATUS=ok`);
       console.log(`PROFILE_ID=${config.profileId}`);
+      console.log(`FORGE_PROVIDER=${config.forge.provider}`);
       console.log(`REPO_SLUG=${config.repoSlug}`);
       console.log(`REPO_ROOT=${config.paths.repoRoot}`);
       console.log(`AGENT_ROOT=${config.paths.agentRoot}`);
@@ -2557,7 +2756,7 @@ async function runSetupFlow(forwardedArgs) {
       if (workerSetupStep.guide.verifyExamples[0]) {
         console.log(`WORKER_BACKEND_VERIFY_EXAMPLE=${workerSetupStep.guide.verifyExamples[0]}`);
       }
-      console.log(`GITHUB_AUTH_STATUS=${prereq.ghAuthOk ? "ok" : "not-ready"}`);
+      console.log(`GITHUB_AUTH_STATUS=${prereq.forgeAuthOk ? "ok" : "not-ready"}`);
       console.log(`FINAL_FIXUP_STATUS=${finalFixup.status}`);
       console.log(`FINAL_FIXUP_ACTIONS=${finalFixup.actions.join(",")}`);
       console.log(`DEPENDENCY_INSTALL_STATUS=${dependencyInstall.status}`);

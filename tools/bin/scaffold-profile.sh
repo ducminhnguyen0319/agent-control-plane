@@ -14,7 +14,12 @@ Create a new installed project profile, profile templates, and profile notes.
 
 Options:
   --profile-id <id>                  Profile id, e.g. billing-api
-  --repo-slug <owner/repo>           GitHub repo slug
+  --repo-slug <owner/repo>           Forge repo slug
+  --forge-provider <github|gitea>    Forge provider (default: github)
+  --gitea-base-url <url>             Base URL for a local/self-hosted Gitea instance
+  --gitea-token <token>              Gitea API token written to profile runtime.env
+  --gitea-username <user>            Gitea username written to profile runtime.env
+  --gitea-password <pass>            Gitea password written to profile runtime.env
   --profile-home <path>              Profile registry root (default: ~/.agent-runtime/control-plane/profiles)
   --repo-root <path>                 Canonical repo root
   --agent-repo-root <path>           Agent-owned anchor repo root (defaults to repo root)
@@ -40,6 +45,11 @@ EOF
 
 profile_id=""
 repo_slug=""
+forge_provider="github"
+gitea_base_url=""
+gitea_token=""
+gitea_username=""
+gitea_password=""
 profile_home=""
 repo_root=""
 agent_repo_root=""
@@ -63,6 +73,11 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --profile-id) profile_id="${2:-}"; shift 2 ;;
     --repo-slug) repo_slug="${2:-}"; shift 2 ;;
+    --forge-provider) forge_provider="${2:-}"; shift 2 ;;
+    --gitea-base-url) gitea_base_url="${2:-}"; shift 2 ;;
+    --gitea-token) gitea_token="${2:-}"; shift 2 ;;
+    --gitea-username) gitea_username="${2:-}"; shift 2 ;;
+    --gitea-password) gitea_password="${2:-}"; shift 2 ;;
     --profile-home) profile_home="${2:-}"; shift 2 ;;
     --repo-root) repo_root="${2:-}"; shift 2 ;;
     --agent-repo-root) agent_repo_root="${2:-}"; shift 2 ;;
@@ -104,6 +119,14 @@ case "$coding_worker" in
     ;;
 esac
 
+case "$forge_provider" in
+  github|gitea) ;;
+  *)
+    echo "--forge-provider must be github or gitea" >&2
+    exit 1
+    ;;
+esac
+
 case "$claude_effort" in
   low|medium|high|max) ;;
   *)
@@ -133,6 +156,7 @@ profile_home="${profile_home:-$(resolve_flow_profile_registry_root)}"
 profiles_dir="${profile_home}"
 profile_dir="${profiles_dir}/${profile_id}"
 profile_yaml="${profile_dir}/control-plane.yaml"
+profile_runtime_env="${profile_dir}/runtime.env"
 profile_templates_dir="${profile_dir}/templates"
 profile_readme="${profile_dir}/README.md"
 
@@ -228,7 +252,7 @@ session_naming:
   pr_worktree_branch_prefix: "${pr_worktree_branch_prefix}"
   managed_pr_branch_globs: "${managed_pr_branch_globs}"
 queue:
-  source: "github"
+  source: "${forge_provider}"
   issue_labels:
     ready: ""
     running: "agent-running"
@@ -366,7 +390,38 @@ policies:
 EOF
 }
 
+write_profile_runtime_env() {
+  local target_file="${1:?target file required}"
+
+  : >"$target_file"
+  {
+    printf 'ACP_FORGE_PROVIDER=%s\n' "${forge_provider}"
+    printf 'F_LOSNING_FORGE_PROVIDER=%s\n' "${forge_provider}"
+    if [[ "${forge_provider}" == "gitea" ]]; then
+      if [[ -n "${gitea_base_url}" ]]; then
+        printf 'ACP_GITEA_BASE_URL=%s\n' "${gitea_base_url}"
+        printf 'GITEA_BASE_URL=%s\n' "${gitea_base_url}"
+      fi
+      if [[ -n "${gitea_token}" ]]; then
+        printf 'ACP_GITEA_TOKEN=%s\n' "${gitea_token}"
+        printf 'GITEA_TOKEN=%s\n' "${gitea_token}"
+      fi
+      if [[ -n "${gitea_username}" ]]; then
+        printf 'ACP_GITEA_USERNAME=%s\n' "${gitea_username}"
+        printf 'GITEA_USERNAME=%s\n' "${gitea_username}"
+      fi
+      if [[ -n "${gitea_password}" ]]; then
+        printf 'ACP_GITEA_PASSWORD=%s\n' "${gitea_password}"
+        printf 'GITEA_PASSWORD=%s\n' "${gitea_password}"
+      fi
+      printf 'ACP_SOURCE_SYNC_REMOTE=gitea\n'
+      printf 'F_LOSNING_SOURCE_SYNC_REMOTE=gitea\n'
+    fi
+  } >"$target_file"
+}
+
 write_profile_yaml "$profile_yaml"
+write_profile_runtime_env "$profile_runtime_env"
 write_profile_readme "$profile_readme"
 
 if compgen -G "${flow_skill_dir}/tools/templates/*.md" >/dev/null; then
@@ -375,15 +430,18 @@ fi
 
 profile_home_real="$(mkdir -p "$profile_home" && cd "$profile_home" && pwd -P)"
 profile_yaml_real="$(cd "$(dirname "$profile_yaml")" && pwd -P)/$(basename "$profile_yaml")"
+profile_runtime_env_real="$(cd "$(dirname "$profile_runtime_env")" && pwd -P)/$(basename "$profile_runtime_env")"
 profile_templates_dir_real="$(cd "$profile_templates_dir" && pwd -P)"
 profile_readme_real="$(cd "$(dirname "$profile_readme")" && pwd -P)/$(basename "$profile_readme")"
 
 printf 'PROFILE_ID=%s\n' "$profile_id"
 printf 'PROFILE_HOME=%s\n' "$profile_home_real"
 printf 'PROFILE_YAML=%s\n' "$profile_yaml_real"
+printf 'PROFILE_RUNTIME_ENV=%s\n' "$profile_runtime_env_real"
 printf 'PROFILE_TEMPLATE_DIR=%s\n' "$profile_templates_dir_real"
 printf 'PROFILE_README=%s\n' "$profile_readme_real"
 printf 'REPO_SLUG=%s\n' "$repo_slug"
+printf 'FORGE_PROVIDER=%s\n' "$forge_provider"
 printf 'CODING_WORKER=%s\n' "$coding_worker"
 printf 'NEXT_STEP=ACP_PROJECT_ID=%s bash %s/tools/bin/render-flow-config.sh\n' "$profile_id" "$flow_skill_dir"
 printf 'NEXT_STEP=bash %s/tools/bin/sync-shared-agent-home.sh\n' "$flow_skill_dir"

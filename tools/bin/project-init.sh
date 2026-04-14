@@ -35,6 +35,11 @@ runtime copy.
 Common options:
   --profile-id <id>                  Profile id, e.g. billing-api
   --repo-slug <owner/repo>           Forge repo slug
+  --forge-provider <github|gitea>    Forge provider for this profile
+  --gitea-base-url <url>             Base URL for a local/self-hosted Gitea instance
+  --gitea-token <token>              Gitea API token written to profile runtime.env
+  --gitea-username <user>            Gitea username written to profile runtime.env
+  --gitea-password <pass>            Gitea password written to profile runtime.env
   --profile-home <path>              Installed profile registry root
   --repo-root <path>                 Canonical repo root
   --agent-repo-root <path>           Agent-owned anchor repo root
@@ -68,6 +73,11 @@ EOF
 
 profile_id=""
 repo_slug=""
+forge_provider=""
+gitea_base_url=""
+gitea_token=""
+gitea_username=""
+gitea_password=""
 profile_home=""
 repo_root=""
 agent_repo_root=""
@@ -98,6 +108,11 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --profile-id) profile_id="${2:-}"; shift 2 ;;
     --repo-slug) repo_slug="${2:-}"; shift 2 ;;
+    --forge-provider) forge_provider="${2:-}"; shift 2 ;;
+    --gitea-base-url) gitea_base_url="${2:-}"; shift 2 ;;
+    --gitea-token) gitea_token="${2:-}"; shift 2 ;;
+    --gitea-username) gitea_username="${2:-}"; shift 2 ;;
+    --gitea-password) gitea_password="${2:-}"; shift 2 ;;
     --profile-home) profile_home="${2:-}"; shift 2 ;;
     --repo-root) repo_root="${2:-}"; shift 2 ;;
     --agent-repo-root) agent_repo_root="${2:-}"; shift 2 ;;
@@ -144,6 +159,11 @@ SOURCE_HOME="${source_home:-${ACP_PROJECT_INIT_SOURCE_HOME:-$(cd "${FLOW_SKILL_D
 RUNTIME_HOME="${runtime_home:-${ACP_PROJECT_INIT_RUNTIME_HOME:-${HOME}/.agent-runtime/runtime-home}}"
 
 scaffold_cmd=(bash "${SCAFFOLD_SCRIPT}" --profile-id "${profile_id}" --repo-slug "${repo_slug}")
+[[ -n "${forge_provider}" ]] && scaffold_cmd+=(--forge-provider "${forge_provider}")
+[[ -n "${gitea_base_url}" ]] && scaffold_cmd+=(--gitea-base-url "${gitea_base_url}")
+[[ -n "${gitea_token}" ]] && scaffold_cmd+=(--gitea-token "${gitea_token}")
+[[ -n "${gitea_username}" ]] && scaffold_cmd+=(--gitea-username "${gitea_username}")
+[[ -n "${gitea_password}" ]] && scaffold_cmd+=(--gitea-password "${gitea_password}")
 [[ -n "${profile_home}" ]] && scaffold_cmd+=(--profile-home "${profile_home}")
 [[ -n "${repo_root}" ]] && scaffold_cmd+=(--repo-root "${repo_root}")
 [[ -n "${agent_repo_root}" ]] && scaffold_cmd+=(--agent-repo-root "${agent_repo_root}")

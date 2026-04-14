@@ -33,7 +33,7 @@ however, and suddenly that "not smart enough" free model is grinding through
 your issue backlog like a junior developer who is weirdly enthusiastic about
 reading CI logs.
 
-That is what ACP does. It turns a GitHub repo into a managed runtime: a
+That is what ACP does. It turns a forge-backed repo into a managed runtime: a
 repeatable setup, a stable home for state, a heartbeat that keeps agents
 scheduled and supervised, and a dashboard you can actually glance at without
 spelunking through temp folders, worktrees, or half-remembered `tmux` sessions.
@@ -73,7 +73,7 @@ monthly API budget in a long weekend, or enter a retry loop that only stops when
 the credit card does.
 
 ACP is the person standing next to the fuse. It enforces launch limits,
-reconciles outcomes before touching GitHub, validates before it publishes, and
+reconciles outcomes before touching your forge, validates before it publishes, and
 respects cooldowns instead of hammering a provider at full throttle. The agent
 gets to be smart and fast. ACP makes sure "smart and fast" does not also mean
 "unattended and irreversible."
@@ -97,6 +97,27 @@ it had a supervisor."
 | Compare worker backends on real workloads | Swap between `codex`, `claude`, `openclaw`, `ollama`, `pi`, `opencode`, and `kilo` without rebuilding your runtime habits |
 | Run reproducible agent research cheaply | Cost-controlled execution harness for studying agent behavior, output quality, or prompting strategies |
 | Enforce safety by architecture, not by hope | Launch limits, reconcile gates, and cooldowns that are built into the runtime, not left to chance |
+
+## Why Gitea Local-First
+
+ACP started GitHub-first, but a local-first Gitea loop is often a better daily
+working setup:
+
+- It reduces dependence on GitHub API rate limits for routine issue and PR work.
+- It lets agents collaborate against a local forge while you keep GitHub as the
+  public mirror or release boundary.
+- It gives you a safer place to let ACP iterate quickly, because local Gitea is
+  cheaper to reset, inspect, and isolate than a live hosted repo.
+- It matches how ACP now works best operationally: local runtime state,
+  local worktrees, local dashboard, and a forge that can live on the same
+  machine.
+
+The intended model is:
+
+- `Gitea main` is the working mainline ACP automates day to day.
+- Your local source checkout auto-syncs from that forge mainline.
+- GitHub becomes the publish/release mirror once the codebase is stable enough
+  to push outward.
 
 ## Use Cases
 
@@ -211,7 +232,7 @@ flowchart LR
   Scheduler --> Workers["issue / PR worker launchers"]
   Workers --> Backends["codex / claude / openclaw / ollama / pi / opencode / kilo"]
   Backends --> Reconcile["reconcile issue / PR session"]
-  Reconcile --> GitHub["issues / PRs / labels / comments"]
+  Reconcile --> Forge["issues / PRs / labels / comments"]
   Scheduler --> State["runs + state + history"]
   State --> Dashboard["dashboard snapshot + UI"]
 ```
@@ -227,7 +248,7 @@ sequenceDiagram
   participant Heartbeat
   participant Worker
   participant Reconcile
-  participant GitHub
+  participant Forge
 
   Operator->>RuntimeCtl: runtime start --profile-id <id>
   RuntimeCtl->>Supervisor: keep runtime alive
@@ -236,7 +257,7 @@ sequenceDiagram
     Bootstrap->>Heartbeat: invoke published heartbeat
     Heartbeat->>Worker: launch eligible issue/PR flow
     Worker->>Reconcile: emit result artifacts
-    Reconcile->>GitHub: labels, comments, PR actions
+    Reconcile->>Forge: labels, comments, PR actions
   end
 ```
 
@@ -267,9 +288,9 @@ system.
 | --- | --- | --- | --- |
 | Node.js `>= 18` | yes | Runs the npm package entrypoint and `npx` wrapper. | CI runs on Node `22`. Node `20` or `22` both work fine. |
 | `bash` | yes | All runtime, profile, and worker orchestration scripts are Bash. | Your login shell can be `zsh`; `bash` just needs to be on `PATH`. |
-| `git` | yes | Manages worktrees, checks branch state, and coordinates repo automation. | Required even if you interact only through GitHub issues and PRs. |
-| `gh` | yes | GitHub CLI auth and API access for issues, PRs, labels, and metadata. | Run `gh auth login` before first use. |
-| `jq` | yes | Parses JSON from `gh` output and worker metadata throughout. | Missing `jq` will break GitHub-heavy and runtime flows. |
+| `git` | yes | Manages worktrees, checks branch state, and coordinates repo automation. | Required even if you interact only through forge issues and PRs. |
+| `gh` | for GitHub-first setups | GitHub CLI auth and API access for issues, PRs, labels, and metadata. | Run `gh auth login` before first use when `--forge-provider github`. |
+| `jq` | yes | Parses JSON from forge API output and worker metadata throughout. | Missing `jq` will break GitHub-heavy and Gitea-heavy runtime flows. |
 | `python3` | yes | Powers the dashboard server, snapshot renderer, and config helpers. | Required for both dashboard use and several internal scripts. |
 | `tmux` | yes | Runs long-lived worker sessions and captures their status. | Missing `tmux` means background worker workflows will not launch. |
 | Worker CLI (backend-specific) | depends on backend | The coding agent for a profile. Supported: `codex`, `claude`, `openclaw` (production); `ollama`, `pi`, `opencode`, `kilo` (experimental). | Install and authenticate your chosen backend before starting background runs. |
@@ -279,8 +300,10 @@ system.
 | `kilo` CLI | for `kilo` backend | TypeScript coding agent ([kilocode/cli](https://github.com/Kilo-Org/kilocode)). | Install via `npm i -g @kilocode/cli`. |
 | Bundled `codex-quota` + ACP quota manager | automatic for Codex | Quota-aware failover and health signals for Codex profiles. | Bundled by default. Override with `ACP_CODEX_QUOTA_BIN` only if you have a custom setup. |
 
-Make sure `gh` and your chosen worker backend are both authenticated for the
-same OS user before starting any background runtime.
+Make sure your chosen worker backend is authenticated for the same OS user
+before starting any background runtime. For GitHub-first setups, authenticate
+`gh`. For Gitea local-first setups, provide `--gitea-base-url` plus a token or
+username/password during setup so ACP can write issues, PR comments, and labels.
 
 ## Install
 
@@ -313,7 +336,7 @@ npx agent-control-plane@latest setup
 The wizard walks you through the full setup in one pass:
 
 1. Detects the current repo and suggests sane defaults
-2. Installs missing dependencies and authenticates `gh`
+2. Captures forge mode (`github` or `gitea`) and the auth/settings that mode needs
 3. Checks backend readiness (API keys for openclaw/pi, local server for ollama)
 4. Scaffolds the profile, runs health checks, starts the runtime
 5. Launches the monitoring dashboard in the background
@@ -343,14 +366,39 @@ npx agent-control-plane@latest setup \
 With `--json`, ACP emits a single structured object on `stdout` and sends
 progress logs to `stderr`, which keeps parsing stable.
 
+Example: local-first Gitea setup
+
+```bash
+npx agent-control-plane@latest setup \
+  --forge-provider gitea \
+  --repo-slug acp-admin/my-repo \
+  --gitea-base-url http://127.0.0.1:3000 \
+  --gitea-token <token> \
+  --start-runtime \
+  --start-dashboard
+```
+
+This writes the forge settings into the profile `runtime.env`, so later
+heartbeat, reconcile, and publish steps keep talking to the same Gitea
+instance without extra shell exports.
+
 ### Option B — Manual setup
 
 If you prefer explicit control over each step:
 
-**1. Authenticate GitHub**
+**1. Authenticate the working forge**
 
 ```bash
 gh auth login
+```
+
+For Gitea local-first, skip `gh auth login` and pass Gitea settings directly to
+`setup` or `init`:
+
+```bash
+--forge-provider gitea \
+--gitea-base-url http://127.0.0.1:3000 \
+--gitea-token <token>
 ```
 
 **2. Install the packaged runtime**
@@ -368,6 +416,7 @@ re-run after upgrades.
 npx agent-control-plane@latest init \
   --profile-id my-repo \
   --repo-slug owner/my-repo \
+  --forge-provider github \
   --repo-root ~/src/my-repo \
   --agent-root ~/.agent-runtime/projects/my-repo \
   --worktree-root ~/src/my-repo-worktrees \
@@ -377,7 +426,9 @@ npx agent-control-plane@latest init \
 | Flag | Purpose |
 | --- | --- |
 | `--profile-id` | Short name used in all ACP commands |
-| `--repo-slug` | GitHub repo ACP should track |
+| `--repo-slug` | Forge repo ACP should track |
+| `--forge-provider` | Which forge ACP should automate (`github` or `gitea`) |
+| `--gitea-base-url` | Base URL when `--forge-provider gitea` |
 | `--repo-root` | Path to your local checkout |
 | `--agent-root` | Where ACP keeps per-project runtime state |
 | `--worktree-root` | Where ACP places repo worktrees |
