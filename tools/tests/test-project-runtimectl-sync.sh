@@ -16,7 +16,7 @@ source_home="${tmpdir}/source-home"
 ensure_sync_script="${tmpdir}/ensure-sync.sh"
 ensure_log="${tmpdir}/ensure.log"
 
-mkdir -p "${profile_dir}" "${runtime_root}" "${runtime_home}" "${source_home}"
+mkdir -p "${profile_dir}" "${runtime_root}" "${runtime_home}" "${source_home}" "${state_root}"
 
 cat >"${profile_dir}/control-plane.yaml" <<EOF
 schema_version: "1"
@@ -119,5 +119,50 @@ grep -q '^SYNC_STAMP_FILE='"${runtime_home}"'/.agent-control-plane-runtime-sync.
 grep -q '^RUNTIME_SYNC_STATUS=updated$' <<<"${status_output}"
 grep -q '^RUNTIME_SYNC_UPDATED_AT=2026-04-02T13:33:00Z$' <<<"${status_output}"
 grep -q '^RUNTIME_SYNC_FINGERPRINT=abc123$' <<<"${status_output}"
+
+cat >"${state_root}/source-repo-main-sync.env" <<'EOF'
+STATUS=updated
+UPDATED_AT=2026-04-14T11:55:00Z
+SOURCE_REPO_ROOT=/tmp/source-repo
+DEFAULT_BRANCH=main
+REMOTE_NAME=gitea
+REMOTE_SHA=deadbeef
+LOCAL_SHA=deadbeef
+DETAIL=fast-forward-local-ref
+EOF
+
+status_output_with_source_sync="$(
+  ACP_PROFILE_REGISTRY_ROOT="${profile_registry_root}" \
+  ACP_PROJECT_RUNTIME_RUNTIME_HOME="${runtime_home}" \
+    bash "${RUNTIMECTL_BIN}" status --profile-id demo
+)"
+
+grep -q '^SOURCE_REPO_SYNC_STATE_FILE='"${state_root}"'/source-repo-main-sync.env$' <<<"${status_output_with_source_sync}"
+grep -q '^SOURCE_REPO_SYNC_STATUS=updated$' <<<"${status_output_with_source_sync}"
+grep -q '^SOURCE_REPO_SYNC_REMOTE=gitea$' <<<"${status_output_with_source_sync}"
+grep -q '^SOURCE_REPO_SYNC_REMOTE_SHA=deadbeef$' <<<"${status_output_with_source_sync}"
+grep -q '^SOURCE_REPO_SYNC_LOCAL_SHA=deadbeef$' <<<"${status_output_with_source_sync}"
+grep -q '^SOURCE_REPO_SYNC_ALIGNED=yes$' <<<"${status_output_with_source_sync}"
+
+cat >"${state_root}/source-repo-main-sync.env" <<'EOF'
+STATUS=blocked
+UPDATED_AT=2026-04-14T11:56:00Z
+SOURCE_REPO_ROOT=/tmp/source-repo
+DEFAULT_BRANCH=main
+REMOTE_NAME=gitea
+REMOTE_SHA=feedface
+LOCAL_SHA=deadbeef
+DETAIL=local-main-diverged
+EOF
+
+status_output_blocked="$(
+  ACP_PROFILE_REGISTRY_ROOT="${profile_registry_root}" \
+  ACP_PROJECT_RUNTIME_RUNTIME_HOME="${runtime_home}" \
+    bash "${RUNTIMECTL_BIN}" status --profile-id demo
+)"
+
+grep -q '^SOURCE_REPO_SYNC_STATUS=blocked$' <<<"${status_output_blocked}"
+grep -q '^SOURCE_REPO_SYNC_DETAIL=local-main-diverged$' <<<"${status_output_blocked}"
+grep -q '^SOURCE_REPO_SYNC_ALIGNED=no$' <<<"${status_output_blocked}"
 
 echo "project runtimectl sync test passed"

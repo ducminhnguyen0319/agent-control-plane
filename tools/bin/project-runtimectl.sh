@@ -110,6 +110,7 @@ LAUNCHD_PLIST="${ACP_PROJECT_RUNTIME_LAUNCHD_PLIST:-${LAUNCH_AGENTS_DIR}/${LAUNC
 SOURCE_HOME="${ACP_PROJECT_RUNTIME_SOURCE_HOME:-}"
 RUNTIME_HOME="${ACP_PROJECT_RUNTIME_RUNTIME_HOME:-$(resolve_runtime_home)}"
 SYNC_STAMP_FILE="${RUNTIME_HOME}/.agent-control-plane-runtime-sync.env"
+SOURCE_REPO_SYNC_STATE_FILE="${STATE_ROOT}/source-repo-main-sync.env"
 
 case "${delay_seconds}" in
   ''|*[!0-9]*) echo "--delay-seconds must be numeric" >&2; exit 64 ;;
@@ -196,6 +197,13 @@ sync_stamp_value() {
   local key="${1:?key required}"
   [[ -f "${SYNC_STAMP_FILE}" ]] || return 1
   awk -F= -v target="${key}" '$1 == target {print $2; exit}' "${SYNC_STAMP_FILE}" 2>/dev/null \
+    | sed -e "s/^'//" -e "s/'$//"
+}
+
+source_repo_sync_value() {
+  local key="${1:?key required}"
+  [[ -f "${SOURCE_REPO_SYNC_STATE_FILE}" ]] || return 1
+  awk -F= -v target="${key}" '$1 == target {print $2; exit}' "${SOURCE_REPO_SYNC_STATE_FILE}" 2>/dev/null \
     | sed -e "s/^'//" -e "s/'$//"
 }
 
@@ -399,6 +407,15 @@ print_status() {
   local shared_loop_last_status=""
   local shared_loop_started_at=""
   local shared_loop_updated_at=""
+  local source_repo_sync_status=""
+  local source_repo_sync_updated_at=""
+  local source_repo_sync_root=""
+  local source_repo_sync_branch=""
+  local source_repo_sync_remote=""
+  local source_repo_sync_remote_sha=""
+  local source_repo_sync_local_sha=""
+  local source_repo_sync_detail=""
+  local source_repo_sync_aligned="unknown"
 
   heartbeat="$(heartbeat_pid)"
   shared_loop="$(shared_loop_pid)"
@@ -429,6 +446,23 @@ print_status() {
   shared_loop_last_status="$(shared_loop_status_value "STATUS" || true)"
   shared_loop_started_at="$(shared_loop_status_value "STARTED_AT" || true)"
   shared_loop_updated_at="$(shared_loop_status_value "UPDATED_AT" || true)"
+  source_repo_sync_status="$(source_repo_sync_value "STATUS" || true)"
+  source_repo_sync_updated_at="$(source_repo_sync_value "UPDATED_AT" || true)"
+  source_repo_sync_root="$(source_repo_sync_value "SOURCE_REPO_ROOT" || true)"
+  source_repo_sync_branch="$(source_repo_sync_value "DEFAULT_BRANCH" || true)"
+  source_repo_sync_remote="$(source_repo_sync_value "REMOTE_NAME" || true)"
+  source_repo_sync_remote_sha="$(source_repo_sync_value "REMOTE_SHA" || true)"
+  source_repo_sync_local_sha="$(source_repo_sync_value "LOCAL_SHA" || true)"
+  source_repo_sync_detail="$(source_repo_sync_value "DETAIL" || true)"
+  if [[ -n "${source_repo_sync_status}" ]]; then
+    if [[ -n "${source_repo_sync_remote_sha}" && -n "${source_repo_sync_local_sha}" && "${source_repo_sync_remote_sha}" == "${source_repo_sync_local_sha}" ]]; then
+      source_repo_sync_aligned="yes"
+    elif [[ "${source_repo_sync_status}" == "blocked" || "${source_repo_sync_status}" == "failed" ]]; then
+      source_repo_sync_aligned="no"
+    else
+      source_repo_sync_aligned="unknown"
+    fi
+  fi
 
   printf 'PROFILE_ID=%s\n' "${PROFILE_ID}"
   printf 'CONFIG_YAML=%s\n' "${CONFIG_YAML}"
@@ -459,6 +493,16 @@ print_status() {
   printf 'RUNTIME_SYNC_STATUS=%s\n' "${runtime_sync_status}"
   printf 'RUNTIME_SYNC_UPDATED_AT=%s\n' "${runtime_sync_updated_at}"
   printf 'RUNTIME_SYNC_FINGERPRINT=%s\n' "${runtime_sync_fingerprint}"
+  printf 'SOURCE_REPO_SYNC_STATE_FILE=%s\n' "${SOURCE_REPO_SYNC_STATE_FILE}"
+  printf 'SOURCE_REPO_SYNC_STATUS=%s\n' "${source_repo_sync_status}"
+  printf 'SOURCE_REPO_SYNC_UPDATED_AT=%s\n' "${source_repo_sync_updated_at}"
+  printf 'SOURCE_REPO_SYNC_ROOT=%s\n' "${source_repo_sync_root}"
+  printf 'SOURCE_REPO_SYNC_BRANCH=%s\n' "${source_repo_sync_branch}"
+  printf 'SOURCE_REPO_SYNC_REMOTE=%s\n' "${source_repo_sync_remote}"
+  printf 'SOURCE_REPO_SYNC_REMOTE_SHA=%s\n' "${source_repo_sync_remote_sha}"
+  printf 'SOURCE_REPO_SYNC_LOCAL_SHA=%s\n' "${source_repo_sync_local_sha}"
+  printf 'SOURCE_REPO_SYNC_DETAIL=%s\n' "${source_repo_sync_detail}"
+  printf 'SOURCE_REPO_SYNC_ALIGNED=%s\n' "${source_repo_sync_aligned}"
 }
 
 terminate_pid_list() {
