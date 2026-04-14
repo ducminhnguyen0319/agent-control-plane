@@ -7,7 +7,7 @@
     {
       "id": "issue-implementation",
       "kind": "issue",
-      "trigger": "Open issue with agent-ready and without agent-running/agent-blocked",
+      "trigger": "Open issue without agent-running, without an open agent PR claim, and not blocked by retry policy",
       "entrypoint": "tools/bin/start-issue-worker.sh",
       "summary": "Primary implementation loop for focused issues that should end in a PR or a blocked report."
     },

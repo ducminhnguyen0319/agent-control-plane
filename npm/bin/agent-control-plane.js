@@ -581,7 +581,7 @@ Agent schedule: every 4h
 
 - Run \`pnpm typecheck\` (or the repo-equivalent lint/typecheck) after code changes and record verification.
 `,
-    labels: ["agent-ready", "agent-keep-open"]
+    labels: ["agent-keep-open"]
   },
   {
     key: "test-coverage",
@@ -597,7 +597,7 @@ Agent schedule: every 6h
 
 - Run the narrowest relevant test command after code changes and record verification.
 `,
-    labels: ["agent-ready", "agent-keep-open"]
+    labels: ["agent-keep-open"]
   },
   {
     key: "documentation",
@@ -613,7 +613,7 @@ Agent schedule: every 8h
 
 - Run any doc-build or link-check command after changes and record verification.
 `,
-    labels: ["agent-ready", "agent-keep-open"]
+    labels: ["agent-keep-open"]
   },
   {
     key: "dependency-audit",
@@ -629,7 +629,7 @@ Agent schedule: every 12h
 
 - Run \`pnpm audit\` and \`pnpm install --frozen-lockfile\` after changes and record verification.
 `,
-    labels: ["agent-ready", "agent-keep-open"]
+    labels: ["agent-keep-open"]
   },
   {
     key: "refactor",
@@ -645,7 +645,7 @@ Agent schedule: every 8h
 
 - Run the narrowest relevant test command after refactoring and record verification.
 `,
-    labels: ["agent-ready", "agent-keep-open"]
+    labels: ["agent-keep-open"]
   }
 ];
 
@@ -701,7 +701,6 @@ async function maybeCreateStarterIssues(options, config, prereq) {
   // Ensure labels exist
   console.log("\nCreating labels and issues...");
   const requiredLabels = [
-    { name: "agent-ready", color: "0E8A16", description: "Ready for agent automation" },
     { name: "agent-keep-open", color: "D4C5F9", description: "Recurring issue — agent works on this continuously" }
   ];
   for (const label of requiredLabels) {
@@ -2496,7 +2495,7 @@ async function runSetupFlow(forwardedArgs) {
         }
       } else {
         console.log("\n  Getting started:");
-        console.log(`    1. Add the label 'agent-ready' to a GitHub issue in ${config.repoSlug}`);
+        console.log(`    1. Leave a normal issue open in ${config.repoSlug}, or add 'agent-keep-open' for a recurring issue`);
         console.log("    2. ACP picks it up automatically, assigns a worker, and opens a PR");
         console.log("    3. Watch progress in the dashboard or with 'runtime status'");
       }

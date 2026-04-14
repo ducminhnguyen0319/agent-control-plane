@@ -100,7 +100,7 @@ fi
 bash "${FLOW_TOOLS_DIR}/agent-github-update-labels" --repo-slug "$REPO_SLUG" --number "$PR_NUMBER" "${args[@]}" >/dev/null
 
 if [[ -n "$linked_issue_id" ]]; then
-  bash "${FLOW_TOOLS_DIR}/agent-github-update-labels" --repo-slug "$REPO_SLUG" --number "$linked_issue_id" --remove agent-ready --remove agent-running >/dev/null || true
+  bash "${FLOW_TOOLS_DIR}/agent-github-update-labels" --repo-slug "$REPO_SLUG" --number "$linked_issue_id" --remove agent-running >/dev/null || true
 fi
 
 printf 'PR_NUMBER=%s\n' "$PR_NUMBER"

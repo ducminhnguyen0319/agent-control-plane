@@ -218,7 +218,7 @@ issue_publish_extra_args() {
 }
 
 issue_remove_running() {
-  bash "${FLOW_TOOLS_DIR}/agent-github-update-labels" --repo-slug "${REPO_SLUG}" --number "$ISSUE_ID" --remove agent-ready --remove agent-running --remove agent-blocked >/dev/null || true
+  bash "${FLOW_TOOLS_DIR}/agent-github-update-labels" --repo-slug "${REPO_SLUG}" --number "$ISSUE_ID" --remove agent-running --remove agent-blocked >/dev/null || true
 }
 
 issue_mark_blocked() {

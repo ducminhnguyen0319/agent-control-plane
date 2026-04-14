@@ -596,9 +596,9 @@ heartbeat_mark_issue_running() {
   local cached_json
   cached_json="$(heartbeat_issue_json_cached "$issue_id" 2>/dev/null || true)"
   if [[ "$is_heavy" == "yes" ]]; then
-    ACP_CACHED_ISSUE_JSON="${cached_json}" bash "${FLOW_TOOLS_DIR}/agent-github-update-labels" --repo-slug "$REPO_SLUG" --number "$issue_id" --remove agent-ready --remove agent-blocked --add agent-running --add agent-e2e-heavy >/dev/null || true
+    ACP_CACHED_ISSUE_JSON="${cached_json}" bash "${FLOW_TOOLS_DIR}/agent-github-update-labels" --repo-slug "$REPO_SLUG" --number "$issue_id" --remove agent-blocked --add agent-running --add agent-e2e-heavy >/dev/null || true
   else
-    ACP_CACHED_ISSUE_JSON="${cached_json}" bash "${FLOW_TOOLS_DIR}/agent-github-update-labels" --repo-slug "$REPO_SLUG" --number "$issue_id" --remove agent-ready --remove agent-blocked --add agent-running >/dev/null || true
+    ACP_CACHED_ISSUE_JSON="${cached_json}" bash "${FLOW_TOOLS_DIR}/agent-github-update-labels" --repo-slug "$REPO_SLUG" --number "$issue_id" --remove agent-blocked --add agent-running >/dev/null || true
   fi
 }
 

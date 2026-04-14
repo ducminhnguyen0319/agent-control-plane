@@ -35,7 +35,7 @@ if [[ "${1:-}" == "api" ]]; then
   fi
   if [[ "$route" == "repositories/123/issues?state=open&per_page=100" ]]; then
     cat <<'JSON'
-[[{"number":2,"created_at":"2026-03-27T10:00:00Z","updated_at":"2026-03-27T10:05:00Z","title":"Ready issue","html_url":"https://github.com/example/demo/issues/2","labels":[{"name":"agent-ready"}]},{"number":9,"created_at":"2026-03-27T10:01:00Z","updated_at":"2026-03-27T10:06:00Z","title":"PR mirror","html_url":"https://github.com/example/demo/pull/9","labels":[],"pull_request":{"url":"https://api.github.com/repos/example/demo/pulls/9"}}]]
+[[{"number":2,"created_at":"2026-03-27T10:00:00Z","updated_at":"2026-03-27T10:05:00Z","title":"Ready issue","html_url":"https://github.com/example/demo/issues/2","labels":[{"name":"agent-keep-open"}]},{"number":9,"created_at":"2026-03-27T10:01:00Z","updated_at":"2026-03-27T10:06:00Z","title":"PR mirror","html_url":"https://github.com/example/demo/pull/9","labels":[],"pull_request":{"url":"https://api.github.com/repos/example/demo/pulls/9"}}]]
 JSON
     exit 0
   fi
@@ -58,7 +58,7 @@ EOF
 
 test "$(jq 'length' <<<"$output")" -eq 1
 test "$(jq -r '.[0].number' <<<"$output")" = "2"
-test "$(jq -r '.[0].labels[0].name' <<<"$output")" = "agent-ready"
+test "$(jq -r '.[0].labels[0].name' <<<"$output")" = "agent-keep-open"
 test "$(jq -r '.[0].createdAt' <<<"$output")" = "2026-03-27T10:00:00Z"
 
 echo "flow github issue list falls back to repository id test passed"

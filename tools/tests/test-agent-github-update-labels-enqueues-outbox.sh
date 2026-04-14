@@ -55,7 +55,7 @@ case "${route}" in
     fi
 
     cat <<'JSON'
-{"labels":[{"name":"agent-ready"}]}
+{"labels":[{"name":"agent-blocked"}]}
 JSON
     exit 0
     ;;
@@ -79,7 +79,7 @@ TEST_GH_MODE=offline bash "$UPDATE_LABELS_BIN" \
   --repo-slug example/repo \
   --number 42 \
   --add agent-running \
-  --remove agent-ready
+  --remove agent-blocked
 
 pending_file="$(find "$state_root/github-outbox/pending" -type f -name '*.json' | head -n 1)"
 test -n "$pending_file"
@@ -87,7 +87,7 @@ jq -e '.type == "labels"' "$pending_file" >/dev/null
 jq -e '.repo_slug == "example/repo"' "$pending_file" >/dev/null
 jq -e '.number == "42"' "$pending_file" >/dev/null
 jq -e '.add == ["agent-running"]' "$pending_file" >/dev/null
-jq -e '.remove == ["agent-ready"]' "$pending_file" >/dev/null
+jq -e '.remove == ["agent-blocked"]' "$pending_file" >/dev/null
 
 TEST_GH_MODE=online bash "$OUTBOX_BIN" flush --limit 10 >/dev/null
 

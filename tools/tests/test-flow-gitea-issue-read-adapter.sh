@@ -24,12 +24,12 @@ url="${args[$(( ${#args[@]} - 1 ))]}"
 case "${url}" in
   "http://gitea.test/api/v1/repos/example/repo/issues?state=open&page=1&limit=100")
     cat <<'JSON'
-[{"number":1,"title":"Local forge issue","html_url":"http://gitea.test/example/repo/issues/1","created_at":"2026-04-14T06:00:00Z","updated_at":"2026-04-14T06:10:00Z","labels":[{"name":"agent-ready"}]}]
+[{"number":1,"title":"Local forge issue","html_url":"http://gitea.test/example/repo/issues/1","created_at":"2026-04-14T06:00:00Z","updated_at":"2026-04-14T06:10:00Z","labels":[{"name":"agent-keep-open"}]}]
 JSON
     ;;
   "http://gitea.test/api/v1/repos/example/repo/issues/1")
     cat <<'JSON'
-{"number":1,"state":"open","title":"Local forge issue","body":"Mirror me","html_url":"http://gitea.test/example/repo/issues/1","created_at":"2026-04-14T06:00:00Z","updated_at":"2026-04-14T06:10:00Z","labels":[{"name":"agent-ready"}]}
+{"number":1,"state":"open","title":"Local forge issue","body":"Mirror me","html_url":"http://gitea.test/example/repo/issues/1","created_at":"2026-04-14T06:00:00Z","updated_at":"2026-04-14T06:10:00Z","labels":[{"name":"agent-keep-open"}]}
 JSON
     ;;
   "http://gitea.test/api/v1/repos/example/repo/issues/1/comments?page=1&limit=100")
@@ -60,7 +60,7 @@ issue_json="$(flow_github_issue_view_json "example/repo" 1)"
 
 jq -e 'length == 1' >/dev/null <<<"$issues_json"
 jq -e '.[0].number == 1' >/dev/null <<<"$issues_json"
-jq -e '.[0].labels[0].name == "agent-ready"' >/dev/null <<<"$issues_json"
+jq -e '.[0].labels[0].name == "agent-keep-open"' >/dev/null <<<"$issues_json"
 
 jq -e '.number == 1' >/dev/null <<<"$issue_json"
 jq -e '.state == "OPEN"' >/dev/null <<<"$issue_json"

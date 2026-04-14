@@ -75,7 +75,7 @@ pr_cleanup_linked_issue_session() {
 
   local should_close
   should_close="$(pr_linked_issue_should_close "$issue_id")"
-  update_args=(--remove agent-ready --remove agent-running --remove agent-blocked --remove agent-e2e-heavy --remove agent-automerge --remove agent-exclusive)
+  update_args=(--remove agent-running --remove agent-blocked --remove agent-e2e-heavy --remove agent-automerge --remove agent-exclusive)
   pr_best_effort_update_labels --repo-slug "${REPO_SLUG}" --number "$issue_id" "${update_args[@]}"
 
   local issue_session="${ISSUE_SESSION_PREFIX}${issue_id}"

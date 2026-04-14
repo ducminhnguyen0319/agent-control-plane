@@ -230,7 +230,7 @@ session_naming:
 queue:
   source: "github"
   issue_labels:
-    ready: "agent-ready"
+    ready: ""
     running: "agent-running"
     blocked: "agent-blocked"
     heavy: "agent-e2e-heavy"

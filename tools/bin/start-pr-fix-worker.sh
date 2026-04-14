@@ -172,8 +172,38 @@ fi
 PR_PULL_JSON="$(flow_github_api_repo "${REPO_SLUG}" "pulls/${PR_NUMBER}" 2>/dev/null || printf '{}\n')"
 PR_HEAD_SHA="$(jq -r '.head.sha // .headRefOid // ""' <<<"$PR_PULL_JSON")"
 PR_MERGEABLE_STATUS="$(jq -r 'if .mergeable == null then "UNKNOWN" else (.mergeable | tostring | ascii_upcase) end' <<<"$PR_PULL_JSON" 2>/dev/null || printf 'UNKNOWN\n')"
+
+pr_comments_json() {
+  local review_route="pulls/${PR_NUMBER}/comments"
+  local issue_route="issues/${PR_NUMBER}/comments"
+  local payload=""
+
+  if flow_using_gitea; then
+    payload="$(flow_github_api_repo "${REPO_SLUG}" "${issue_route}" 2>/dev/null || true)"
+  else
+    payload="$(flow_github_api_repo "${REPO_SLUG}" "${review_route}" 2>/dev/null || true)"
+  fi
+
+  if jq -e 'type == "array"' >/dev/null 2>&1 <<<"${payload}"; then
+    printf '%s\n' "${payload}"
+    return 0
+  fi
+
+  printf '[]\n'
+}
+
+pr_issue_comments_json() {
+  local payload=""
+  payload="$(flow_github_api_repo "${REPO_SLUG}" "issues/${PR_NUMBER}/comments" 2>/dev/null || true)"
+  if jq -e 'type == "array"' >/dev/null 2>&1 <<<"${payload}"; then
+    printf '%s\n' "${payload}"
+    return 0
+  fi
+  printf '[]\n'
+}
+
 PR_REVIEW_FINDINGS_TEXT="$(
-  (flow_github_api_repo "${REPO_SLUG}" "pulls/${PR_NUMBER}/comments" 2>/dev/null || printf '[]\n') \
+  pr_comments_json \
     | jq -r --arg head_sha "$PR_HEAD_SHA" '
         map(select(
           (.user.login == "chatgpt-codex-connector[bot]")
@@ -195,7 +225,7 @@ PR_REVIEW_FINDINGS_TEXT="$(
       '
 )"
 PR_BLOCKER_SUMMARY_TEXT="$(
-  (flow_github_api_repo "${REPO_SLUG}" "issues/${PR_NUMBER}/comments" 2>/dev/null || printf '[]\n') \
+  pr_issue_comments_json \
     | jq -r '
         map(select((.body // "") | startswith("## PR final review blocker")))
         | if length == 0 then

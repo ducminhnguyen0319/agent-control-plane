@@ -407,9 +407,8 @@ grouped and inspectable without digging through scattered temp files.
 ## Starter Issues
 
 The setup wizard can create a set of recurring `agent-keep-open` issues on your
-repo so ACP starts working immediately after installation. Each issue carries the
-`agent-ready` and `agent-keep-open` labels, and ACP picks them up on its next
-heartbeat cycle.
+repo so ACP starts working immediately after installation. ACP picks them up on
+its next heartbeat cycle without requiring a separate readiness label.
 
 Built-in templates:
 
@@ -421,9 +420,9 @@ Built-in templates:
 | Dependency audit | Fix vulnerabilities and update safe patches |
 | Refactoring sweep | Reduce complexity and duplication |
 
-You can also create your own recurring issues — just add the `agent-ready` and
-`agent-keep-open` labels to any GitHub issue and ACP will work on it
-continuously.
+You can also create your own recurring issues by adding the
+`agent-keep-open` label to any GitHub issue. ACP will keep revisiting that
+issue continuously unless it is blocked or already claimed by an open agent PR.
 
 To skip this step during setup, pass `--no-create-starter-issues`.
 

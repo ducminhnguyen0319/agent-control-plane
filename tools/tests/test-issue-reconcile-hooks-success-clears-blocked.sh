@@ -30,7 +30,6 @@ REPO_SLUG="example/repo"
 issue_remove_running
 
 grep -q -- '--remove agent-running' "$capture_file"
-grep -q -- '--remove agent-ready' "$capture_file"
 grep -q -- '--remove agent-blocked' "$capture_file"
 
 echo "issue reconcile hooks success clears blocked label test passed"
