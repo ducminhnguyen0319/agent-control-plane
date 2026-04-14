@@ -55,7 +55,9 @@ run_step() {
   return "${status}"
 }
 
-NPM_CONFIG_CACHE="${TMP_NPM_CACHE}" npm pack --pack-destination "$TMP_PACK_DIR" >/dev/null
+NPM_CONFIG_CACHE="${TMP_NPM_CACHE}" \
+npm_config_cache="${TMP_NPM_CACHE}" \
+npm pack --pack-destination "$TMP_PACK_DIR" >/dev/null
 tarball_path=$(printf '%s\n' "$TMP_PACK_DIR"/agent-control-plane-*.tgz)
 if [[ ! -f "${tarball_path}" ]]; then
   echo "failed to build package tarball" >&2
@@ -67,6 +69,7 @@ run_smoke_command_fixture() (
   HOME="$TMP_HOME" \
     AGENT_PLATFORM_HOME="$TMP_PLATFORM" \
     NPM_CONFIG_CACHE="$TMP_NPM_CACHE" \
+    npm_config_cache="$TMP_NPM_CACHE" \
     npx --yes --package "$tarball_path" agent-control-plane smoke >"$TMP_OUTPUT"
   grep -q '^SMOKE_TEST_STATUS=ok$' "$TMP_OUTPUT"
 )
@@ -87,6 +90,7 @@ run_setup_dry_run_fixture() (
     HOME="$TMP_HOME" \
       AGENT_PLATFORM_HOME="$TMP_PLATFORM" \
       NPM_CONFIG_CACHE="$TMP_NPM_CACHE" \
+      npm_config_cache="$TMP_NPM_CACHE" \
       npx --yes --package "$tarball_path" agent-control-plane setup \
         --non-interactive \
         --repo-root "${setup_repo}" \
@@ -105,6 +109,21 @@ run_setup_dry_run_fixture() (
   grep -q '^CORE_TOOLS_STATUS=' <<<"${output}"
 )
 
+run_sync_command_fixture() (
+  set -euo pipefail
+  local output=""
+
+  output="$(
+    HOME="$TMP_HOME" \
+      AGENT_PLATFORM_HOME="$TMP_PLATFORM" \
+      NPM_CONFIG_CACHE="$TMP_NPM_CACHE" \
+      npm_config_cache="$TMP_NPM_CACHE" \
+      npx --yes --package "$tarball_path" agent-control-plane sync
+  )"
+
+  grep -q '^SHARED_AGENT_HOME=' <<<"${output}"
+)
+
 run_cli_version_and_help_fixture() (
   set -euo pipefail
   local version_output=""
@@ -115,6 +134,7 @@ run_cli_version_and_help_fixture() (
     HOME="$TMP_HOME" \
       AGENT_PLATFORM_HOME="$TMP_PLATFORM" \
       NPM_CONFIG_CACHE="$TMP_NPM_CACHE" \
+      npm_config_cache="$TMP_NPM_CACHE" \
       npx --yes --package "$tarball_path" agent-control-plane version
   )"
   package_version="$(node -p "require('./package.json').version")"
@@ -127,6 +147,7 @@ run_cli_version_and_help_fixture() (
     HOME="$TMP_HOME" \
       AGENT_PLATFORM_HOME="$TMP_PLATFORM" \
       NPM_CONFIG_CACHE="$TMP_NPM_CACHE" \
+      npm_config_cache="$TMP_NPM_CACHE" \
       npx --yes --package "$tarball_path" agent-control-plane help
   )"
   grep -q '^Usage:' <<<"${help_output}"
@@ -135,6 +156,7 @@ run_cli_version_and_help_fixture() (
 
 run_step "smoke" run_smoke_command_fixture
 run_step "package-setup-dry-run" run_setup_dry_run_fixture
+run_step "package-sync" run_sync_command_fixture
 run_step "package-cli-version-and-help" run_cli_version_and_help_fixture
 
 printf 'SMOKE_TEST_STATUS=ok\n'
