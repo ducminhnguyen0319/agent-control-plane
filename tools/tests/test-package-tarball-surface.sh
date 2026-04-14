@@ -60,6 +60,9 @@ for (const forbiddenPath of [
 for (const requiredPath of [
   "bin/agent-control-plane",
   "npm/bin/agent-control-plane.js",
+  "hooks/heartbeat-hooks.sh",
+  "hooks/issue-reconcile-hooks.sh",
+  "hooks/pr-reconcile-hooks.sh",
   "tools/bin/test-smoke.sh",
   "tools/dashboard/app.js",
   "tools/vendor/codex-quota/codex-quota.js",
@@ -76,6 +79,9 @@ for (const executablePath of [
   "bin/pr-risk.sh",
   "bin/sync-pr-labels.sh",
   "npm/bin/agent-control-plane.js",
+  "hooks/heartbeat-hooks.sh",
+  "hooks/issue-reconcile-hooks.sh",
+  "hooks/pr-reconcile-hooks.sh",
   "tools/bin/test-smoke.sh",
 ]) {
   const entry = entriesByPath.get(executablePath);
