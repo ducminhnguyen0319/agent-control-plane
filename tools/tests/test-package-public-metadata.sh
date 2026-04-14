@@ -21,7 +21,10 @@ if (!pkg.repository || pkg.repository.type !== "git" || pkg.repository.url !== "
   process.exit(12);
 }
 if (pkg.license !== "MIT") {
-  process.exit(2);
+    process.exit(2);
+}
+if (!pkg.publishConfig || pkg.publishConfig.access !== "public" || pkg.publishConfig.provenance !== true) {
+  process.exit(13);
 }
 for (const keyword of ["agents", "dashboard", "runtime"]) {
   if (!Array.isArray(pkg.keywords) || !pkg.keywords.includes(keyword)) {
