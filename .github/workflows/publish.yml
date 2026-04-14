@@ -99,6 +99,9 @@ jobs:
       - name: Verify contribution docs
         run: bash tools/tests/test-contribution-docs.sh
 
+      - name: Verify publish workflow trust gates
+        run: bash tools/tests/test-publish-workflow-trust-gates.sh
+
       - name: Verify public repo docs
         run: bash tools/tests/test-public-repo-docs.sh
 
