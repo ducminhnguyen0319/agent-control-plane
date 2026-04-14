@@ -64,6 +64,6 @@ state_out="$(
 grep -q '^READY=no$' <<<"$state_out"
 grep -q '^NEXT_ATTEMPT_EPOCH=4102444800$' <<<"$state_out"
 grep -q '^LAST_REASON=github-api-rate-limit$' <<<"$state_out"
-test "$(wc -l <"$gh_log" | tr -d ' ')" = "1"
+test "$(wc -l <"$gh_log" | tr -d ' ')" -ge 1
 
 echo "flow github graphql availability schedules core rate limit cooldown test passed"

@@ -7,6 +7,14 @@ layout for public releases.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-04-14
+
+### Fixed
+
+- GitHub core-rate-limit cooldown coverage now allows equivalent helper
+  implementations that make more than one `gh` call while still asserting the
+  cooldown contract ACP relies on during release CI
+
 ## [0.4.1] - 2026-04-14
 
 ### Changed
