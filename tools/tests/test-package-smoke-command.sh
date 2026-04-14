@@ -105,7 +105,36 @@ run_setup_dry_run_fixture() (
   grep -q '^CORE_TOOLS_STATUS=' <<<"${output}"
 )
 
+run_cli_version_and_help_fixture() (
+  set -euo pipefail
+  local version_output=""
+  local help_output=""
+  local package_version=""
+
+  version_output="$(
+    HOME="$TMP_HOME" \
+      AGENT_PLATFORM_HOME="$TMP_PLATFORM" \
+      NPM_CONFIG_CACHE="$TMP_NPM_CACHE" \
+      npx --yes --package "$tarball_path" agent-control-plane version
+  )"
+  package_version="$(node -p "require('./package.json').version")"
+  if [[ "${version_output}" != "${package_version}" ]]; then
+    echo "version mismatch: expected ${package_version}, got ${version_output}" >&2
+    return 1
+  fi
+
+  help_output="$(
+    HOME="$TMP_HOME" \
+      AGENT_PLATFORM_HOME="$TMP_PLATFORM" \
+      NPM_CONFIG_CACHE="$TMP_NPM_CACHE" \
+      npx --yes --package "$tarball_path" agent-control-plane help
+  )"
+  grep -q '^Usage:' <<<"${help_output}"
+  grep -q '^Commands:' <<<"${help_output}"
+)
+
 run_step "smoke" run_smoke_command_fixture
 run_step "package-setup-dry-run" run_setup_dry_run_fixture
+run_step "package-cli-version-and-help" run_cli_version_and_help_fixture
 
 printf 'SMOKE_TEST_STATUS=ok\n'
