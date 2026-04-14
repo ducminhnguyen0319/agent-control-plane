@@ -643,6 +643,7 @@ fi
 # to avoid burning API quota on every heartbeat cycle.
 CATCHUP_INTERVAL_SECONDS="${ACP_CATCHUP_INTERVAL_SECONDS:-${F_LOSNING_CATCHUP_INTERVAL_SECONDS:-300}}"
 CATCHUP_STAMP_FILE="${STATE_ROOT}/last-catchup-timestamp"
+SOURCE_REPO_SYNC_TIMEOUT_SECONDS="${ACP_SOURCE_REPO_SYNC_TIMEOUT_SECONDS:-${F_LOSNING_SOURCE_REPO_SYNC_TIMEOUT_SECONDS:-45}}"
 _catchup_now="$(date +%s)"
 _catchup_last="0"
 if [[ -f "${CATCHUP_STAMP_FILE}" ]]; then
@@ -668,6 +669,25 @@ if [[ "${_catchup_age}" -ge "${CATCHUP_INTERVAL_SECONDS}" ]]; then
       printf 'CATCHUP_TIMEOUT=yes\n'
     fi
     printf '[%s] merged-pr catchup end status=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "${catchup_status}"
+  fi
+
+  if [[ -x "${FLOW_TOOLS_DIR}/agent-project-sync-source-repo-main" ]]; then
+    printf '[%s] source-repo main sync start\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    if run_with_timeout "${SOURCE_REPO_SYNC_TIMEOUT_SECONDS}" \
+      env \
+        ACP_RUNS_ROOT="$RUNS_ROOT" \
+        F_LOSNING_RUNS_ROOT="$RUNS_ROOT" \
+        ACP_STATE_ROOT="$STATE_ROOT" \
+        F_LOSNING_STATE_ROOT="$STATE_ROOT" \
+        bash "${FLOW_TOOLS_DIR}/agent-project-sync-source-repo-main"; then
+      printf '[%s] source-repo main sync end status=0\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    else
+      source_repo_sync_status=$?
+      if [[ "${source_repo_sync_status}" -eq 124 ]]; then
+        printf 'SOURCE_REPO_SYNC_TIMEOUT=yes\n'
+      fi
+      printf '[%s] source-repo main sync end status=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "${source_repo_sync_status}"
+    fi
   fi
 
   printf '[%s] linked-pr issue catchup start\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"

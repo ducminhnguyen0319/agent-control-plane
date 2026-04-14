@@ -2504,6 +2504,16 @@ flow_resolve_retained_repo_root() {
   flow_env_or_config "${config_file}" "ACP_RETAINED_REPO_ROOT F_LOSNING_RETAINED_REPO_ROOT" "runtime.retained_repo_root" "${default_value}"
 }
 
+flow_resolve_source_repo_root() {
+  local config_file="${1:-}"
+  local default_value=""
+  if [[ -z "${config_file}" ]]; then
+    config_file="$(resolve_flow_config_yaml "${BASH_SOURCE[1]:-${BASH_SOURCE[0]}}")"
+  fi
+  default_value="$(flow_resolve_retained_repo_root "${config_file}")"
+  flow_env_or_config "${config_file}" "ACP_SOURCE_REPO_ROOT F_LOSNING_SOURCE_REPO_ROOT" "runtime.source_repo_root" "${default_value}"
+}
+
 flow_resolve_vscode_workspace_file() {
   local config_file="${1:-}"
   local default_value=""

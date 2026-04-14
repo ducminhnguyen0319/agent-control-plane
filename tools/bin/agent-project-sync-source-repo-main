@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/flow-config-lib.sh"
+
+CONFIG_YAML="${ACP_SOURCE_REPO_SYNC_CONFIG_YAML:-$(resolve_flow_config_yaml "${BASH_SOURCE[0]}")}"
+REPO_SLUG="$(flow_resolve_repo_slug "${CONFIG_YAML}")"
+SOURCE_REPO_ROOT="$(flow_resolve_source_repo_root "${CONFIG_YAML}")"
+DEFAULT_BRANCH="$(flow_resolve_default_branch "${CONFIG_YAML}")"
+STATE_ROOT="$(flow_resolve_state_root "${CONFIG_YAML}")"
+SYNC_STATE_FILE="${STATE_ROOT}/source-repo-main-sync.env"
+FORGE_PROVIDER="$(flow_forge_provider)"
+REMOTE_OVERRIDE="${ACP_SOURCE_SYNC_REMOTE:-${F_LOSNING_SOURCE_SYNC_REMOTE:-}}"
+
+write_state() {
+  local status="${1:-}"
+  local remote_name="${2:-}"
+  local remote_sha="${3:-}"
+  local local_sha="${4:-}"
+  local detail="${5:-}"
+
+  mkdir -p "$(dirname "${SYNC_STATE_FILE}")"
+  {
+    printf 'STATUS=%s\n' "${status}"
+    printf 'UPDATED_AT=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    printf 'SOURCE_REPO_ROOT=%s\n' "${SOURCE_REPO_ROOT}"
+    printf 'DEFAULT_BRANCH=%s\n' "${DEFAULT_BRANCH}"
+    printf 'REMOTE_NAME=%s\n' "${remote_name}"
+    printf 'REMOTE_SHA=%s\n' "${remote_sha}"
+    printf 'LOCAL_SHA=%s\n' "${local_sha}"
+    printf 'DETAIL=%s\n' "${detail}"
+  } >"${SYNC_STATE_FILE}"
+}
+
+git_ref_sha() {
+  local repo_root="${1:?repo root required}"
+  local ref_name="${2:?ref required}"
+  git -C "${repo_root}" rev-parse --verify --quiet "${ref_name}" 2>/dev/null || true
+}
+
+git_has_remote() {
+  local repo_root="${1:?repo root required}"
+  local remote_name="${2:?remote required}"
+  git -C "${repo_root}" remote get-url "${remote_name}" >/dev/null 2>&1
+}
+
+discover_remote_name() {
+  local remote_name=""
+
+  if [[ -n "${REMOTE_OVERRIDE}" ]] && git_has_remote "${SOURCE_REPO_ROOT}" "${REMOTE_OVERRIDE}"; then
+    printf '%s\n' "${REMOTE_OVERRIDE}"
+    return 0
+  fi
+
+  case "${FORGE_PROVIDER}" in
+    gitea)
+      if git_has_remote "${SOURCE_REPO_ROOT}" "gitea"; then
+        printf 'gitea\n'
+        return 0
+      fi
+      ;;
+    github)
+      if git_has_remote "${SOURCE_REPO_ROOT}" "origin"; then
+        printf 'origin\n'
+        return 0
+      fi
+      ;;
+  esac
+
+  while IFS= read -r remote_name; do
+    [[ -n "${remote_name}" ]] || continue
+    if [[ "$(flow_git_remote_repo_slug "${SOURCE_REPO_ROOT}" "${remote_name}" 2>/dev/null || true)" == "${REPO_SLUG}" ]]; then
+      printf '%s\n' "${remote_name}"
+      return 0
+    fi
+  done < <(git -C "${SOURCE_REPO_ROOT}" remote)
+
+  return 1
+}
+
+if [[ -z "${SOURCE_REPO_ROOT}" ]]; then
+  write_state "skipped" "" "" "" "source-repo-root-unset"
+  printf 'SOURCE_REPO_SYNC_STATUS=skipped\nSOURCE_REPO_SYNC_REASON=source-repo-root-unset\n'
+  exit 0
+fi
+
+if [[ ! -d "${SOURCE_REPO_ROOT}/.git" && ! -f "${SOURCE_REPO_ROOT}/.git" ]]; then
+  write_state "skipped" "" "" "" "source-repo-not-git"
+  printf 'SOURCE_REPO_SYNC_STATUS=skipped\nSOURCE_REPO_SYNC_REASON=source-repo-not-git\nSOURCE_REPO_ROOT=%s\n' "${SOURCE_REPO_ROOT}"
+  exit 0
+fi
+
+REMOTE_NAME="$(discover_remote_name || true)"
+if [[ -z "${REMOTE_NAME}" ]]; then
+  write_state "skipped" "" "" "" "remote-not-found"
+  printf 'SOURCE_REPO_SYNC_STATUS=skipped\nSOURCE_REPO_SYNC_REASON=remote-not-found\nSOURCE_REPO_ROOT=%s\n' "${SOURCE_REPO_ROOT}"
+  exit 0
+fi
+
+if ! git -C "${SOURCE_REPO_ROOT}" fetch "${REMOTE_NAME}" "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/${REMOTE_NAME}/${DEFAULT_BRANCH}" --prune >/dev/null 2>&1; then
+  write_state "failed" "${REMOTE_NAME}" "" "" "fetch-failed"
+  printf 'SOURCE_REPO_SYNC_STATUS=failed\nSOURCE_REPO_SYNC_REASON=fetch-failed\nSOURCE_REPO_ROOT=%s\nREMOTE_NAME=%s\n' "${SOURCE_REPO_ROOT}" "${REMOTE_NAME}"
+  exit 1
+fi
+
+remote_sha="$(git_ref_sha "${SOURCE_REPO_ROOT}" "refs/remotes/${REMOTE_NAME}/${DEFAULT_BRANCH}")"
+local_branch_sha="$(git_ref_sha "${SOURCE_REPO_ROOT}" "refs/heads/${DEFAULT_BRANCH}")"
+current_branch="$(git -C "${SOURCE_REPO_ROOT}" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+
+if [[ -z "${remote_sha}" || -z "${local_branch_sha}" ]]; then
+  write_state "failed" "${REMOTE_NAME}" "${remote_sha}" "${local_branch_sha}" "missing-branch-ref"
+  printf 'SOURCE_REPO_SYNC_STATUS=failed\nSOURCE_REPO_SYNC_REASON=missing-branch-ref\nSOURCE_REPO_ROOT=%s\nREMOTE_NAME=%s\n' "${SOURCE_REPO_ROOT}" "${REMOTE_NAME}"
+  exit 1
+fi
+
+if [[ "${remote_sha}" == "${local_branch_sha}" ]]; then
+  write_state "unchanged" "${REMOTE_NAME}" "${remote_sha}" "${local_branch_sha}" "already-current"
+  printf 'SOURCE_REPO_SYNC_STATUS=unchanged\nSOURCE_REPO_ROOT=%s\nREMOTE_NAME=%s\nSOURCE_REPO_SYNC_SHA=%s\n' "${SOURCE_REPO_ROOT}" "${REMOTE_NAME}" "${remote_sha}"
+  exit 0
+fi
+
+if [[ "${current_branch}" == "${DEFAULT_BRANCH}" ]]; then
+  if [[ -n "$(git -C "${SOURCE_REPO_ROOT}" status --porcelain 2>/dev/null || true)" ]]; then
+    write_state "blocked" "${REMOTE_NAME}" "${remote_sha}" "${local_branch_sha}" "working-tree-dirty"
+    printf 'SOURCE_REPO_SYNC_STATUS=blocked\nSOURCE_REPO_SYNC_REASON=working-tree-dirty\nSOURCE_REPO_ROOT=%s\nREMOTE_NAME=%s\nLOCAL_SHA=%s\nREMOTE_SHA=%s\n' \
+      "${SOURCE_REPO_ROOT}" "${REMOTE_NAME}" "${local_branch_sha}" "${remote_sha}"
+    exit 0
+  fi
+
+  if git -C "${SOURCE_REPO_ROOT}" merge-base --is-ancestor "${local_branch_sha}" "${remote_sha}" >/dev/null 2>&1; then
+    git -C "${SOURCE_REPO_ROOT}" merge --ff-only "refs/remotes/${REMOTE_NAME}/${DEFAULT_BRANCH}" >/dev/null
+    updated_sha="$(git_ref_sha "${SOURCE_REPO_ROOT}" "refs/heads/${DEFAULT_BRANCH}")"
+    write_state "updated" "${REMOTE_NAME}" "${remote_sha}" "${updated_sha}" "fast-forward-checked-out-branch"
+    printf 'SOURCE_REPO_SYNC_STATUS=updated\nSOURCE_REPO_ROOT=%s\nREMOTE_NAME=%s\nSOURCE_REPO_SYNC_SHA=%s\n' "${SOURCE_REPO_ROOT}" "${REMOTE_NAME}" "${updated_sha}"
+    exit 0
+  fi
+
+  if git -C "${SOURCE_REPO_ROOT}" merge --no-edit "refs/remotes/${REMOTE_NAME}/${DEFAULT_BRANCH}" >/dev/null 2>&1; then
+    updated_sha="$(git_ref_sha "${SOURCE_REPO_ROOT}" "refs/heads/${DEFAULT_BRANCH}")"
+    write_state "updated" "${REMOTE_NAME}" "${remote_sha}" "${updated_sha}" "merge-checked-out-branch"
+    printf 'SOURCE_REPO_SYNC_STATUS=updated\nSOURCE_REPO_ROOT=%s\nREMOTE_NAME=%s\nSOURCE_REPO_SYNC_SHA=%s\n' "${SOURCE_REPO_ROOT}" "${REMOTE_NAME}" "${updated_sha}"
+    exit 0
+  fi
+
+  git -C "${SOURCE_REPO_ROOT}" merge --abort >/dev/null 2>&1 || true
+  write_state "blocked" "${REMOTE_NAME}" "${remote_sha}" "${local_branch_sha}" "merge-conflict"
+  printf 'SOURCE_REPO_SYNC_STATUS=blocked\nSOURCE_REPO_SYNC_REASON=merge-conflict\nSOURCE_REPO_ROOT=%s\nREMOTE_NAME=%s\nLOCAL_SHA=%s\nREMOTE_SHA=%s\n' \
+    "${SOURCE_REPO_ROOT}" "${REMOTE_NAME}" "${local_branch_sha}" "${remote_sha}"
+  exit 0
+fi
+
+if ! git -C "${SOURCE_REPO_ROOT}" merge-base --is-ancestor "${local_branch_sha}" "${remote_sha}" >/dev/null 2>&1; then
+  write_state "blocked" "${REMOTE_NAME}" "${remote_sha}" "${local_branch_sha}" "local-main-diverged"
+  printf 'SOURCE_REPO_SYNC_STATUS=blocked\nSOURCE_REPO_SYNC_REASON=local-main-diverged\nSOURCE_REPO_ROOT=%s\nREMOTE_NAME=%s\nLOCAL_SHA=%s\nREMOTE_SHA=%s\n' \
+    "${SOURCE_REPO_ROOT}" "${REMOTE_NAME}" "${local_branch_sha}" "${remote_sha}"
+  exit 0
+fi
+
+git -C "${SOURCE_REPO_ROOT}" update-ref "refs/heads/${DEFAULT_BRANCH}" "${remote_sha}" "${local_branch_sha}"
+write_state "updated" "${REMOTE_NAME}" "${remote_sha}" "${remote_sha}" "fast-forward-local-ref"
+printf 'SOURCE_REPO_SYNC_STATUS=updated\nSOURCE_REPO_ROOT=%s\nREMOTE_NAME=%s\nSOURCE_REPO_SYNC_SHA=%s\n' "${SOURCE_REPO_ROOT}" "${REMOTE_NAME}" "${remote_sha}"
