@@ -54,7 +54,11 @@ if [[ -x "${ENSURE_SYNC_SCRIPT}" ]]; then
   if [[ "${ALWAYS_SYNC}" == "1" ]]; then
     ensure_args=(--force "${ensure_args[@]}")
   fi
-  bash "${ENSURE_SYNC_SCRIPT}" "${ensure_args[@]}"
+  if [[ "${FLOW_SKILL_DIR}" == "${RUNTIME_HOME}"/* ]]; then
+    printf 'RUNTIME_SYNC_SKIPPED=active-runtime-home\n'
+  else
+    bash "${ENSURE_SYNC_SCRIPT}" "${ensure_args[@]}"
+  fi
 elif [[ "${ALWAYS_SYNC}" == "1" || ! -x "${RUNTIME_HEARTBEAT_SCRIPT}" ]]; then
   if [[ -z "${SOURCE_HOME}" ]]; then
     SOURCE_HOME="${FLOW_SKILL_DIR}"

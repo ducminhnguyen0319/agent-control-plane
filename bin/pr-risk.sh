@@ -26,10 +26,10 @@ fi
 gh_api_json_matching_or_fallback() {
   local fallback="${1:?fallback required}"
   local jq_filter="${2:?jq filter required}"
-  shift 2
+  local route="${3:?route required}"
   local output=""
 
-  output="$(gh api "$@" 2>/dev/null || true)"
+  output="$(flow_github_api_repo "${REPO_SLUG}" "${route}" 2>/dev/null || true)"
   if jq -e "${jq_filter}" >/dev/null 2>&1 <<<"${output}"; then
     printf '%s\n' "${output}"
     return 0
@@ -38,17 +38,32 @@ gh_api_json_matching_or_fallback() {
   printf '%s\n' "${fallback}"
 }
 
-PR_JSON="$(gh pr view "$PR_NUMBER" -R "$REPO_SLUG" --json number,title,url,body,isDraft,headRefName,headRefOid,baseRefName,labels,files,mergeStateStatus,reviewDecision,reviewRequests,statusCheckRollup,comments 2>/dev/null)" \
-  || { printf 'pr-risk: gh pr view failed for PR %s (repo: %s)\n' "$PR_NUMBER" "$REPO_SLUG" >&2; exit 1; }
+PR_JSON="$(flow_github_pr_view_json "$REPO_SLUG" "$PR_NUMBER" 2>/dev/null || true)"
+if ! jq -e '.number? != null' >/dev/null 2>&1 <<<"${PR_JSON:-}"; then
+  if flow_using_gitea; then
+    printf 'pr-risk: forge PR view failed for PR %s (repo: %s)\n' "$PR_NUMBER" "$REPO_SLUG" >&2
+    exit 1
+  fi
+  PR_JSON="$(gh pr view "$PR_NUMBER" -R "$REPO_SLUG" --json number,title,url,body,isDraft,headRefName,headRefOid,baseRefName,labels,files,mergeStateStatus,reviewDecision,reviewRequests,statusCheckRollup,comments 2>/dev/null)" \
+    || { printf 'pr-risk: forge PR view failed for PR %s (repo: %s)\n' "$PR_NUMBER" "$REPO_SLUG" >&2; exit 1; }
+fi
 PR_HEAD_SHA="$(jq -r '.headRefOid // ""' <<<"$PR_JSON")"
 PR_HEAD_COMMITTED_AT=""
 if [[ -n "${PR_HEAD_SHA}" ]]; then
-  PR_HEAD_COMMITTED_AT="$(gh api "repos/${REPO_SLUG}/commits/${PR_HEAD_SHA}" --jq .commit.committer.date 2>/dev/null || true)"
+  PR_HEAD_COMMITTED_AT="$(
+    flow_github_api_repo "${REPO_SLUG}" "commits/${PR_HEAD_SHA}" 2>/dev/null \
+      | jq -r '.commit.committer.date // .commit.author.date // .created // .timestamp // ""' 2>/dev/null \
+      || true
+  )"
 fi
-REVIEW_COMMENTS_JSON="$(gh_api_json_matching_or_fallback '[]' 'type == "array"' "repos/${REPO_SLUG}/pulls/${PR_NUMBER}/comments")"
+if flow_using_gitea; then
+  REVIEW_COMMENTS_JSON='[]'
+else
+  REVIEW_COMMENTS_JSON="$(gh_api_json_matching_or_fallback '[]' 'type == "array"' "pulls/${PR_NUMBER}/comments")"
+fi
 CHECK_RUNS_JSON='{"check_runs":[]}'
 if [[ -n "${PR_HEAD_SHA}" ]]; then
-  CHECK_RUNS_JSON="$(gh_api_json_matching_or_fallback '{"check_runs":[]}' 'type == "object" and ((.check_runs // []) | type == "array")' "repos/${REPO_SLUG}/commits/${PR_HEAD_SHA}/check-runs")"
+  CHECK_RUNS_JSON="$(gh_api_json_matching_or_fallback '{"check_runs":[]}' 'type == "object" and ((.check_runs // []) | type == "array")' "commits/${PR_HEAD_SHA}/check-runs")"
 fi
 
 PR_JSON="$PR_JSON" PR_HEAD_SHA="$PR_HEAD_SHA" PR_HEAD_COMMITTED_AT="$PR_HEAD_COMMITTED_AT" REVIEW_COMMENTS_JSON="$REVIEW_COMMENTS_JSON" CHECK_RUNS_JSON="$CHECK_RUNS_JSON" PR_LANE_OVERRIDE="${PR_LANE_OVERRIDE:-}" MANAGED_PR_PREFIXES_JSON="$MANAGED_PR_PREFIXES_JSON" MANAGED_PR_ISSUE_CAPTURE_REGEX="$MANAGED_PR_ISSUE_CAPTURE_REGEX" ALLOW_INFRA_CI_BYPASS="$ALLOW_INFRA_CI_BYPASS" LOCAL_FIRST_PR_POLICY="$LOCAL_FIRST_PR_POLICY" node <<'EOF'

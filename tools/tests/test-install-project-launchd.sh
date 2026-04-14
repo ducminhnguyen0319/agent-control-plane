@@ -117,8 +117,9 @@ default_runtime_home="$default_home_dir/.agent-runtime/runtime-home"
 default_profile_registry_root="$default_home_dir/.agent-runtime/control-plane/profiles"
 default_profile_dir="$default_profile_registry_root/default-demo"
 default_label="ai.agent.project.default-demo"
+default_runtime_skill_dir="$default_runtime_home/skills/openclaw/agent-control-plane/tools/bin"
 
-mkdir -p "$default_workspace_dir" "$default_launch_agents_dir" "$default_log_dir" "$default_runtime_home" "$default_profile_dir"
+mkdir -p "$default_workspace_dir" "$default_launch_agents_dir" "$default_log_dir" "$default_runtime_home" "$default_profile_dir" "$default_runtime_skill_dir"
 
 cat >"$default_profile_dir/control-plane.yaml" <<EOF
 schema_version: "1"
@@ -144,6 +145,20 @@ execution:
     timeout_seconds: 900
 EOF
 
+cat >"$default_runtime_skill_dir/project-launchd-bootstrap.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+exit 0
+EOF
+chmod +x "$default_runtime_skill_dir/project-launchd-bootstrap.sh"
+
+cat >"$default_runtime_skill_dir/project-runtime-supervisor.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+exit 0
+EOF
+chmod +x "$default_runtime_skill_dir/project-runtime-supervisor.sh"
+
 default_output="$(
   ACP_PROJECT_RUNTIME_HOME_DIR="$default_home_dir" \
   ACP_PROJECT_RUNTIME_RUNTIME_HOME="$default_runtime_home" \
@@ -152,8 +167,6 @@ default_output="$(
   ACP_PROJECT_RUNTIME_LAUNCH_AGENTS_DIR="$default_launch_agents_dir" \
   ACP_PROJECT_RUNTIME_LOG_DIR="$default_log_dir" \
   ACP_PROJECT_RUNTIME_SYNC_SCRIPT="$sync_script" \
-  ACP_PROJECT_RUNTIME_BOOTSTRAP_SCRIPT="$bootstrap_script" \
-  ACP_PROJECT_RUNTIME_SUPERVISOR_SCRIPT="$supervisor_script" \
   ACP_PROJECT_RUNTIME_SKIP_LAUNCHCTL=1 \
   bash "$INSTALL_BIN" --profile-id default-demo --label "$default_label"
 )"
@@ -161,5 +174,6 @@ default_output="$(
 default_wrapper_path="$default_workspace_dir/bin/agent-project-default-demo-launchd.sh"
 grep -q '^LAUNCHD_INSTALL_STATUS=skipped-launchctl$' <<<"$default_output"
 grep -q "^export ACP_PROJECT_RUNTIME_SOURCE_HOME='$FLOW_ROOT'$" "$default_wrapper_path"
+grep -q "exec bash '$default_runtime_skill_dir/project-runtime-supervisor.sh' --bootstrap-script '$default_runtime_skill_dir/project-launchd-bootstrap.sh'" "$default_wrapper_path"
 
 echo "install project launchd test passed"
