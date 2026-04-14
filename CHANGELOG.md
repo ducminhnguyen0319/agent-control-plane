@@ -7,6 +7,15 @@ layout for public releases.
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-04-14
+
+### Fixed
+
+- GitHub outbox regression tests now preserve the active runner `PATH` while
+  prepending their fake `gh` shim, so replayed label, comment, and approval
+  writes still find the `node` binary installed by `actions/setup-node` during
+  publish CI
+
 ## [0.4.5] - 2026-04-14
 
 ### Fixed

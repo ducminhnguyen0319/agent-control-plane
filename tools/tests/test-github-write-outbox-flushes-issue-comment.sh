@@ -58,7 +58,7 @@ EOF
 
 chmod +x "$bin_dir/gh"
 
-export PATH="$bin_dir:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export PATH="$bin_dir:${PATH:-/usr/bin:/bin:/usr/sbin:/sbin}"
 export ACP_STATE_ROOT="$state_root"
 export F_LOSNING_STATE_ROOT="$state_root"
 export ACP_REPO_ID="99"
