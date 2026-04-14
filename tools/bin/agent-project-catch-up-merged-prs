@@ -46,6 +46,7 @@ optional_hooks=(
   pr_cleanup_merged_residue
   pr_linked_issue_should_close
   pr_after_merged
+  pr_after_closed
 )
 
 for hook_name in "${optional_hooks[@]}"; do

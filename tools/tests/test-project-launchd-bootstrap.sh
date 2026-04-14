@@ -15,6 +15,7 @@ capture_dir="$tmpdir/capture"
 sync_script="$tmpdir/sync.sh"
 ensure_sync_script="$tmpdir/ensure-sync.sh"
 runtime_heartbeat_script="$runtime_home/skills/openclaw/agent-control-plane/tools/bin/heartbeat-safe-auto.sh"
+env_override_heartbeat_script="$tmpdir/env-override-heartbeat.sh"
 env_file="$profile_dir/runtime.env"
 
 mkdir -p "$home_dir" "$profile_dir" "$(dirname "$runtime_heartbeat_script")" "$capture_dir"
@@ -65,6 +66,15 @@ cat >"$env_file" <<'EOF'
 OPENROUTER_API_KEY=test-openrouter-key
 EOF
 
+cat >"$env_override_heartbeat_script" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'HEARTBEAT_SOURCE=env-file\n' >"${ACP_PROJECT_RUNTIME_CAPTURE_DIR}/heartbeat.log"
+printf 'PROFILE_ID=%s\n' "${ACP_PROJECT_ID:-}" >>"${ACP_PROJECT_RUNTIME_CAPTURE_DIR}/heartbeat.log"
+printf 'PATH=%s\n' "${PATH:-}" >>"${ACP_PROJECT_RUNTIME_CAPTURE_DIR}/heartbeat.log"
+EOF
+chmod +x "$env_override_heartbeat_script"
+
 ACP_PROJECT_RUNTIME_HOME_DIR="$home_dir" \
 ACP_PROJECT_RUNTIME_SOURCE_HOME="$tmpdir/source-home" \
 ACP_PROJECT_RUNTIME_RUNTIME_HOME="$runtime_home" \
@@ -101,5 +111,29 @@ if grep -q '^ENSURE_SOURCE=' "$capture_dir/ensure.log"; then
   echo "bootstrap passed unexpected source-home override" >&2
   exit 1
 fi
+
+cat >"$env_file" <<EOF
+OPENROUTER_API_KEY=test-openrouter-key
+ACP_PROJECT_RUNTIME_HEARTBEAT_SCRIPT=$env_override_heartbeat_script
+ACP_PROJECT_RUNTIME_PATH=/custom/bin:/usr/bin:/bin
+ACP_PROJECT_RUNTIME_ALWAYS_SYNC=1
+EOF
+
+rm -f "$capture_dir/ensure.log" "$capture_dir/heartbeat.log"
+
+ACP_PROJECT_RUNTIME_HOME_DIR="$home_dir" \
+ACP_PROJECT_RUNTIME_SOURCE_HOME="$tmpdir/source-home" \
+ACP_PROJECT_RUNTIME_RUNTIME_HOME="$runtime_home" \
+ACP_PROJECT_RUNTIME_PROFILE_REGISTRY_ROOT="$profile_registry_root" \
+ACP_PROJECT_RUNTIME_PROFILE_ID="demo" \
+ACP_PROJECT_RUNTIME_SYNC_SCRIPT="$sync_script" \
+ACP_PROJECT_RUNTIME_ENSURE_SYNC_SCRIPT="$ensure_sync_script" \
+ACP_PROJECT_RUNTIME_CAPTURE_DIR="$capture_dir" \
+bash "$BOOTSTRAP_BIN"
+
+grep -q '^ENSURE_ARGS=--force --source-home '"$tmpdir"'/source-home --runtime-home '"$runtime_home"' --quiet$' "$capture_dir/ensure.log"
+grep -q '^HEARTBEAT_SOURCE=env-file$' "$capture_dir/heartbeat.log"
+grep -q '^PROFILE_ID=demo$' "$capture_dir/heartbeat.log"
+grep -q '^PATH=/custom/bin:/usr/bin:/bin$' "$capture_dir/heartbeat.log"
 
 echo "project launchd bootstrap test passed"
