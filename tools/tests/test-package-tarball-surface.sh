@@ -43,6 +43,7 @@ for (const forbiddenPath of [
   "tools/bin/audit-retained-overlap.sh",
   "tools/bin/audit-retained-worktrees.sh",
   "tools/bin/check-skill-contracts.sh",
+  "tools/bin/split-retained-slice.sh",
   "bin/audit-issue-routing.sh",
   "tools/templates/legacy/issue-prompt-template-pre-slim.md",
   "tools/bin/render-dashboard-snapshot.py",
@@ -51,6 +52,7 @@ for (const forbiddenPath of [
   "references/docs-map.md",
   "references/repo-map.md",
   "references/architecture.md",
+  "tools/bin/resident-issue-queue-status.py",
 ]) {
   if (paths.has(forbiddenPath)) {
     fail(`forbidden tarball path present: ${forbiddenPath}`);

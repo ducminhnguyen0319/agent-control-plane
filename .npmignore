@@ -12,8 +12,10 @@ tools/bin/check-skill-contracts.sh
 tools/bin/render-dashboard-demo-media.sh
 tools/bin/render-architecture-infographics.sh
 tools/vendor/codex-quota/README.md
+tools/bin/split-retained-slice.sh
 tools/dashboard/__pycache__/
 tools/tests/__pycache__/
 *.pyc
 tools/templates/legacy/
+tools/bin/resident-issue-queue-status.py
 tools/bin/render-dashboard-snapshot.py
