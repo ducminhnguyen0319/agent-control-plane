@@ -32,6 +32,7 @@ function fail(message) {
 }
 
 for (const forbiddenPath of [
+  "SKILL.md",
   "tools/tests/test-agent-control-plane-npm-cli.sh",
   "tools/bin/render-dashboard-demo-media.sh",
   "tools/bin/render-architecture-infographics.sh",
