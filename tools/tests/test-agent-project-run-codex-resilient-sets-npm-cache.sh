@@ -39,20 +39,21 @@ printf '{"account":"ok"}\n' >"$home_dir/.codex/auth.json"
 printf 'Prompt\n' >"$prompt_file"
 git -C "$worktree" init -b test >/dev/null 2>&1
 
-HOME="$home_dir" \
-PATH="$bin_dir:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin" \
-bash "$SCRIPT" \
-  --mode safe \
-  --worktree "$worktree" \
-  --prompt-file "$prompt_file" \
-  --output-file "$output_file" \
-  --host-run-dir "$host_run_dir" \
-  --sandbox-run-dir "$sandbox_run_dir" \
-  --safe-profile demo-safe \
-  --codex-bin "$bin_dir/codex" \
-  --max-resume-attempts 1 \
-  --auth-refresh-timeout-seconds 5 \
-  --auth-refresh-poll-seconds 1 >/dev/null
+env -u NPM_CONFIG_CACHE -u npm_config_cache \
+  HOME="$home_dir" \
+  PATH="$bin_dir:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin" \
+  bash "$SCRIPT" \
+    --mode safe \
+    --worktree "$worktree" \
+    --prompt-file "$prompt_file" \
+    --output-file "$output_file" \
+    --host-run-dir "$host_run_dir" \
+    --sandbox-run-dir "$sandbox_run_dir" \
+    --safe-profile demo-safe \
+    --codex-bin "$bin_dir/codex" \
+    --max-resume-attempts 1 \
+    --auth-refresh-timeout-seconds 5 \
+    --auth-refresh-poll-seconds 1 >/dev/null
 
 expected_cache="$home_dir/.agent-runtime/npm-cache"
 test "$(cat "$npm_capture")" = "$expected_cache"

@@ -632,11 +632,10 @@ stream_codex_exec() {
   rm -f "$stream_fifo"
   rm -f "$progress_file"
 
-  if wait "$producer_pid"; then
-    last_exit_code="0"
-  else
-    last_exit_code="$?"
-  fi
+  set +e
+  wait "$producer_pid" 2>/dev/null
+  last_exit_code="$?"
+  set -e
 
   update_thread_id_from_output "$last_attempt_start_size"
 }

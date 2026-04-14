@@ -7,6 +7,21 @@ layout for public releases.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-04-14
+
+### Changed
+
+- `npm test` now runs through a dedicated shell runner so npm-driven release
+  workflows execute the full regression suite consistently instead of tripping
+  over long chained shell commands
+
+### Fixed
+
+- the Codex runner npm-cache regression test now explicitly clears inherited npm
+  cache environment variables before asserting ACP's default cache path
+- Codex runner stall handling now captures the producer exit status without
+  depending on shell-specific `wait` behavior under `set -e`
+
 ## [0.4.0] - 2026-04-14
 
 ### Added
