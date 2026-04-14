@@ -105,10 +105,43 @@ tar -xOf "$TMP_PACK_DIR"/agent-control-plane-*.tgz package/package.json >"$TMP_P
 node - "$TMP_PACKAGE_JSON" <<'NODE'
 const fs = require("fs");
 const pkg = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const expectedFunding = "https://github.com/sponsors/ducminhnguyen0319";
 
 if (!pkg.bin || pkg.bin["agent-control-plane"] !== "./bin/agent-control-plane") {
   console.error("tarball package.json missing executable bin entry");
   process.exit(1);
+}
+
+if (!pkg.publishConfig || pkg.publishConfig.access !== "public" || pkg.publishConfig.provenance !== true) {
+  console.error("tarball package.json missing trusted publishing metadata");
+  process.exit(1);
+}
+
+if (pkg.homepage !== "https://github.com/ducminhnguyen0319/agent-control-plane") {
+  console.error("tarball package.json has unexpected homepage");
+  process.exit(1);
+}
+
+if (!pkg.bugs || pkg.bugs.url !== "https://github.com/ducminhnguyen0319/agent-control-plane/issues") {
+  console.error("tarball package.json has unexpected bugs URL");
+  process.exit(1);
+}
+
+if (!pkg.repository || pkg.repository.type !== "git" || pkg.repository.url !== "git+https://github.com/ducminhnguyen0319/agent-control-plane.git") {
+  console.error("tarball package.json has unexpected repository");
+  process.exit(1);
+}
+
+if (!Array.isArray(pkg.funding) || !pkg.funding.includes(expectedFunding)) {
+  console.error("tarball package.json missing expected funding link");
+  process.exit(1);
+}
+
+for (const keyword of ["runtime", "dashboard", "agents"]) {
+  if (!Array.isArray(pkg.keywords) || !pkg.keywords.includes(keyword)) {
+    console.error(`tarball package.json missing expected keyword: ${keyword}`);
+    process.exit(1);
+  }
 }
 NODE
 
