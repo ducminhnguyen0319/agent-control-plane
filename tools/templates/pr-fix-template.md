@@ -11,6 +11,7 @@ PR metadata:
 - PR: {PR_NUMBER} - {PR_TITLE}
 - URL: {PR_URL}
 - Base branch: {PR_BASE_REF}
+- Base tracking ref: {PR_BASE_TRACKING_REF}
 - Head branch: {PR_HEAD_REF}
 - Linked issue: {PR_LINKED_ISSUE_ID}
 - Risk classification: {PR_RISK}
@@ -55,7 +56,7 @@ Required flow:
 
 1. Inspect the current diff and the failing/pending CI signals first:
    - `openspec list` if the repo uses OpenSpec
-   - `git diff --stat origin/main...HEAD`
+   - `git diff --stat {PR_BASE_TRACKING_REF}...HEAD`
    - `git status --short`
    - if `Merge state` is not `CLEAN` or `Mergeable` is `FALSE`, treat branch drift/conflicts as the concrete blocker first
    - if `Actionable current-head review findings` is not `- none`, treat those findings as the concrete blockers to address first
@@ -68,6 +69,7 @@ Required flow:
    - do not run `git fetch`, `git merge`, `git rebase`, `git commit`, `git push`, or other Git metadata-writing commands from inside this worker; host-side wrappers own those steps
 3. If the blocker is branch drift or a merge conflict, use the already-prepared local refs and make the smallest branch-local source update needed to restore mergeability on this PR branch. Keep the resolution scoped to the PR intent; do not rewrite unrelated code.
    - Treat `Current local merge-conflict paths` as the authoritative conflict list to clear.
+   - Treat `{PR_BASE_TRACKING_REF}` as the authoritative base ref for any read-only diff or merge-base inspection.
    - Do not stop after fixing only one file if other conflict paths remain.
    - Before you declare success, rerun local merge simulation and confirm there are no remaining conflict paths for this branch against `{PR_BASE_REF}`.
 4. Make the smallest change that fixes the concrete PR blockers on this existing branch.

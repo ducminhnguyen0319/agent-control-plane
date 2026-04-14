@@ -275,6 +275,64 @@ flow_git_remote_repo_slug() {
   return 1
 }
 
+flow_git_has_remote() {
+  local repo_root="${1:-}"
+  local remote_name="${2:-}"
+
+  [[ -n "${repo_root}" && -d "${repo_root}" && -n "${remote_name}" ]] || return 1
+  git -C "${repo_root}" remote get-url "${remote_name}" >/dev/null 2>&1
+}
+
+flow_resolve_forge_primary_remote() {
+  local repo_root="${1:-}"
+  local repo_slug="${2:-}"
+  local remote_name=""
+  local override="${ACP_SOURCE_SYNC_REMOTE:-${F_LOSNING_SOURCE_SYNC_REMOTE:-}}"
+  local forge_provider=""
+
+  [[ -n "${repo_root}" && -d "${repo_root}" ]] || return 1
+
+  if [[ -n "${override}" ]] && flow_git_has_remote "${repo_root}" "${override}"; then
+    printf '%s\n' "${override}"
+    return 0
+  fi
+
+  forge_provider="$(flow_forge_provider)"
+  case "${forge_provider}" in
+    gitea)
+      if flow_git_has_remote "${repo_root}" "gitea"; then
+        printf 'gitea\n'
+        return 0
+      fi
+      ;;
+    github)
+      if flow_git_has_remote "${repo_root}" "origin"; then
+        printf 'origin\n'
+        return 0
+      fi
+      ;;
+  esac
+
+  if [[ -n "${repo_slug}" ]]; then
+    while IFS= read -r remote_name; do
+      [[ -n "${remote_name}" ]] || continue
+      if [[ "$(flow_git_remote_repo_slug "${repo_root}" "${remote_name}" 2>/dev/null || true)" == "${repo_slug}" ]]; then
+        printf '%s\n' "${remote_name}"
+        return 0
+      fi
+    done < <(git -C "${repo_root}" remote)
+  fi
+
+  for remote_name in origin gitea; do
+    if flow_git_has_remote "${repo_root}" "${remote_name}"; then
+      printf '%s\n' "${remote_name}"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 flow_git_credential_token_for_repo_slug() {
   local repo_slug="${1:-}"
   local host="${2:-github.com}"
@@ -473,7 +531,7 @@ flow_gitea_api_repo() {
   while IFS= read -r -d '' arg; do
     auth_args+=("${arg}")
   done < <(flow_gitea_auth_curl_args "${repo_slug}") || true
-  if [[ "${#auth_args[@]}" -eq 0 ]]; then
+  if [[ "${#auth_args[@]}" -eq 0 && "${method}" != "GET" ]]; then
     rm -f "${input_file}"
     return 1
   fi

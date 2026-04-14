@@ -55,8 +55,9 @@ for hook_name in "${optional_hooks[@]}"; do
   fi
 done
 
-merged_ledger_dir="${state_root}/merged-pr-catchup"
-closed_ledger_dir="${state_root}/closed-pr-catchup"
+forge_scope="$(printf '%s' "${ACP_FORGE_PROVIDER:-${F_LOSNING_FORGE_PROVIDER:-github}}" | tr -c '[:alnum:]._-' '-')"
+merged_ledger_dir="${state_root}/merged-pr-catchup-${forge_scope}"
+closed_ledger_dir="${state_root}/closed-pr-catchup-${forge_scope}"
 mkdir -p "$merged_ledger_dir" "$closed_ledger_dir"
 
 get_pr_risk_json() {

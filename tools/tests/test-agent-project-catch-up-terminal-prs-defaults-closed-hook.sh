@@ -66,7 +66,7 @@ output="$(
 grep -q '^CATCHUP_CLOSED_PR=202$' <<<"$output"
 grep -q '^CLEAR:202$' "$events_file"
 grep -q '^RESIDUE:202$' "$events_file"
-test -f "$state_root/closed-pr-catchup/202.env"
-grep -q '^PR_STATE=closed$' "$state_root/closed-pr-catchup/202.env"
+test -f "$state_root/closed-pr-catchup-github/202.env"
+grep -q '^PR_STATE=closed$' "$state_root/closed-pr-catchup-github/202.env"
 
 echo "agent-project-catch-up terminal PRs defaults closed hook test passed"
