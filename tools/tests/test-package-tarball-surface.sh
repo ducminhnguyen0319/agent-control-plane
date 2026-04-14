@@ -46,6 +46,11 @@ for (const forbiddenPath of [
   "bin/audit-issue-routing.sh",
   "tools/templates/legacy/issue-prompt-template-pre-slim.md",
   "tools/bin/render-dashboard-snapshot.py",
+  "references/commands.md",
+  "references/control-plane-map.md",
+  "references/docs-map.md",
+  "references/repo-map.md",
+  "references/architecture.md",
 ]) {
   if (paths.has(forbiddenPath)) {
     fail(`forbidden tarball path present: ${forbiddenPath}`);
@@ -55,10 +60,6 @@ for (const forbiddenPath of [
 for (const requiredPath of [
   "bin/agent-control-plane",
   "npm/bin/agent-control-plane.js",
-  "references/commands.md",
-  "references/control-plane-map.md",
-  "references/docs-map.md",
-  "references/repo-map.md",
   "tools/bin/test-smoke.sh",
   "tools/dashboard/app.js",
   "tools/vendor/codex-quota/codex-quota.js",
