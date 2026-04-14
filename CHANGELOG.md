@@ -7,6 +7,14 @@ layout for public releases.
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-04-14
+
+### Fixed
+
+- the Gitea `pr-risk` regression test now seeds its managed-branch globs
+  explicitly, so GitHub runners no longer depend on a locally installed ACP
+  profile id to classify managed PR branches correctly
+
 ## [0.4.6] - 2026-04-14
 
 ### Fixed

@@ -55,6 +55,7 @@ risk_json="$(
   ACP_FORGE_PROVIDER="gitea" \
   ACP_GITEA_BASE_URL="http://gitea.local" \
   ACP_GITEA_TOKEN="local-token" \
+  ACP_MANAGED_PR_BRANCH_GLOBS="agent/agent-control-plane/* codex/* openclaw/*" \
   F_LOSNING_REPO_SLUG="acp-admin/agent-control-plane" \
   bash "$PR_RISK_BIN" 6
 )"
