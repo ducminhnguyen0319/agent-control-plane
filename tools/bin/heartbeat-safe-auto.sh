@@ -38,6 +38,7 @@ CATCHUP_TIMEOUT_SECONDS="${ACP_CATCHUP_TIMEOUT_SECONDS:-${F_LOSNING_CATCHUP_TIME
 HEARTBEAT_LOOP_TIMEOUT_SECONDS="${ACP_HEARTBEAT_LOOP_TIMEOUT_SECONDS:-${F_LOSNING_HEARTBEAT_LOOP_TIMEOUT_SECONDS:-720}}"
 CONFIG_YAML="$(resolve_flow_config_yaml "${BASH_SOURCE[0]}")"
 SHARED_AGENT_HOME="$(resolve_shared_agent_home "${FLOW_SKILL_DIR}")"
+RUNTIME_HOME_DIR="$(resolve_runtime_home)"
 FLOW_TOOLS_DIR="${FLOW_SKILL_DIR}/tools/bin"
 ISSUE_SESSION_PREFIX="$(flow_resolve_issue_session_prefix "${CONFIG_YAML}")"
 PR_SESSION_PREFIX="$(flow_resolve_pr_session_prefix "${CONFIG_YAML}")"
@@ -512,7 +513,11 @@ run_codex_quota_preflight
 # Sync skill files to runtime-home if source has changed since last sync.
 # This ensures start-issue-worker.sh and other scripts are always up to date.
 if [[ -x "${FLOW_TOOLS_DIR}/ensure-runtime-sync.sh" ]]; then
-  "${FLOW_TOOLS_DIR}/ensure-runtime-sync.sh" --quiet 2>/dev/null || true
+  if [[ "${FLOW_SKILL_DIR}" == "${RUNTIME_HOME_DIR}"/* ]]; then
+    printf 'RUNTIME_SYNC_SKIPPED=active-runtime-home\n'
+  else
+    "${FLOW_TOOLS_DIR}/ensure-runtime-sync.sh" --quiet 2>/dev/null || true
+  fi
 fi
 
 acquire_lock
