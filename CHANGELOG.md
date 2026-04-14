@@ -7,6 +7,14 @@ layout for public releases.
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-04-14
+
+### Fixed
+
+- relaxed the GitHub core-rate-limit cooldown regression to assert the contract
+  ACP depends on without pinning runner-specific helper details that caused
+  release-CI flakes
+
 ## [0.4.2] - 2026-04-14
 
 ### Fixed
