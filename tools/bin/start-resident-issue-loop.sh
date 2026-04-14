@@ -243,12 +243,12 @@ record_scheduled_next_due() {
   now_epoch="$(date +%s)"
   next_due_epoch=$((now_epoch + interval_seconds))
   NEXT_WAKE_EPOCH="${next_due_epoch}"
-  NEXT_WAKE_AT="$(date -u -r "${next_due_epoch}" +"%Y-%m-%dT%H:%M:%SZ")"
+  NEXT_WAKE_AT="$(flow_format_epoch_utc "${next_due_epoch}")"
   state_file="${SCHEDULED_STATE_DIR}/${ISSUE_ID}.env"
   cat >"${state_file}" <<EOF
 INTERVAL_SECONDS=${interval_seconds}
 LAST_STARTED_EPOCH=${now_epoch}
-LAST_STARTED_AT=$(date -u -r "${now_epoch}" +"%Y-%m-%dT%H:%M:%SZ")
+LAST_STARTED_AT=$(flow_format_epoch_utc "${now_epoch}")
 NEXT_DUE_EPOCH=${next_due_epoch}
 NEXT_DUE_AT=${NEXT_WAKE_AT}
 UPDATED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")

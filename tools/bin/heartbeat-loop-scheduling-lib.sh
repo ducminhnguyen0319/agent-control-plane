@@ -268,9 +268,9 @@ record_scheduled_issue_launch() {
   cat >"$state_file" <<EOF
 INTERVAL_SECONDS=${interval_seconds}
 LAST_STARTED_EPOCH=${now_epoch}
-LAST_STARTED_AT=$(date -u -r "$now_epoch" +"%Y-%m-%dT%H:%M:%SZ")
+LAST_STARTED_AT=$(flow_format_epoch_utc "$now_epoch")
 NEXT_DUE_EPOCH=${next_due_epoch}
-NEXT_DUE_AT=$(date -u -r "$next_due_epoch" +"%Y-%m-%dT%H:%M:%SZ")
+NEXT_DUE_AT=$(flow_format_epoch_utc "$next_due_epoch")
 UPDATED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
 }
@@ -299,12 +299,12 @@ record_scheduled_issue_result() {
   cat >"$state_file" <<EOF
 INTERVAL_SECONDS=${interval_seconds}
 LAST_STARTED_EPOCH=${last_started_epoch}
-LAST_STARTED_AT=$(if [[ "$last_started_epoch" =~ ^[0-9]+$ ]] && (( last_started_epoch > 0 )); then date -u -r "$last_started_epoch" +"%Y-%m-%dT%H:%M:%SZ"; fi)
+LAST_STARTED_AT=$(if [[ "$last_started_epoch" =~ ^[0-9]+$ ]] && (( last_started_epoch > 0 )); then flow_format_epoch_utc "$last_started_epoch"; fi)
 LAST_RESULT_STATUS=${result_status}
 LAST_RESULT_EPOCH=${now_epoch}
-LAST_RESULT_AT=$(date -u -r "$now_epoch" +"%Y-%m-%dT%H:%M:%SZ")
+LAST_RESULT_AT=$(flow_format_epoch_utc "$now_epoch")
 NEXT_DUE_EPOCH=${next_due_epoch}
-NEXT_DUE_AT=$(if [[ "$next_due_epoch" =~ ^[0-9]+$ ]] && (( next_due_epoch > 0 )); then date -u -r "$next_due_epoch" +"%Y-%m-%dT%H:%M:%SZ"; fi)
+NEXT_DUE_AT=$(if [[ "$next_due_epoch" =~ ^[0-9]+$ ]] && (( next_due_epoch > 0 )); then flow_format_epoch_utc "$next_due_epoch"; fi)
 UPDATED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
 }
@@ -361,14 +361,14 @@ record_blocked_recovery_issue_launch() {
   next_due_at=""
   if [[ "${blocked_recovery_cooldown_seconds:-}" =~ ^[1-9][0-9]*$ ]]; then
     next_due_epoch=$((now_epoch + blocked_recovery_cooldown_seconds))
-    next_due_at="$(date -u -r "$next_due_epoch" +"%Y-%m-%dT%H:%M:%SZ")"
+    next_due_at="$(flow_format_epoch_utc "$next_due_epoch")"
   fi
 
   state_file="$(blocked_recovery_state_file "$issue_id")"
   cat >"$state_file" <<EOF
 LANE=blocked-recovery
 LAST_STARTED_EPOCH=${now_epoch}
-LAST_STARTED_AT=$(date -u -r "$now_epoch" +"%Y-%m-%dT%H:%M:%SZ")
+LAST_STARTED_AT=$(flow_format_epoch_utc "$now_epoch")
 NEXT_DUE_EPOCH=${next_due_epoch}
 NEXT_DUE_AT=${next_due_at}
 UPDATED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")

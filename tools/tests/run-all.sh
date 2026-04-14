@@ -15,6 +15,7 @@ tests=(
   tools/tests/test-agent-project-claude-session-wrapper-does-not-retry-provider-quota.sh
   tools/tests/test-agent-project-run-codex-resilient-uses-path-python-and-gnu-stat.sh
   tools/tests/test-agent-project-run-codex-resilient-sets-npm-cache.sh
+  tools/tests/test-agent-project-retry-state-portable-epoch-format.sh
   tools/tests/test-agent-project-sync-source-repo-main.sh
   tools/tests/test-heartbeat-safe-auto-uses-path-python.sh
   tools/tests/test-heartbeat-safe-auto-skips-self-sync.sh

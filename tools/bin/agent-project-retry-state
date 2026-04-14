@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/flow-shell-lib.sh"
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -101,7 +105,7 @@ write_state() {
 
   new_updated_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   if [[ "$new_next_epoch" != "0" ]]; then
-    new_next_at="$(date -u -r "$new_next_epoch" +"%Y-%m-%dT%H:%M:%SZ")"
+    new_next_at="$(flow_format_epoch_utc "$new_next_epoch")"
   fi
 
   cat >"$state_file" <<EOF
@@ -125,7 +129,7 @@ case "$action" in
       next_attempt_epoch=$((now_epoch + cooldown_seconds))
     fi
     write_state "$attempts" "$next_attempt_epoch" "$reason"
-    next_attempt_at="$(date -u -r "$next_attempt_epoch" +"%Y-%m-%dT%H:%M:%SZ")"
+    next_attempt_at="$(flow_format_epoch_utc "$next_attempt_epoch")"
     last_reason="$reason"
     updated_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
     ;;

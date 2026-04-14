@@ -29,6 +29,38 @@ flow_resolve_python_bin() {
   return 1
 }
 
+flow_format_epoch_utc() {
+  local epoch="${1:-}"
+  local python_bin=""
+
+  if ! [[ "${epoch}" =~ ^[0-9]+$ ]] || [[ "${epoch}" == "0" ]]; then
+    return 1
+  fi
+
+  if date -u -r "${epoch}" +"%Y-%m-%dT%H:%M:%SZ" >/dev/null 2>&1; then
+    date -u -r "${epoch}" +"%Y-%m-%dT%H:%M:%SZ"
+    return 0
+  fi
+
+  if date -u -d "@${epoch}" +"%Y-%m-%dT%H:%M:%SZ" >/dev/null 2>&1; then
+    date -u -d "@${epoch}" +"%Y-%m-%dT%H:%M:%SZ"
+    return 0
+  fi
+
+  python_bin="$(flow_resolve_python_bin 2>/dev/null || true)"
+  if [[ -n "${python_bin}" ]]; then
+    "${python_bin}" - "${epoch}" <<'PY'
+import datetime
+import sys
+
+print(datetime.datetime.fromtimestamp(int(sys.argv[1]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+PY
+    return 0
+  fi
+
+  return 1
+}
+
 flow_compat_skill_alias() {
   printf '%s\n' "${AGENT_CONTROL_PLANE_COMPAT_ALIAS:-}"
 }

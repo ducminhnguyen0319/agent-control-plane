@@ -401,7 +401,7 @@ controller_wait_for_provider_capacity() {
         if (( wait_completed_epoch >= wait_started_epoch )); then
           PROVIDER_LAST_WAIT_SECONDS=$((wait_completed_epoch - wait_started_epoch))
           PROVIDER_WAIT_TOTAL_SECONDS=$((PROVIDER_WAIT_TOTAL_SECONDS + PROVIDER_LAST_WAIT_SECONDS))
-          PROVIDER_LAST_WAIT_COMPLETED_AT="$(date -u -r "${wait_completed_epoch}" +"%Y-%m-%dT%H:%M:%SZ")"
+          PROVIDER_LAST_WAIT_COMPLETED_AT="$(flow_format_epoch_utc "${wait_completed_epoch}")"
         fi
       fi
       NEXT_WAKE_EPOCH=""
@@ -418,7 +418,7 @@ controller_wait_for_provider_capacity() {
     if [[ -z "${wait_started_epoch}" ]]; then
       wait_started_epoch="$(date +%s)"
       PROVIDER_WAIT_COUNT=$((PROVIDER_WAIT_COUNT + 1))
-      PROVIDER_LAST_WAIT_STARTED_AT="$(date -u -r "${wait_started_epoch}" +"%Y-%m-%dT%H:%M:%SZ")"
+      PROVIDER_LAST_WAIT_STARTED_AT="$(flow_format_epoch_utc "${wait_started_epoch}")"
     fi
 
     PROVIDER_WAITED="yes"

@@ -7,6 +7,16 @@ layout for public releases.
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-04-14
+
+### Fixed
+
+- Linux and GitHub Actions runners now format retry and scheduling epochs
+  portably instead of relying on BSD-only `date -r <epoch>` behavior
+- added regression coverage for retry-state epoch formatting under a GNU-style
+  `date` shim so release CI catches the exact portability bug that blocked
+  publish
+
 ## [0.4.3] - 2026-04-14
 
 ### Fixed
