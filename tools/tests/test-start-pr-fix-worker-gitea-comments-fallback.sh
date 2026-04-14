@@ -6,14 +6,15 @@ SOURCE_SCRIPT="${FLOW_ROOT}/tools/bin/start-pr-fix-worker.sh"
 SOURCE_TEMPLATE="${FLOW_ROOT}/tools/templates/pr-fix-template.md"
 SOURCE_CONFIG_LIB="${FLOW_ROOT}/tools/bin/flow-config-lib.sh"
 SOURCE_SHELL_LIB="${FLOW_ROOT}/tools/bin/flow-shell-lib.sh"
+SOURCE_SKILL_DOC="${FLOW_ROOT}/SKILL.md"
 
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
-workspace_root="$tmpdir/workspace/tools"
-bin_dir="$workspace_root/bin"
-template_dir="$workspace_root/templates"
-assets_dir="$workspace_root/assets"
+workspace_root="$tmpdir/workspace"
+bin_dir="$workspace_root/tools/bin"
+template_dir="$workspace_root/tools/templates"
+assets_dir="$workspace_root/tools/assets"
 profile_registry_root="$tmpdir/profile-registry"
 profile_dir="$profile_registry_root/alpha"
 shim_bin_dir="$tmpdir/shims"
@@ -31,6 +32,7 @@ cp "$SOURCE_SCRIPT" "$bin_dir/start-pr-fix-worker.sh"
 cp "$SOURCE_CONFIG_LIB" "$bin_dir/flow-config-lib.sh"
 cp "$SOURCE_SHELL_LIB" "$bin_dir/flow-shell-lib.sh"
 cp "$SOURCE_TEMPLATE" "$template_dir/pr-fix-template.md"
+cp "$SOURCE_SKILL_DOC" "$workspace_root/SKILL.md"
 printf '{}\n' >"$assets_dir/workflow-catalog.json"
 
 cat >"$profile_dir/control-plane.yaml" <<EOF

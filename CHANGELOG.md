@@ -7,6 +7,14 @@ layout for public releases.
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-04-14
+
+### Fixed
+
+- the Gitea PR-fix fallback regression test now builds a real ACP skill-root
+  layout in its temporary workspace, so clean Linux runners can resolve the
+  copied `start-pr-fix-worker.sh` entrypoint exactly like production
+
 ## [0.4.7] - 2026-04-14
 
 ### Fixed
