@@ -477,6 +477,87 @@ flow_resident_issue_controller_reap_file() {
   return 0
 }
 
+flow_resident_issue_reap_stale_claims() {
+  local config_file="${1:-}"
+  local claims_dir=""
+  local claim_file=""
+  local claim_token=""
+  local claim_pid=""
+  local issue_id=""
+  local queued_by=""
+  local queued_at=""
+  local claimed_at=""
+  local existing_pending_file=""
+  local other_claim=""
+  local other_token=""
+  local other_pid=""
+
+  if [[ -z "${config_file}" ]]; then
+    config_file="$(resolve_flow_config_yaml "${BASH_SOURCE[1]:-${BASH_SOURCE[0]}}")"
+  fi
+
+  claims_dir="$(flow_resident_issue_queue_claims_dir "${config_file}")"
+  mkdir -p "${claims_dir}"
+
+  for claim_file in "${claims_dir}"/issue-*.env; do
+    [[ -f "${claim_file}" ]] || continue
+
+    claim_token="${claim_file##*/}"
+    claim_token="${claim_token%.env}"
+    claim_pid="${claim_token##*.}"
+    [[ "${claim_pid}" =~ ^[0-9]+$ ]] || continue
+
+    if flow_resident_controller_pid_live "${claim_pid}" "start-resident-issue-loop.sh"; then
+      continue
+    fi
+
+    issue_id="$(flow_resident_metadata_value "${claim_file}" "ISSUE_ID" || true)"
+    [[ -n "${issue_id}" ]] || issue_id="${claim_token#issue-}"
+    issue_id="${issue_id%%.*}"
+    [[ -n "${issue_id}" ]] || continue
+
+    # If another live claim exists for the same issue, do not re-queue this one.
+    for other_claim in "${claims_dir}/issue-${issue_id}."*; do
+      [[ -f "${other_claim}" ]] || continue
+      other_token="${other_claim##*/}"
+      other_token="${other_token%.env}"
+      other_pid="${other_token##*.}"
+      [[ "${other_pid}" =~ ^[0-9]+$ ]] || continue
+      if [[ "${other_pid}" == "${claim_pid}" ]]; then
+        continue
+      fi
+      if flow_resident_controller_pid_live "${other_pid}" "start-resident-issue-loop.sh"; then
+        issue_id=""
+        break
+      fi
+    done
+    [[ -n "${issue_id}" ]] || continue
+
+    existing_pending_file="$(flow_resident_issue_queue_file "${config_file}" "${issue_id}")"
+    if [[ -f "${existing_pending_file}" ]]; then
+      rm -f "${claim_file}"
+      continue
+    fi
+
+    queued_by="$(flow_resident_metadata_value "${claim_file}" "QUEUED_BY" || true)"
+    queued_at="$(flow_resident_metadata_value "${claim_file}" "QUEUED_AT" || true)"
+    claimed_at="$(flow_resident_metadata_value "${claim_file}" "CLAIMED_AT" || true)"
+
+    [[ -n "${queued_by}" ]] || queued_by="heartbeat"
+    [[ -n "${queued_at}" ]] || queued_at="${claimed_at:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}"
+
+    flow_resident_write_metadata "${existing_pending_file}" \
+      "STATE_FORMAT_VERSION=1" \
+      "STATE_KIND=pending" \
+      "ISSUE_ID=${issue_id}" \
+      "QUEUED_BY=${queued_by}" \
+      "QUEUED_AT=${queued_at}" \
+      "UPDATED_AT=${claimed_at:-${queued_at}}"
+    rm -f "${claim_file}"
+
+  done
+}
+
 flow_resident_issue_reap_stale_state() {
   local config_file="${1:-}"
   local resident_root=""
@@ -494,6 +575,7 @@ flow_resident_issue_reap_stale_state() {
       reaped=$((reaped + 1))
     fi
   done
+  flow_resident_issue_reap_stale_claims "${config_file}" || true
 
   printf '%s\n' "${reaped}"
 }
