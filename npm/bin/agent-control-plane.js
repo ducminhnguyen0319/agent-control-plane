@@ -1879,7 +1879,7 @@ async function maybeRunFinalSetupFixups(options, scopedContext, config, currentS
 
   if (!options.interactive) {
     return {
-      status: "skipped",
+      status: "remaining",
       actions: [],
       ...currentState
     };
