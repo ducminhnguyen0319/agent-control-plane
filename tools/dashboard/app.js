@@ -258,6 +258,23 @@ function renderProfile(profile) {
     )
     .join("");
 
+  const runsFilterState = window._acpRunsFilter || { search: "", status: "all" };
+  window._acpRunsFilter = runsFilterState;
+
+  const filteredRuns = profile.runs.filter((row) => {
+    if (runsFilterState.status !== "all" && row.status !== runsFilterState.status) return false;
+    if (runsFilterState.search) {
+      const q = runsFilterState.search.toLowerCase();
+      return (
+        (row.session || "").toLowerCase().includes(q) ||
+        (row.coding_worker || "").toLowerCase().includes(q) ||
+        (row.task_kind || "").toLowerCase().includes(q) ||
+        (row.task_id || "").toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
+
   const runsTable = renderTable(
     [
       { label: "Session", render: (row) => `<div class="mono">${row.session}</div>` },
@@ -268,9 +285,25 @@ function renderProfile(profile) {
       { label: "Result", render: renderResult },
       { label: "Updated", render: (row) => row.updated_at ? `${relativeTime(row.updated_at)}<div class="muted">${row.updated_at}</div>` : "n/a" },
     ],
-    profile.runs,
+    filteredRuns,
     "No active run directories for this profile.",
   );
+
+  const historyFilterState = window._acpHistoryFilter || { search: "", result: "all" };
+  window._acpHistoryFilter = historyFilterState;
+
+  const filteredHistory = (profile.recent_history || []).filter((row) => {
+    if (historyFilterState.result !== "all" && row.result_kind !== historyFilterState.result) return false;
+    if (historyFilterState.search) {
+      const q = historyFilterState.search.toLowerCase();
+      return (
+        (row.session || "").toLowerCase().includes(q) ||
+        (row.coding_worker || "").toLowerCase().includes(q) ||
+        (row.task_kind || "").toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
 
   const recentHistoryTable = renderTable(
     [
@@ -281,7 +314,7 @@ function renderProfile(profile) {
       { label: "Result", render: renderResult },
       { label: "Updated", render: (row) => row.updated_at ? `${relativeTime(row.updated_at)}<div class="muted">${row.updated_at}</div>` : "n/a" },
     ],
-    profile.recent_history || [],
+    filteredHistory,
     "No recently archived runs.",
   );
 
@@ -415,6 +448,28 @@ function renderProfile(profile) {
       `
       : "";
 
+  const runsFilterBar = `
+    <div class="filter-bar">
+      <input type="text" class="filter-search" placeholder="Search runs..." value="${runsFilterState.search}"
+        oninput="window._acpRunsFilter.search=this.value; rerenderAll();" />
+      <button class="filter-btn ${runsFilterState.status === 'all' ? 'active' : ''}" onclick="window._acpRunsFilter.status='all'; rerenderAll();">All</button>
+      <button class="filter-btn ${runsFilterState.status === 'RUNNING' ? 'active' : ''}" onclick="window._acpRunsFilter.status='RUNNING'; rerenderAll();">Running</button>
+      <button class="filter-btn ${runsFilterState.status === 'SUCCEEDED' ? 'active' : ''}" onclick="window._acpRunsFilter.status='SUCCEEDED'; rerenderAll();">Completed</button>
+      <button class="filter-btn ${runsFilterState.status === 'FAILED' ? 'active' : ''}" onclick="window._acpRunsFilter.status='FAILED'; rerenderAll();">Failed</button>
+    </div>
+  `;
+
+  const historyFilterBar = `
+    <div class="filter-bar">
+      <input type="text" class="filter-search" placeholder="Search history..." value="${historyFilterState.search}"
+        oninput="window._acpHistoryFilter.search=this.value; rerenderAll();" />
+      <button class="filter-btn ${historyFilterState.result === 'all' ? 'active' : ''}" onclick="window._acpHistoryFilter.result='all'; rerenderAll();">All</button>
+      <button class="filter-btn ${historyFilterState.result === 'implemented' ? 'active' : ''}" onclick="window._acpHistoryFilter.result='implemented'; rerenderAll();">Implemented</button>
+      <button class="filter-btn ${historyFilterState.result === 'reported' ? 'active' : ''}" onclick="window._acpHistoryFilter.result='reported'; rerenderAll();">Reported</button>
+      <button class="filter-btn ${historyFilterState.result === 'blocked' ? 'active' : ''}" onclick="window._acpHistoryFilter.result='blocked'; rerenderAll();">Blocked</button>
+    </div>
+  `;
+
   return `
     <article class="profile">
       <header class="profile-header">
@@ -437,11 +492,13 @@ function renderProfile(profile) {
         <section class="panel">
           <h3>Active Runs</h3>
           <p class="panel-subtitle">Lifecycle shows technical session completion. Result shows what the run achieved: implemented, reported, or blocked.</p>
+          ${runsFilterBar}
           ${runsTable}
         </section>
         <section class="panel">
           <h3>Recent Completed Runs</h3>
           <p class="panel-subtitle">Recently archived runs so they do not disappear from the dashboard immediately after completion.</p>
+          ${historyFilterBar}
           ${recentHistoryTable}
         </section>
         <section class="panel">
@@ -525,9 +582,8 @@ async function loadSnapshot() {
       throw new Error(`Snapshot request failed with ${response.status}`);
     }
     const snapshot = await response.json();
-    generatedAtNode.textContent = `Snapshot: ${snapshot.generated_at}`;
-    renderOverview(snapshot);
-    profilesNode.innerHTML = snapshot.profiles.map(renderProfile).join("");
+    window._acpSnapshot = snapshot;
+    renderFromSnapshot(snapshot);
     await maybeNotifyAlerts(snapshot);
   } catch (error) {
     generatedAtNode.textContent = `Snapshot load failed: ${error.message}`;
@@ -535,6 +591,18 @@ async function loadSnapshot() {
   } finally {
     refreshButton.disabled = false;
   }
+}
+
+function renderFromSnapshot(snapshot) {
+  generatedAtNode.textContent = `Snapshot: ${snapshot.generated_at}`;
+  renderOverview(snapshot);
+  profilesNode.innerHTML = snapshot.profiles.map(renderProfile).join("");
+}
+
+function rerenderAll() {
+  const snapshot = window._acpSnapshot;
+  if (!snapshot) return;
+  renderFromSnapshot(snapshot);
 }
 
 refreshButton.addEventListener("click", () => {
