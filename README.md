@@ -141,7 +141,7 @@ familiar:
 ## Roadmap
 
 ACP is moving toward a true multi-backend control plane. The goal is one runtime
-and one dashboard for many coding-agent backends, across macOS, Linux, and
+and one dashboard for many coding-agent backends, across macOS, Linux, and Windows (WSL2)
 Windows.
 
 ### Backend Status
@@ -521,6 +521,40 @@ npx agent-control-plane@latest launchd-uninstall --profile-id my-repo
 ```
 
 These commands are macOS-only and manage per-user `launchd` agents.
+
+## Windows (WSL2) Autostart
+
+ACP runs inside WSL2 (Windows Subsystem for Linux) where it uses systemd for service management. This requires WSL2 with systemd enabled (Windows 11 22H2+).
+
+**Prerequisites:**
+1. Install WSL2 with Ubuntu: `wsl --install -d Ubuntu` (in PowerShell Admin)
+2. Enable systemd in WSL2 (create `/etc/wsl.conf` with `[boot] systemd=true`)
+3. Run `wsl --shutdown` from PowerShell, then restart WSL2
+
+**Install project service in WSL2:**
+
+```bash
+# Inside WSL2 Ubuntu terminal
+cd /mnt/c/Users/You/Projects/your-repo
+
+# Bootstrap systemd service (same as Linux)
+agent-control-plane project systemd-bootstrap \
+  --project-dir . \
+  --repo-url https://github.com/your-org/your-repo.git \
+  --worker-type claude \
+  --schedule "*/30 * * * *" \
+  --issues "1,2,3"
+```
+
+**Manage the service:**
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now agent-control-plane@$(basename $(pwd)).timer
+systemctl --user status agent-control-plane@$(basename $(pwd)).timer
+```
+
+See [WSL2_SETUP.md](docs/WSL2_SETUP.md) for full setup guide, Docker in WSL2, and troubleshooting.
 
 ## Update
 

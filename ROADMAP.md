@@ -110,7 +110,7 @@ ACP should eventually support a broader adapter model for:
 
 - keep macOS as the polished reference install path
 - make Linux a first-class operator target with documented service/autostart patterns
-- support Windows users pragmatically through WSL2 before promising native parity
+- ~~support Windows users pragmatically through WSL2 before promising native parity~~ done: docs/WSL2_SETUP.md + README section, systemd scripts work in WSL2 with systemd enabled
 - evaluate what native Windows runtime supervision should look like long-term
 
 ### 3. Public Package Experience
