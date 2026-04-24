@@ -18,8 +18,9 @@ npm pack --dry-run 2>&1 | tee "${TMP_DIR}/pack-output.txt"
 
 # Check if key files are included
 while IFS= read -r line; do
-  if [[ "$line" =~ ^npm notice[[:space:]]+(.+)$ ]]; then
-    file="${BASH_REMATCH[1]}"
+  # Match lines like "npm notice filename"
+  if [[ "$line" == npm\ notice\ * ]]; then
+    file="${line#npm notice }"
     
     # Check for required files
     case "$file" in
