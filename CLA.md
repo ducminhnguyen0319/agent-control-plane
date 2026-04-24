@@ -12,6 +12,12 @@ By contributing to **agent-control-plane** (the "Project"), you agree to the fol
 
 4. **License Compatibility** - You agree that your contributions will be licensed under the Project's license (MIT), and you ensure your contributions are compatible with that license.
 
+## Important Notes
+
+- **This CLA is a license grant, not a copyright assignment.** You retain copyright in your contribution.
+- The Project maintainers may **relicense the contribution** under the Project's license or compatible licenses.
+- This CLA does not transfer ownership, patent rights, or control over your contributions.
+
 ## How to Sign
 
 When you submit a pull request, include the following statement in your PR description:
