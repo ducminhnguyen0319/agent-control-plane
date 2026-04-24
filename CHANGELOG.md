@@ -7,6 +7,30 @@ layout for public releases.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-24
+
+### Added
+- **Linux systemd support** (Phase 1): `install-project-systemd.sh`, `project-systemd-bootstrap.sh`, `uninstall-project-systemd.sh` for autostart via systemd
+- **Backend Hardening** (Phase 2): Health-check + context detection for ollama adapter (ping `/api/tags`, fetch `model_info.context_length`)
+- **Health-check for pi/kilo adapters**: Binary verification and API key validation
+- **gemini-cli adapter** (Phase 4): Google's official terminal agent support (`@google/gemini-cli`)
+- **flow-runtime-doctor-linux.sh**: Linux-specific runtime validation (systemd, XDG paths, processes, tmux, sockets)
+- **debug-session.sh**: Troubleshoot ACP worker sessions (pane inspection, output capture, process tree)
+- **Dashboard v2**: Polling live updates (5s interval) already in app.js
+- **CI on ubuntu-latest**: GitHub Actions matrix includes Linux
+
+### Changed
+- **ROADMAP.md**: gemini-cli → "integrated", nanoclaw/picoclaw → "not integrable" (standalone systems)
+- **flow-runtime-doctor.sh**: Improved output with "ACTION REQUIRED" section and clear next steps
+- **flow-runtime-doctor-linux.sh**: Added "NEXT STEPS" section with systemd commands and tmux install hints
+
+### Fixed
+- ollama adapter: Context window now dynamically detected instead of hardcoded 32768
+- Doctor output: More actionable next steps for operators
+
+### Security
+- Worker adapters now validate binaries and API keys before execution
+
 ## [0.4.9] - 2026-04-14
 
 ### Fixed
