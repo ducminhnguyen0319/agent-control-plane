@@ -159,6 +159,33 @@ Windows.
 | `nanoclaw` | Not integrable | Standalone agent system (like ACP), not a CLI backend. Reference for container patterns. |
 | `picoclaw` | Not integrable | Standalone agent system (Go-based). Runs on $10 hardware. Not a CLI backend. |
 
+### Adapter Pattern
+
+ACP uses a **standardized adapter interface** to support multiple backends. Every adapter implements these functions:
+
+| Function | Purpose |
+| --- | --- |
+| `adapter_info()` | Print adapter metadata (id, name, type, version, model) |
+| `adapter_health_check()` | Verify backend is available (exit 0 = healthy) |
+| `adapter_run()` | Execute a task (params: MODE SESSION WORKTREE PROMPT_FILE) |
+| `adapter_status()` | Get run status for a session |
+
+**Available adapters:**
+- `tools/bin/ollama-adapter.sh` - Ollama local models (implements health-check)
+- All existing backends (`codex`, `claude`, `pi`, `opencode`, `kilo`) use the same interface via `run-codex-task.sh`, `run-claude-task.sh`, etc.
+
+**Using adapters:**
+
+```bash
+# Print adapter info
+bash tools/bin/ollama-adapter.sh
+
+# Run a task with generic runner
+bash tools/bin/run-with-adapter.sh tools/bin/ollama-adapter.sh safe my-session /path/to/worktree /path/to/prompt.txt
+```
+
+See `tools/bin/adapter-interface.sh` for the full interface specification.
+
 If you are trying ACP on a real repo right now, start with `codex`, `claude`,
 or `openclaw`. Use `ollama` to run local models — useful for research, offline
 workflows, or comparing local model output against cloud backends without
