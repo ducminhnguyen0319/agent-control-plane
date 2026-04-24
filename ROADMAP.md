@@ -43,7 +43,7 @@ done.
 | `codex` | production-ready | yes | yes | First-class worker path for Codex-backed runs. |
 | `claude` | production-ready | yes | yes | First-class worker path for Claude-backed runs. Retry, timeout, and provider-quota handling. |
 | `openclaw` | production-ready | yes | yes | First-class worker path with resident workflow support, stall detection, and host-side result inference. |
-| `ollama` | experimental | yes | yes | Working adapter with Node.js agentic loop. Runs any model served by a local Ollama instance. Host-side git-state inference for result contracts. |
+| `ollama` | **hardening** | Working adapter with Node.js agentic loop. Runs any model served by a local Ollama instance. Host-side git-state inference for result contracts. **v0.4.9+: Added health-check (ping /api/tags) + context detection (fetch model_info.context_length).** |
 | `pi` | experimental | yes | yes | Working adapter using the pi CLI in `--print --no-session` mode. Stall detection, exit markers, and proper result contracts. |
 | `opencode` | experimental | yes | yes | Working adapter for Crush (charmbracelet/crush, formerly opencode). Non-interactive `crush run` with git-state result inference. |
 | `kilo` | experimental | yes | yes | Working adapter for Kilo Code (kilocode/cli). Non-interactive `kilo run --auto --format json` with structured event output. |

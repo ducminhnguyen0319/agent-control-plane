@@ -85,6 +85,32 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
+# Health-check: verify Ollama server is running
+ollama_health_check() {
+  local base_url="${ollama_base_url%/}"
+  local max_attempts=3
+  local attempt=0
+  local http_code=""
+
+  echo "Checking Ollama server at ${base_url}..."
+  while (( attempt < max_attempts )); do
+    http_code="$(curl -s -o /dev/null -w "%{http_code}" "${base_url}/api/tags" 2>/dev/null || true)"
+    if [[ "${http_code}" == "200" ]]; then
+      echo "Ollama server is healthy (HTTP ${http_code})"
+      return 0
+    fi
+    echo "Attempt $((attempt+1))/${max_attempts}: Ollama server not ready (HTTP: ${http_code:-failed})"
+    sleep 2
+    ((attempt++))
+  done
+  
+  echo "ERROR: Ollama server not reachable at ${base_url}" >&2
+  echo "Please start Ollama first: 'ollama serve' or check OLLAMA_BASE_URL" >&2
+  exit 1
+}
+
+ollama_health_check
+
 artifact_dir="${runs_root}/${session}"
 output_file="${artifact_dir}/${session}.log"
 inner_script="${artifact_dir}/${session}.sh"
@@ -316,6 +342,44 @@ const ollamaTimeoutMs = Number(process.env.ACP_OLLAMA_TIMEOUT_SECONDS || '900') 
 const resultFile = process.env.ACP_RESULT_FILE;
 const maxIterations = 30;
 
+// Context detection: fetch model info to get context window size
+async function detectContextWindow() {
+  try {
+    const https = await import('node:https');
+    const url = new URL('/api/show', ollamaBaseUrl);
+    const body = JSON.stringify({ model: ollamaModel });
+    
+    const data = await new Promise((resolve, reject) => {
+      const req = https.request(
+        { hostname: url.hostname, port: url.port || 443, path: url.pathname, method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+        },
+        (res) => {
+          let d = '';
+          res.on('data', c => d += c);
+          res.on('end', () => {
+            try { resolve(JSON.parse(d)); } catch(e) { reject(e); }
+          });
+        }
+      );
+      req.on('error', reject);
+      req.write(body);
+      req.end();
+    });
+    
+    if (data?.model_info?.['llama.context_length']) {
+      const ctx = Number(data.model_info['llama.context_length']);
+      console.log(`Detected context window: ${ctx} tokens`);
+      return ctx;
+    }
+  } catch(e) {
+    console.log(`Context detection failed: ${e.message}`);
+  }
+  return 32768; // default fallback
+}
+
+const contextWindow = await detectContextWindow();
+
 function writeResult(status, reason) {
   if (!resultFile) return;
   if (status === 'success') {
@@ -337,7 +401,7 @@ async function ollamaChat(messages, tools) {
     tools: tools || undefined,
     stream: false,
     think: false,
-    options: { num_ctx: 32768 },
+    options: { num_ctx: contextWindow }
   });
 
   const url = new URL('/api/chat', ollamaBaseUrl);
