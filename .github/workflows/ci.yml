@@ -44,6 +44,13 @@ jobs:
       - name: Verify contribution docs
         run: bash tools/tests/test-contribution-docs.sh
 
+      - name: Verify CLA signed (if PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          PR_BODY="${{ github.event.pull_request.body }}"
+          echo "$PR_BODY" > /tmp/pr_body.txt
+          bash tools/tests/test-cla-signed.sh /tmp/pr_body.txt || echo "WARN: CLA not signed yet"
+
       - name: Verify public repo docs
         run: bash tools/tests/test-public-repo-docs.sh
 

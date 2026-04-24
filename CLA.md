@@ -1,75 +1,31 @@
-# Contributor License Agreement
+# Contributor License Agreement (CLA)
 
-This Contributor License Agreement applies to any contribution submitted to
-`agent-control-plane`, including pull requests, patches, documentation changes,
-tests, scripts, or other material intentionally submitted for inclusion in the
-project.
+## Agreement
 
-By submitting a contribution and stating that you agree to this CLA, you agree
-to the following terms.
+By contributing to **agent-control-plane** (the "Project"), you agree to the following terms:
 
-## 1. Ownership
+1. **Grant of License** - You grant the Project maintainers a non-exclusive, irrevocable, royalty-free license to use, modify, distribute, and sublicense your contributions as part of the Project.
 
-You retain copyright in your contribution.
+2. **Original Work** - You represent that your contributions are your original work and that you have the right to grant the license above.
 
-This CLA is a license grant, not a copyright assignment. Unless you and the
-maintainer sign a separate written agreement, ownership of your contribution
-does not transfer to the maintainer.
+3. **No Confidential Information** - You confirm that your contributions do not contain any confidential or proprietary information of third parties.
 
-## 2. Your Authority
+4. **License Compatibility** - You agree that your contributions will be licensed under the Project's license (MIT), and you ensure your contributions are compatible with that license.
 
-You represent that:
+## How to Sign
 
-- you created the contribution yourself, or you otherwise have the legal right
-  to submit it under these terms
-- the contribution does not knowingly violate the rights of a third party
-- if your employer or another party has rights in the contribution, you have
-  any permission needed to submit it
+When you submit a pull request, include the following statement in your PR description:
 
-## 3. License Granted to the Maintainer
+```
+I have read the CLA (https://github.com/ducminhnguyen0319/agent-control-plane/blob/main/CLA.md) and I agree to its terms.
+```
 
-You grant the maintainer and the maintainer's successors, assigns, and
-distributors a perpetual, worldwide, non-exclusive, irrevocable, royalty-free
-license to:
+For first-time contributors, a bot will ask you to confirm your agreement.
 
-- use, reproduce, modify, adapt, and prepare derivative works of the
-  contribution
-- merge the contribution into this project or other projects
-- distribute, sublicense, and relicense the contribution, this project, and
-  derivative works under open source, source-available, commercial, or other
-  license terms chosen by the maintainer
-- publicly perform, publicly display, and otherwise exploit the contribution as
-  part of the project or derivative works
+## Questions
 
-This license is intended to let the maintainer operate the project without
-future relicensing dead-ends.
+If you have questions about this CLA, please open an issue or contact the maintainers.
 
-## 4. Project License
+---
 
-You understand that your contribution may be distributed as part of the project
-under the project's current license and under future licenses chosen by the
-maintainer.
-
-## 5. No Separate Obligation to Use
-
-The maintainer is not required to accept, use, publish, or continue using any
-contribution.
-
-## 6. Patent and Trademark Scope
-
-This CLA does not transfer ownership of patents or trademarks.
-
-If a contribution depends on patent, trademark, trade secret, employer, or
-other special rights that are not covered by the license grant above, the
-maintainer may decline the contribution or require a separate written
-agreement.
-
-## 7. No Warranty
-
-You submit the contribution on an "as is" basis, without warranties or
-conditions of any kind.
-
-## 8. Acceptance
-
-For now, you accept this CLA by explicitly stating in your pull request that
-you have read and agree to `CLA.md`.
+*This CLA is adapted from standard open-source contribution agreements and is designed to protect both contributors and the Project.*
