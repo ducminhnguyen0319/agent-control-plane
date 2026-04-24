@@ -129,6 +129,8 @@ function renderOverview(snapshot) {
     ["Pending GitHub Writes", totals.pendingGithubWrites],
     ["Alerts", totals.alerts],
     ["Queued Issues", totals.queue],
+    ["Retries", totals.retries || 0],
+    ["Blockers", totals.blockers || 0],
   ]
     .map(
       ([label, value]) => `
