@@ -558,6 +558,8 @@ function renderProfile(profile) {
           <div class="action-bar">
             <button class="action-btn" onclick="runDoctor('${profile.id}')">Run Doctor</button>
             <button class="action-btn" onclick="exportProfile('${profile.id}')">Export Profile</button>
+            <button class="action-btn" onclick="document.getElementById('import-file-${profile.id}').click()">Import Profile</button>
+            <input type="file" id="import-file-${profile.id}" style="display:none" accept=".json" onchange="importProfile('${profile.id}', this)">
             <span id="doctor-status-${profile.id}"></span>
           </div>
           <pre id="doctor-output-${profile.id}" class="doctor-output" style="display:none;"></pre>
@@ -689,6 +691,40 @@ async function exportProfile(profileId) {
     URL.revokeObjectURL(url);
   } catch (error) {
     alert(`Export failed: ${error.message}`);
+  }
+}
+
+async function importProfile(profileId, inputEl) {
+  const file = inputEl.files[0];
+  if (!file) return;
+  
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    
+    if (!data.profile_id || !data.config) {
+      alert("Invalid profile file: missing profile_id or config");
+      return;
+    }
+    
+    const response = await fetch("/api/profile/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    
+    const result = await response.json();
+    if (response.ok) {
+      alert(`Profile ${profileId} imported successfully!`);
+      // Refresh the page to show imported profile
+      setTimeout(() => window.location.reload(), 1000);
+    } else {
+      alert(`Import failed: ${result.error || response.status}`);
+    }
+  } catch (error) {
+    alert(`Import failed: ${error.message}`);
+  } finally {
+    inputEl.value = "";
   }
 }
 

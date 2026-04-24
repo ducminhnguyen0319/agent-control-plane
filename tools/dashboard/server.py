@@ -116,6 +116,43 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({"error": str(exc)}).encode("utf-8"))
             return
+        if parsed.path == "/api/profile/import":
+            if self.command != "POST":
+                self.send_response(HTTPStatus.METHOD_NOT_ALOWED)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "POST required"}).encode("utf-8"))
+                return
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body)
+                profile_id = data.get("profile_id", "")
+                config = data.get("config", "")
+                if not profile_id or not config:
+                    self.send_response(HTTPStatus.BAD_REQUEST)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": "profile_id and config required"}).encode("utf-8"))
+                    return
+                registry_root = Path(os.environ.get("ACP_PROFILE_REGISTRY_ROOT", str(Path.home() / ".agent-runtime" / "control-plane" / "profiles")))
+                profile_dir = registry_root / profile_id
+                config_file = profile_dir / "control-plane.yaml"
+                profile_dir.mkdir(parents=True, exist_ok=True)
+                config_file.write_text(config, encoding="utf-8")
+                payload = {"status": "ok", "profile_id": profile_id, "config_file": str(config_file)}
+                encoded = json.dumps(payload).encode("utf-8")
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                self.wfile.write(encoded)
+            except Exception as exc:
+                self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(exc)}).encode("utf-8"))
+            return
         return super().do_GET()
 
     def end_headers(self) -> None:
