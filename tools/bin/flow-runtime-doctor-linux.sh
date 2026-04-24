@@ -119,3 +119,18 @@ fi
 
 echo ""
 echo "=== Linux Doctor Complete ==="
+echo ""
+echo "=== NEXT STEPS ==="
+if ! command -v systemctl &>/dev/null; then
+    echo "NOT on systemd: Use macOS launchd or manual tmux for runtime."
+elif ! systemctl --user is-active --quiet "${CONTROL_PLANE_NAME}.service" 2>/dev/null; then
+    echo "Service not running. Start with:"
+    echo "  systemctl --user start ${CONTROL_PLANE_NAME}.service"
+    echo "  systemctl --user enable ${CONTROL_PLANE_NAME}.service  # autostart"
+fi
+
+if ! command -v tmux &>/dev/null; then
+    echo "MISSING: tmux is required. Install:"
+    echo "  Ubuntu/Debian: sudo apt install tmux"
+    echo "  Alpine: apk add tmux"
+fi

@@ -93,5 +93,9 @@ if [[ -n "${PROFILE_SELECTION_HINT}" ]]; then
 fi
 
 if [[ "${status}" != "ok" ]]; then
-  printf 'NEXT_STEP=bash %q %q %q\n' "${SYNC_SCRIPT}" "${SHARED_AGENT_HOME}" "${RUNTIME_HOME}"
+  printf '\n=== ACTION REQUIRED ===\n'
+  printf 'Status: %s\n' "${status}"
+  printf 'Next step: Run sync to fix issues:\n'
+  printf '  bash %q %q %q\n' "${SYNC_SCRIPT}" "${SHARED_AGENT_HOME}" "${RUNTIME_HOME}"
+  printf '\nOr run: bash %s/tools/bin/setup.sh --resume\n' "${FLOW_SKILL_DIR}"
 fi
