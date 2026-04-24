@@ -298,7 +298,7 @@ setup_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
   PATH="${fake_bin}:${PATH}" \
-  run_with_timeout 30 node "${CLI_SCRIPT}" setup \
+  run_with_timeout 30 node "${CLI_SCRIPT}" setup --force \
     --non-interactive \
     --repo-root "${setup_repo}" \
     --no-start-runtime \
@@ -335,7 +335,7 @@ setup_noninteractive_noauth_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
   PATH="${fake_bin_noauth}:${PATH}" \
-  run_with_timeout 30 node "${CLI_SCRIPT}" setup \
+  run_with_timeout 30 node "${CLI_SCRIPT}" setup --force \
     --non-interactive \
     --repo-root "${setup_repo}" \
     --no-start-runtime \
@@ -352,7 +352,7 @@ setup_missing_repo_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
   PATH="${fake_bin}:${PATH}" \
-  run_with_timeout 30 node "${CLI_SCRIPT}" setup \
+  run_with_timeout 30 node "${CLI_SCRIPT}" setup --force \
     --non-interactive \
     --repo-root "${missing_repo_path}" \
     --repo-slug "example-owner/missing-repo-demo" \
@@ -377,7 +377,7 @@ setup_custom_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
   PATH="${fake_bin}:${PATH}" \
-  run_with_timeout 30 node "${CLI_SCRIPT}" setup \
+  run_with_timeout 30 node "${CLI_SCRIPT}" setup --force \
     --non-interactive \
     --repo-root "${setup_repo}" \
     --profile-id setup-custom \
@@ -402,7 +402,7 @@ setup_deferred_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
   PATH="${fake_bin}:${PATH}" \
-  run_with_timeout 30 node "${CLI_SCRIPT}" setup \
+  run_with_timeout 30 node "${CLI_SCRIPT}" setup --force \
     --non-interactive \
     --repo-root "${setup_repo}" \
     --profile-id deferred-demo \
@@ -422,7 +422,7 @@ setup_dry_run_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
   PATH="${fake_bin}:${PATH}" \
-  run_with_timeout 30 node "${CLI_SCRIPT}" setup \
+  run_with_timeout 30 node "${CLI_SCRIPT}" setup --force \
     --dry-run \
     --non-interactive \
     --repo-root "${setup_repo}" \
@@ -442,7 +442,7 @@ setup_json_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
   PATH="${fake_bin}:${PATH}" \
-  run_with_timeout 30 node "${CLI_SCRIPT}" setup \
+  run_with_timeout 30 node "${CLI_SCRIPT}" setup --force \
     --json \
     --repo-root "${setup_repo}" \
     --profile-id setup-json \
@@ -466,7 +466,7 @@ setup_deferred_json_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
   PATH="${fake_bin}:${PATH}" \
-  run_with_timeout 30 node "${CLI_SCRIPT}" setup \
+  run_with_timeout 30 node "${CLI_SCRIPT}" setup --force \
     --json \
     --repo-root "${setup_repo}" \
     --profile-id deferred-json \
@@ -488,7 +488,7 @@ setup_dry_run_json_output="$(
   HOME="${home_dir}" \
   AGENT_PLATFORM_HOME="${platform_home}" \
   PATH="${fake_bin}:${PATH}" \
-  run_with_timeout 30 node "${CLI_SCRIPT}" setup \
+  run_with_timeout 30 node "${CLI_SCRIPT}" setup --force \
     --json \
     --dry-run \
     --repo-root "${setup_repo}" \
@@ -535,7 +535,7 @@ setup_apk_dry_run_output="$(
   AGENT_PLATFORM_HOME="${platform_home}" \
   HOME="${apk_home}" \
   PATH="${apk_bin}:${PATH}" \
-  run_with_timeout 30 node "${CLI_SCRIPT}" setup \
+  run_with_timeout 30 node "${CLI_SCRIPT}" setup --force \
     --json \
     --dry-run \
     --non-interactive \
@@ -586,7 +586,7 @@ openclaw_setup_output="$(
   AGENT_PLATFORM_HOME="${platform_home}" \
   PATH="${fake_bin}:${PATH}" \
   OPENROUTER_API_KEY="" \
-  run_with_timeout 30 node "${CLI_SCRIPT}" setup \
+  run_with_timeout 30 node "${CLI_SCRIPT}" setup --force \
     --non-interactive \
     --repo-root "${setup_repo}" \
     --profile-id openclaw-key-check \
