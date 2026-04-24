@@ -135,7 +135,6 @@ ACP should eventually support a broader adapter model for:
 - ~~interoperability experiments with adjacent runtimes such as `nanoclaw` and `picoclaw`~~ done: confirmed not integrable (standalone systems), documented in README
 
 ## ROADMAP STATUS: ✅ COMPLETE (as of v0.6.0)
-- interoperability experiments with adjacent runtimes such as `nanoclaw` and `picoclaw`
 
 ## Notes
 
