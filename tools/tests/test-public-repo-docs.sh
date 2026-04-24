@@ -42,8 +42,8 @@ grep -q 'id-token: write' "$ROOT_DIR/.github/workflows/publish.yml"
 grep -q 'npm publish' "$ROOT_DIR/.github/workflows/publish.yml"
 grep -q 'git describe --tags --exact-match' "$ROOT_DIR/.github/workflows/publish.yml"
 
-# Check release checklist exists and has key content
-grep -q 'Release Summary' "$ROOT_DIR/references/release-checklist.md"
+# Check release template and checklist exist and have key content
+grep -q 'Release Summary' "$ROOT_DIR/.github/release-template.md"
 grep -q 'trusted publishing' "$ROOT_DIR/references/release-checklist.md"
 
 echo "public repo docs test passed"
