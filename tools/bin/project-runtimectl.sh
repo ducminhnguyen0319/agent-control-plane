@@ -107,6 +107,9 @@ LAUNCHCTL_BIN="${ACP_PROJECT_RUNTIME_LAUNCHCTL_BIN:-$(command -v launchctl || tr
 LAUNCH_AGENTS_DIR="${ACP_PROJECT_RUNTIME_LAUNCH_AGENTS_DIR:-${HOME}/Library/LaunchAgents}"
 LAUNCHD_LABEL="${ACP_PROJECT_RUNTIME_LAUNCHD_LABEL:-ai.agent.project.${PROFILE_ID_SLUG}}"
 LAUNCHD_PLIST="${ACP_PROJECT_RUNTIME_LAUNCHD_PLIST:-${LAUNCH_AGENTS_DIR}/${LAUNCHD_LABEL}.plist}"
+SYSTEMCTL_BIN="${ACP_PROJECT_RUNTIME_SYSTEMCTL_BIN:-$(command -v systemctl || true)}"
+SYSTEMD_DIR="${ACP_PROJECT_RUNTIME_SYSTEMD_DIR:-${HOME}/.config/systemd/user}"
+SYSTEMD_UNIT_NAME="${ACP_PROJECT_RUNTIME_SYSTEMD_UNIT:-agent-project-${PROFILE_ID_SLUG}.service}"
 SOURCE_HOME="${ACP_PROJECT_RUNTIME_SOURCE_HOME:-}"
 RUNTIME_HOME="${ACP_PROJECT_RUNTIME_RUNTIME_HOME:-$(resolve_runtime_home)}"
 SYNC_STAMP_FILE="${RUNTIME_HOME}/.agent-control-plane-runtime-sync.env"
@@ -385,6 +388,24 @@ launchd_service_state() {
   fi
 }
 
+systemd_service_enabled_for_profile() {
+  [[ -n "${SYSTEMCTL_BIN}" && -x "${SYSTEMCTL_BIN}" ]] || return 1
+  [[ -f "${SYSTEMD_DIR}/${SYSTEMD_UNIT_NAME}" ]] || return 1
+  return 0
+}
+
+systemd_service_state() {
+  if ! systemd_service_enabled_for_profile; then
+    printf 'n/a\n'
+    return 0
+  fi
+  if "${SYSTEMCTL_BIN}" --user is-active --quiet "${SYSTEMD_UNIT_NAME}" 2>/dev/null; then
+    printf 'running\n'
+  else
+    printf 'stopped\n'
+  fi
+}
+
 print_status() {
   local heartbeat=""
   local shared_loop=""
@@ -439,6 +460,7 @@ print_status() {
   fi
 
   launchd_state="$(launchd_service_state)"
+  systemd_state="$(systemd_service_state)"
   runtime_sync_status="$(sync_stamp_value "SYNC_STATUS" || true)"
   runtime_sync_updated_at="$(sync_stamp_value "UPDATED_AT" || true)"
   runtime_sync_fingerprint="$(sync_stamp_value "SOURCE_FINGERPRINT" || true)"
@@ -471,6 +493,7 @@ print_status() {
   printf 'STATE_ROOT=%s\n' "${STATE_ROOT}"
   printf 'RUNTIME_STATUS=%s\n' "${runtime_status}"
   printf 'LAUNCHD_STATE=%s\n' "${launchd_state}"
+  printf 'SYSTEMD_STATE=%s\n' "${systemd_state}"
   printf 'LAUNCHD_LABEL=%s\n' "${LAUNCHD_LABEL}"
   printf 'LAUNCHD_PLIST=%s\n' "${LAUNCHD_PLIST}"
   printf 'HEARTBEAT_PID=%s\n' "${heartbeat}"
@@ -587,6 +610,7 @@ stop_runtime() {
   local session=""
   local pid=""
   local launchd_stopped="no"
+  local systemd_stopped="no"
 
   while IFS= read -r session; do
     [[ -n "${session}" ]] || continue
@@ -619,6 +643,11 @@ stop_runtime() {
     launchd_stopped="yes"
   fi
 
+  if systemd_service_enabled_for_profile; then
+    "${SYSTEMCTL_BIN}" --user stop "${SYSTEMD_UNIT_NAME}" >/dev/null 2>&1 || true
+    systemd_stopped="yes"
+  fi
+
   if [[ -n "${TMUX_BIN}" ]]; then
     for session in "${tmux_sessions[@]+"${tmux_sessions[@]}"}"; do
       "${TMUX_BIN}" kill-session -t "${session}" >/dev/null 2>&1 || true
@@ -636,6 +665,7 @@ stop_runtime() {
   printf 'ACTION=stop\n'
   printf 'PROFILE_ID=%s\n' "${PROFILE_ID}"
   printf 'LAUNCHD_STOPPED=%s\n' "${launchd_stopped}"
+  printf 'SYSTEMD_STOPPED=%s\n' "${systemd_stopped}"
   printf 'STOPPED_PID_COUNT=%s\n' "$(printf '%s\n' "${pid_targets[@]+"${pid_targets[@]}"}" | awk 'NF {c+=1} END {print c+0}')"
   printf 'STOPPED_TMUX_SESSION_COUNT=%s\n' "$(printf '%s\n' "${tmux_sessions[@]+"${tmux_sessions[@]}"}" | awk 'NF {c+=1} END {print c+0}')"
   printf 'STOPPED_STALE_TMUX_SESSION_COUNT=%s\n' "$(printf '%s\n' "${stale_tmux_sessions[@]+"${stale_tmux_sessions[@]}"}" | awk 'NF {c+=1} END {print c+0}')"
@@ -676,6 +706,21 @@ start_runtime() {
     printf 'PROFILE_ID=%s\n' "${PROFILE_ID}"
     printf 'START_MODE=launchd\n'
     printf 'LAUNCHD_LABEL=%s\n' "${LAUNCHD_LABEL}"
+    return 0
+  fi
+
+  if systemd_service_enabled_for_profile; then
+    "${SYSTEMCTL_BIN}" --user restart "${SYSTEMD_UNIT_NAME}" >/dev/null 2>&1 || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      if "${SYSTEMCTL_BIN}" --user is-active --quiet "${SYSTEMD_UNIT_NAME}" 2>/dev/null; then
+        break
+      fi
+      sleep 1
+    done
+    printf 'ACTION=start\n'
+    printf 'PROFILE_ID=%s\n' "${PROFILE_ID}"
+    printf 'START_MODE=systemd\n'
+    printf 'SYSTEMD_UNIT=%s\n' "${SYSTEMD_UNIT_NAME}"
     return 0
   fi
 
