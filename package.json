@@ -32,7 +32,7 @@
   "scripts": {
     "doctor": "node ./npm/bin/agent-control-plane.js doctor",
     "smoke": "node ./npm/bin/agent-control-plane.js smoke",
-    "test": "node -e \"const { spawnSync } = require('node:child_process'); const result = spawnSync('bash', ['tools/tests/run-all.sh'], { stdio: 'inherit' }); if (result.error) throw result.error; process.exit(result.status ?? 1);\""
+    "test": "bash tools/tests/test-package-surface.sh && bash tools/tests/test-package-public-metadata.sh",
   },
   "files": [
     "README.md",
