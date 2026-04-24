@@ -26,13 +26,13 @@
     "developer-tools",
     "github-actions",
     "github",
-    "npx",
+    "npm",
     "runtime"
   ],
   "scripts": {
     "doctor": "node ./npm/bin/agent-control-plane.js doctor",
     "smoke": "node ./npm/bin/agent-control-plane.js smoke",
-    "test": "bash tools/tests/test-package-surface.sh && bash tools/tests/test-package-public-metadata.sh",
+    "test": "bash tools/tests/test-package-surface.sh && bash tools/tests/test-package-public-metadata.sh"
   },
   "files": [
     "README.md",
