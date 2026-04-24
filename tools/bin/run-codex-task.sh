@@ -278,3 +278,87 @@ case "$CODING_WORKER" in
     exit 1
     ;;
 esac
+
+# Use adapter interface if available
+ADAPTER_SCRIPT="${FLOW_TOOLS_DIR}/${CODING_WORKER}-adapter.sh"
+if [[ -f "$ADAPTER_SCRIPT" ]]; then
+  echo "Using adapter: ${ADAPTER_SCRIPT}"
+  source "${ADAPTER_SCRIPT}"
+  if adapter_validate; then
+    adapter_run "${MODE}" "${SESSION}" "${WORKTREE}" "${PROMPT_FILE}"
+    exit $?
+  else
+    echo "WARN: Adapter validation failed, falling back to legacy execution"
+  fi
+fi
+
+# Legacy execution (fallback)
+case "${CODING_WORKER}" in
+  codex)
+    ARGS+=(
+      --safe-profile "${CODEX_PROFILE_SAFE}"
+      --bypass-profile "${CODEX_PROFILE_BYPASS}"
+    )
+    bash "${FLOW_TOOLS_DIR}/agent-project-run-codex-session" "${ARGS[@]}"
+    ;;
+  claude)
+    ARGS+=(
+      --claude-model "${CLAUDE_MODEL}"
+      --claude-permission-mode "${CLAUDE_PERMISSION_MODE}"
+      --claude-effort "${CLAUDE_EFFORT}"
+      --claude-timeout-seconds "${CLAUDE_TIMEOUT_SECONDS}"
+      --claude-max-attempts "${CLAUDE_MAX_ATTEMPTS}"
+      --claude-retry-backoff-seconds "${CLAUDE_RETRY_BACKOFF_SECONDS}"
+    )
+    bash "${FLOW_TOOLS_DIR}/agent-project-run-claude-session" "${ARGS[@]}"
+    ;;
+  openclaw)
+    ARGS+=(
+      --openclaw-model "${OPENCLAW_MODEL}"
+      --openclaw-thinking "${OPENCLAW_THINKING}"
+      --openclaw-timeout-seconds "${OPENCLAW_TIMEOUT_SECONDS}"
+    )
+    if [[ "${RESIDENT_WORKER_ENABLED}" == "yes" ]]; then
+      ARGS+=(
+        --keep-agent
+        --openclaw-agent-id "${RESIDENT_OPENCLAW_AGENT_ID}"
+        --openclaw-session-id "${RESIDENT_OPENCLAW_SESSION_ID}"
+        --openclaw-agent-dir "${RESIDENT_OPENCLAW_AGENT_DIR}"
+        --openclaw-state-dir "${RESIDENT_OPENCLAW_STATE_DIR}"
+        --openclaw-config-path "${RESIDENT_OPENCLAW_CONFIG_PATH}"
+      )
+    fi
+    bash "${FLOW_TOOLS_DIR}/agent-project-run-openclaw-session" "${ARGS[@]}"
+    ;;
+  opencode)
+    ARGS+=(
+      --opencode-model "${OPENCODE_MODEL}"
+      --opencode-timeout-seconds "${OPENCODE_TIMEOUT_SECONDS}"
+    )
+    bash "${FLOW_TOOLS_DIR}/agent-project-run-opencode-session" "${ARGS[@]}"
+    ;;
+  kilo)
+    ARGS+=(
+      --kilo-model "${KILO_MODEL}"
+      --kilo-timeout-seconds "${KILO_TIMEOUT_SECONDS}"
+    )
+    bash "${FLOW_TOOLS_DIR}/agent-project-run-kilo-session" "${ARGS[@]}"
+    ;;
+  ollama)
+    ARGS+=(
+      --ollama-model "${OLLAMA_MODEL}"
+      --ollama-base-url "${OLLAMA_BASE_URL}"
+      --ollama-timeout-seconds "${OLLAMA_TIMEOUT_SECONDS}"
+    )
+    bash "${FLOW_TOOLS_DIR}/agent-project-run-ollama-session" "${ARGS[@]}"
+    ;;
+  pi)
+    ARGS+=(
+      --pi-model "${PI_MODEL}"
+      --pi-thinking "${PI_THINKING}"
+      --pi-timeout-seconds "${PI_TIMEOUT_SECONDS}"
+      --pi-stall-seconds "${PI_STALL_SECONDS}"
+    )
+    bash "${FLOW_TOOLS_DIR}/agent-project-run-pi-session" "${ARGS[@]}"
+    ;;
+esac
