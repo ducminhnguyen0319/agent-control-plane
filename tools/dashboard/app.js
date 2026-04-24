@@ -552,6 +552,15 @@ function renderProfile(profile) {
           <h3>Resident Worker Metadata</h3>
           ${workerTable}
         </section>
+        <section class="panel">
+          <h3>Troubleshooting</h3>
+          <p class="panel-subtitle">Run diagnostics or debugging tools against this live profile.</p>
+          <div class="action-bar">
+            <button class="action-btn" onclick="runDoctor('${profile.id}')">Run Doctor</button>
+            <span id="doctor-status-${profile.id}"></span>
+          </div>
+          <pre id="doctor-output-${profile.id}" class="doctor-output" style="display:none;"></pre>
+        </section>
         <section class="panel half">
           <h3>Provider Cooldowns</h3>
           ${cooldownTable}
@@ -636,6 +645,27 @@ function rerenderAll() {
   const snapshot = window._acpSnapshot;
   if (!snapshot) return;
   renderFromSnapshot(snapshot);
+}
+
+async function runDoctor(profileId) {
+  const statusEl = document.getElementById(`doctor-status-${profileId}`);
+  const outputEl = document.getElementById(`doctor-output-${profileId}`);
+  if (statusEl) statusEl.textContent = "Running...";
+  if (outputEl) {
+    outputEl.style.display = "none";
+    outputEl.textContent = "";
+  }
+  try {
+    const response = await fetch(`/api/doctor?profile_id=${encodeURIComponent(profileId)}`, { cache: "no-store" });
+    const data = await response.json();
+    if (statusEl) statusEl.textContent = response.ok ? "Done" : `Error: ${data.error || response.status}`;
+    if (outputEl) {
+      outputEl.style.display = "block";
+      outputEl.textContent = data.output || data.error || "No output";
+    }
+  } catch (error) {
+    if (statusEl) statusEl.textContent = `Error: ${error.message}`;
+  }
 }
 
 refreshButton.addEventListener("click", () => {
