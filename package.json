@@ -55,6 +55,7 @@
     "tools/bin/ensure-*.sh",
     "tools/bin/heartbeat-*.sh",
     "tools/bin/github-*.sh",
+    "tools/bin/profile-*.sh",
     "tools/bin/test-smoke.sh",
     "tools/dashboard/",
     "tools/templates/issue-prompt-template.md",
