@@ -150,14 +150,14 @@ Windows.
 | --- | --- | --- |
 | `codex` | Production-ready | Full ACP workflow support today. |
 | `claude` | Production-ready | Full ACP workflow support today. |
-| `openclaw` | Production-ready | Full ACP workflow support, including resident-style runs. |
-| `ollama` | Experimental | Working adapter with Node.js agentic loop. Runs any model served by a local Ollama instance. Output quality depends on model size — 7–9B models handle exploration well but struggle with complex multi-step tasks. |
-| `pi` | Experimental | Working adapter using the [pi CLI](https://github.com/mariozechner/pi) in `--print --no-session` mode. Connects to any OpenRouter-compatible model. Useful as a lightweight alternative to openclaw for free-tier model testing. |
-| `opencode` | Experimental | Working adapter for [Crush](https://github.com/charmbracelet/crush) (formerly opencode). Non-interactive `crush run` with full tool execution. |
-| `kilo` | Experimental | Working adapter for [Kilo Code](https://github.com/Kilo-Org/kilocode). Non-interactive `kilo run --auto` with JSON event stream. |
-| `gemini-cli` | Roadmap | Strong future candidate; not wired into ACP yet. |
-| `nanoclaw` | Exploratory | Ecosystem reference for containerized and WSL2-friendly workflows. |
-| `picoclaw` | Exploratory | Ecosystem reference for lightweight Linux and edge-style runtimes. |
+| `openclaw` | Production-ready | Full ACP workflow, including resident-style runs. |
+| `ollama` | **Hardening** | Working adapter with Node.js agentic loop. **v0.4.9+: Added health-check + context detection.** Moved toward production-ready. |
+| `pi` | Experimental | Working adapter using the pi CLI. **Health-check + API key validation.** |
+| `opencode` | Experimental | Working adapter for Crush. **Health-check (verify `crush` binary).** |
+| `kilo` | Experimental | Working adapter for Kilo Code. **Health-check + JSON stream validation.** |
+| `gemini-cli` | **Integrated** | Google's official terminal agent (v0.39.1+). Full ACP adapter with health-check, API key validation, and streaming JSON output. |
+| `nanoclaw` | Not integrable | Standalone agent system (like ACP), not a CLI backend. Reference for container patterns. |
+| `picoclaw` | Not integrable | Standalone agent system (Go-based). Runs on $10 hardware. Not a CLI backend. |
 
 If you are trying ACP on a real repo right now, start with `codex`, `claude`,
 or `openclaw`. Use `ollama` to run local models — useful for research, offline
