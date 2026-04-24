@@ -108,6 +108,29 @@ if [[ -z "${kilo_bin}" || ! -x "${kilo_bin}" ]]; then
   exit 1
 fi
 
+# Health-check: verify Kilo CLI works
+kilo_health_check() {
+  local max_attempts=3
+  local attempt=0
+  
+  echo "Checking Kilo CLI at ${kilo_bin}..."
+  while (( attempt < max_attempts )); do
+    if "${kilo_bin}" --version >/dev/null 2>&1; then
+      echo "Kilo CLI is healthy ($("${kilo_bin}" --version 2>&1 | head -1))"
+      return 0
+    fi
+    echo "Attempt $((attempt+1))/${max_attempts}: Kilo CLI not ready"
+    sleep 2
+    ((attempt++))
+  done
+  
+  echo "ERROR: Kilo CLI not working properly at ${kilo_bin}" >&2
+  echo "Install: npm install -g @kilocode/cli" >&2
+  exit 1
+}
+
+kilo_health_check
+
 artifact_dir="${runs_root}/${session}"
 output_file="${artifact_dir}/${session}.log"
 inner_script="${artifact_dir}/${session}.sh"

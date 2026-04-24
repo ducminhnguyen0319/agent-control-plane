@@ -122,6 +122,39 @@ if [[ -z "${pi_bin}" || ! -x "${pi_bin}" ]]; then
   exit 1
 fi
 
+# Health-check: verify Pi CLI and API key
+pi_health_check() {
+  local max_attempts=3
+  local attempt=0
+  
+  echo "Checking Pi CLI at ${pi_bin}..."
+  if [[ ! -x "${pi_bin}" ]]; then
+    echo "ERROR: Pi CLI not found or not executable: ${pi_bin}" >&2
+    echo "Install: npm install -g @mariozechner/pi-coding-agent" >&2
+    exit 1
+  fi
+  
+  while (( attempt < max_attempts )); do
+    if "${pi_bin}" --version >/dev/null 2>&1; then
+      echo "Pi CLI is healthy ($("${pi_bin}" --version 2>&1 | head -1))"
+      break
+    fi
+    echo "Attempt $((attempt+1))/${max_attempts}: Pi CLI not ready"
+    sleep 2
+    ((attempt++))
+  done
+  
+  if [[ -z "${OPENROUTER_API_KEY:-}" ]]; then
+    echo "WARNING: OPENROUTER_API_KEY not set - Pi may fail" >&2
+  else
+    echo "API key is configured"
+  fi
+  
+  return 0
+}
+
+pi_health_check
+
 artifact_dir="${runs_root}/${session}"
 output_file="${artifact_dir}/${session}.log"
 inner_script="${artifact_dir}/${session}.sh"
