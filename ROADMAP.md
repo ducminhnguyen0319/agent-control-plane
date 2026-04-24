@@ -131,7 +131,7 @@ ACP should eventually support a broader adapter model for:
 
 - ~~easier profile sharing across machines or team members~~ in progress: profile export added (API + dashboard button), import not yet done
 - stronger contribution workflow and automation around CLA and docs policy
-- more reusable backend adapters so ACP is not locked to one agent ecosystem
+- ~~more reusable backend adapters so ACP is not locked to one agent ecosystem~~ in progress: standardized adapter interface added (adapter-interface.sh, ollama-adapter.sh, run-with-adapter.sh), need to refactor existing backends to use interface
 - interoperability experiments with adjacent runtimes such as `nanoclaw` and `picoclaw`
 - interoperability experiments with adjacent runtimes such as `nanoclaw` and `picoclaw`
 
