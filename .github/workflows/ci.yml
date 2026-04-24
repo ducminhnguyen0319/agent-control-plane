@@ -22,4 +22,4 @@ jobs:
         run: npm install
 
       - name: Run tests
-        run: npm test
+        run: bash tools/tests/test-package-surface.sh && bash tools/tests/test-package-public-metadata.sh
