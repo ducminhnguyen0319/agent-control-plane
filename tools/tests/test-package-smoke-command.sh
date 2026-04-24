@@ -66,11 +66,13 @@ fi
 
 run_smoke_command_fixture() (
   set -euo pipefail
+  # Install the tarball first, then run
+  npm install -g "$tarball_path" 2>/dev/null
   HOME="$TMP_HOME" \
     AGENT_PLATFORM_HOME="$TMP_PLATFORM" \
     NPM_CONFIG_CACHE="$TMP_NPM_CACHE" \
     npm_config_cache="$TMP_NPM_CACHE" \
-    npx --yes --package "$tarball_path" agent-control-plane smoke >"$TMP_OUTPUT"
+    agent-control-plane smoke >"$TMP_OUTPUT" 2>&1
   grep -q '^SMOKE_TEST_STATUS=ok$' "$TMP_OUTPUT"
 )
 
