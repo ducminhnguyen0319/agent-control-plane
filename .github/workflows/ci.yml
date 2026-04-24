@@ -18,8 +18,5 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Run tests
-        run: bash tools/tests/test-package-surface.sh && bash tools/tests/test-package-public-metadata.sh
+      - name: Verify package metadata
+        run: bash tools/tests/test-package-metadata.sh
