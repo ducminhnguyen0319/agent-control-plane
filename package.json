@@ -1,6 +1,6 @@
 {
   "name": "agent-control-plane",
-  "version": "0.4.9",
+  "version": "0.5.0",
   "description": "Help a repo keep GitHub-driven coding agents running reliably without constant human babysitting",
   "homepage": "https://github.com/ducminhnguyen0319/agent-control-plane",
   "bugs": {
@@ -17,43 +17,6 @@
   "bin": {
     "agent-control-plane": "./bin/agent-control-plane"
   },
-  "files": [
-    "README.md",
-    "assets/workflow-catalog.json",
-    "bin/agent-control-plane",
-    "bin/issue-resource-class.sh",
-    "bin/label-follow-up-issues.sh",
-    "bin/pr-risk.sh",
-    "bin/sync-pr-labels.sh",
-    "hooks",
-    "npm/bin",
-    "tools/bin",
-  "!tools/bin/audit-*.sh",
-  "!tools/bin/check-skill-contracts.sh",
-  "!tools/bin/split-retained-slice.sh",
-  "!tools/bin/render-dashboard-snapshot.py",
-  "!tools/bin/resident-issue-queue-status.py",
-    "tools/dashboard/app.js",
-    "tools/dashboard/dashboard_snapshot.py",
-    "tools/dashboard/index.html",
-    "tools/dashboard/server.py",
-    "tools/dashboard/styles.css",
-    "tools/templates",
-    "!tools/templates/legacy/",
-    "tools/vendor/codex-quota/LICENSE",
-    "tools/vendor/codex-quota/codex-quota.js",
-    "tools/vendor/codex-quota/lib",
-    "tools/vendor/codex-quota-manager/scripts"
-  ],
-  "scripts": {
-    "doctor": "node ./npm/bin/agent-control-plane.js doctor",
-    "smoke": "node ./npm/bin/agent-control-plane.js smoke",
-    "test": "node -e \"const { spawnSync } = require('node:child_process'); const result = spawnSync('bash', ['tools/tests/run-all.sh'], { stdio: 'inherit' }); if (result.error) throw result.error; process.exit(result.status ?? 1);\""
-  },
-  "publishConfig": {
-    "access": "public",
-    "provenance": true
-  },
   "keywords": [
     "agents",
     "automation",
@@ -66,6 +29,39 @@
     "npx",
     "runtime"
   ],
+  "scripts": {
+    "doctor": "node ./npm/bin/agent-control-plane.js doctor",
+    "smoke": "node ./npm/bin/agent-control-plane.js smoke",
+    "test": "node -e \"const { spawnSync } = require('node:child_process'); const result = spawnSync('bash', ['tools/tests/run-all.sh'], { stdio: 'inherit' }); if (result.error) throw result.error; process.exit(result.status ?? 1);\""
+  },
+  "files": [
+    "README.md",
+    "assets/workflow-catalog.json",
+    "bin/",
+    "hooks/",
+    "npm/",
+    "tools/bin/agent-project-run-*.sh",
+    "tools/bin/flow-*.sh",
+    "tools/bin/project-*.sh",
+    "tools/bin/scaffold-*.sh",
+    "tools/bin/sync-*.sh",
+    "tools/bin/install-*.sh",
+    "tools/bin/uninstall-*.sh",
+    "tools/bin/debug-session.sh",
+    "tools/bin/ensure-*.sh",
+    "tools/bin/heartbeat-*.sh",
+    "tools/bin/github-*.sh",
+    "tools/dashboard/",
+    "tools/templates/",
+    "tools/vendor/codex-quota/LICENSE",
+    "tools/vendor/codex-quota/codex-quota.js",
+    "tools/vendor/codex-quota/lib/",
+    "tools/vendor/codex-quota-manager/scripts"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "engines": {
     "node": ">=18"
   }
