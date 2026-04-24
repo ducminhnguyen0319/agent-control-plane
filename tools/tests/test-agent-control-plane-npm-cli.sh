@@ -12,8 +12,9 @@ trap 'rm -rf "${tmpdir}"' EXIT
 platform_home="${tmpdir}/platform"
 home_dir="${tmpdir}/home"
 fake_bin="${tmpdir}/fake-bin"
+fake_bin_noauth="${tmpdir}/fake-bin-noauth"
 mkdir -p "${platform_home}" "${home_dir}"
-mkdir -p "${fake_bin}"
+mkdir -p "${fake_bin}" "${fake_bin_noauth}"
 
 run_with_timeout() {
   local timeout_seconds="${1:?timeout required}"
@@ -79,6 +80,23 @@ echo "gh stub: unsupported invocation: $*" >&2
 exit 0
 EOF
 
+cat >"${fake_bin_noauth}/gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "auth" && "${2:-}" == "status" ]]; then
+  exit 1
+fi
+
+if [[ "${1:-}" == "auth" && "${2:-}" == "login" ]]; then
+  echo "gh auth login stub"
+  exit 0
+fi
+
+echo "gh stub: unsupported invocation: $*" >&2
+exit 0
+EOF
+
 cat >"${fake_bin}/jq" <<'EOF'
 #!/usr/bin/env bash
 exit 0
@@ -101,6 +119,7 @@ exit 0
 EOF
 
 chmod +x "${fake_bin}/gh" "${fake_bin}/jq" "${fake_bin}/codex"
+chmod +x "${fake_bin_noauth}/gh"
 
 help_output="$(
   HOME="${home_dir}" \
@@ -311,6 +330,22 @@ grep -q '^RUNTIME_START_STATUS=skipped$' <<<"${setup_output}"
 grep -q '^RUNTIME_START_REASON=not-requested$' <<<"${setup_output}"
 test -f "${platform_home}/control-plane/profiles/setup-demo/control-plane.yaml"
 test -d "${platform_home}/projects/setup-demo/repo"
+
+setup_noninteractive_noauth_output="$(
+  HOME="${home_dir}" \
+  AGENT_PLATFORM_HOME="${platform_home}" \
+  PATH="${fake_bin_noauth}:${PATH}" \
+  run_with_timeout 30 node "${CLI_SCRIPT}" setup \
+    --non-interactive \
+    --repo-root "${setup_repo}" \
+    --no-start-runtime \
+    --skip-anchor-sync \
+    --skip-workspace-sync
+)"
+
+grep -q '^SETUP_STATUS=ok$' <<<"${setup_noninteractive_noauth_output}"
+grep -q '^GITHUB_AUTH_STATUS=not-ready$' <<<"${setup_noninteractive_noauth_output}"
+grep -q '^FINAL_FIXUP_STATUS=remaining$' <<<"${setup_noninteractive_noauth_output}"
 
 missing_repo_path="${tmpdir}/missing-setup-repo"
 setup_missing_repo_output="$(

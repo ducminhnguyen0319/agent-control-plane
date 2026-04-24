@@ -109,13 +109,17 @@ want the dashboard to come back automatically after macOS restart/login.
 ## Project Autostart
 
 ```bash
+# macOS (launchd)
 bash tools/bin/install-project-launchd.sh --profile-id <id>
 bash tools/bin/uninstall-project-launchd.sh --profile-id <id>
+
+# Linux (systemd)
+bash tools/bin/install-project-systemd.sh --profile-id <id>
+bash tools/bin/uninstall-project-systemd.sh --profile-id <id>
 ```
 
 Use the project installer when one profile should come back automatically after
-macOS restart/login. `project-runtimectl.sh start|stop|status` will detect that
-per-project LaunchAgent automatically once it is installed.
+macOS restart/login or Linux logout/login. `project-runtimectl.sh start|stop|status` will detect launchd or systemd automatically once installed.
 
 ## Repo-Specific Commands
 

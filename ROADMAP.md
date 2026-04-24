@@ -27,7 +27,7 @@ The public roadmap should widen that base deliberately:
 | Platform | Status | Why it matters next |
 | --- | --- | --- |
 | `macOS` | best supported today | Current reference platform for setup, launchd, dashboard, and local operator flows. |
-| `Linux` | planned next | ACP already knows common Linux package managers; the missing step is first-class runtime/service validation and an operator story as smooth as macOS. |
+| `Linux` | **in-progress** | systemd support added (v0.4.9+). ACP now validates runtime on Linux. Missing: full CI matrix, service validation. |
 | `Windows (WSL2)` | exploratory next | A practical bridge for Windows users who still want Unix-like repos, containers, and worker CLIs. |
 | `Native Windows` | longer-term | Needs explicit work around services, shell/process management, path handling, and backend compatibility. |
 
