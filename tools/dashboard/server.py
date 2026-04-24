@@ -83,6 +83,39 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(encoded)
             return
+        if parsed.path == "/api/profile/export":
+            query = parse_qs(parsed.query)
+            profile_id = (query.get("profile_id") or [""])[0]
+            if not profile_id:
+                self.send_response(HTTPStatus.BAD_REQUEST)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "profile_id is required"}).encode("utf-8"))
+                return
+            registry_root = Path(os.environ.get("ACP_PROFILE_REGISTRY_ROOT", str(Path.home() / ".agent-runtime" / "control-plane" / "profiles")))
+            profile_dir = registry_root / profile_id
+            config_file = profile_dir / "control-plane.yaml"
+            if not config_file.is_file():
+                self.send_response(HTTPStatus.NOT_FOUND)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "profile config not found"}).encode("utf-8"))
+                return
+            try:
+                config = config_file.read_text(encoding="utf-8")
+                payload = {"profile_id": profile_id, "config": config, "config_file": str(config_file)}
+                encoded = json.dumps(payload).encode("utf-8")
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                self.wfile.write(encoded)
+            except Exception as exc:
+                self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(exc)}).encode("utf-8"))
+            return
         return super().do_GET()
 
     def end_headers(self) -> None:

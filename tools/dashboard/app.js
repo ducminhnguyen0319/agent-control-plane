@@ -557,6 +557,7 @@ function renderProfile(profile) {
           <p class="panel-subtitle">Run diagnostics or debugging tools against this live profile.</p>
           <div class="action-bar">
             <button class="action-btn" onclick="runDoctor('${profile.id}')">Run Doctor</button>
+            <button class="action-btn" onclick="exportProfile('${profile.id}')">Export Profile</button>
             <span id="doctor-status-${profile.id}"></span>
           </div>
           <pre id="doctor-output-${profile.id}" class="doctor-output" style="display:none;"></pre>
@@ -665,6 +666,29 @@ async function runDoctor(profileId) {
     }
   } catch (error) {
     if (statusEl) statusEl.textContent = `Error: ${error.message}`;
+  }
+}
+
+async function exportProfile(profileId) {
+  try {
+    const response = await fetch(`/api/profile/export?profile_id=${encodeURIComponent(profileId)}`, { cache: "no-store" });
+    if (!response.ok) {
+      const data = await response.json();
+      alert(`Export failed: ${data.error || response.status}`);
+      return;
+    }
+    const data = await response.json();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `acp-profile-${profileId}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    alert(`Export failed: ${error.message}`);
   }
 }
 
