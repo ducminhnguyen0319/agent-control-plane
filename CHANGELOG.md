@@ -7,6 +7,28 @@ layout for public releases.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-24
+
+### Added
+- **ROADMAP COMPLETE!** All 5 sections delivered (v0.6.0)
+- **Windows WSL2 support**: `docs/WSL2_SETUP.md` + README section
+- **Dashboard filtering**: search + filter buttons for Runs/History
+- **Time-remaining columns**: cooldowns, retries, scheduled issues now show human-readable remaining time
+- **Troubleshooting panel**: Run Doctor button + API endpoint (`/api/doctor`)
+- **Profile sharing**: Export + Import (API + dashboard buttons) for easy sharing across machines/team
+- **Adapter interface**: `adapter-interface.sh` + 6 backend adapters (codex, claude, pi, opencode, kilo, openclaw)
+- **CLA workflow**: `CLA.md` + `test-cla-signed.sh` + CI check
+- **Docs validation**: `test-docs-links.sh` added to CI
+
+### Changed
+- **run-codex-task.sh**: Refactored to use adapter interface (with fallback to legacy)
+- **ROADMAP.md**: All sections marked complete
+- **README.md**: Added "Adapter Pattern" section, ROADMAP COMPLETE badge
+
+### Security
+- All backend adapters now implement health-check pattern
+- API endpoints validate inputs and handle errors gracefully
+
 ## [0.5.0] - 2026-04-24
 
 ### Added

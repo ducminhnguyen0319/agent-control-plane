@@ -12,6 +12,8 @@
 `agent-control-plane` (ACP) keeps your coding agents running reliably without
 you having to stare at them all day.
 
+**✅ ROADMAP COMPLETE (v0.6.0)** - All planned features delivered!
+
 It is the operator layer for coding agents that need to keep running after the
 novelty wears off — and the responsible adult in the room that stops them from
 going completely off the rails.
