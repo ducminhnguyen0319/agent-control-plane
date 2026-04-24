@@ -72,6 +72,35 @@ function relativeTime(input) {
   return seconds >= 0 ? `${absolute}s ago` : `in ${absolute}s`;
 }
 
+function formatDuration(seconds) {
+  if (!seconds && seconds !== 0) return "n/a";
+  const absSeconds = Math.abs(seconds);
+  const parts = [];
+  const units = [
+    [86400, "d"],
+    [3600, "h"],
+    [60, "m"],
+    [1, "s"],
+  ];
+  for (const [unitSeconds, label] of units) {
+    if (absSeconds >= unitSeconds) {
+      const amount = Math.floor(absSeconds / unitSeconds);
+      parts.push(`${amount}${label}`);
+      seconds -= amount * unitSeconds;
+    }
+  }
+  return parts.slice(0, 2).join(" ") || "0s";
+}
+
+function timeRemaining(isoString) {
+  if (!isoString) return "n/a";
+  const next = new Date(isoString);
+  if (Number.isNaN(next.getTime())) return isoString;
+  const diffSeconds = Math.round((next.getTime() - Date.now()) / 1000);
+  if (diffSeconds <= 0) return "ready now";
+  return formatDuration(diffSeconds);
+}
+
 function statusClass(status) {
   if (!status) return "";
   return status.replace(/[^a-zA-Z0-9_-]/g, "-");
@@ -340,6 +369,7 @@ function renderProfile(profile) {
       { label: "Reason", render: (row) => row.last_reason || "n/a" },
       { label: "Attempts", key: "attempts" },
       { label: "Next attempt", render: (row) => row.next_attempt_at ? `${relativeTime(row.next_attempt_at)}<div class="muted">${row.next_attempt_at}</div>` : "n/a" },
+      { label: "Time Remaining", render: (row) => row.next_attempt_at ? timeRemaining(row.next_attempt_at) : "n/a" },
     ],
     profile.issue_retries || [],
     "No issue retries recorded.",
@@ -352,6 +382,7 @@ function renderProfile(profile) {
       { label: "Reason", render: (row) => row.last_reason || "n/a" },
       { label: "Attempts", key: "attempts" },
       { label: "Next attempt", render: (row) => row.next_attempt_at ? `${relativeTime(row.next_attempt_at)}<div class="muted">${row.next_attempt_at}</div>` : "n/a" },
+      { label: "Time Remaining", render: (row) => row.next_attempt_at ? timeRemaining(row.next_attempt_at) : "n/a" },
     ],
     profile.pr_retries || [],
     "No PR retries recorded.",
@@ -379,6 +410,7 @@ function renderProfile(profile) {
       { label: "Reason", render: (row) => row.last_reason || "n/a" },
       { label: "Attempts", key: "attempts" },
       { label: "Next attempt", render: (row) => row.next_attempt_at ? `${relativeTime(row.next_attempt_at)}<div class="muted">${row.next_attempt_at}</div>` : "n/a" },
+      { label: "Time Remaining", render: (row) => row.next_attempt_at ? timeRemaining(row.next_attempt_at) : "n/a" },
     ],
     profile.provider_cooldowns,
     "No provider cooldowns recorded.",
@@ -389,6 +421,7 @@ function renderProfile(profile) {
       { label: "Issue", key: "issue_id" },
       { label: "Interval", render: (row) => `${row.interval_seconds}s` },
       { label: "Next due", render: (row) => row.next_due_at ? `${relativeTime(row.next_due_at)}<div class="muted">${row.next_due_at}</div>` : "n/a" },
+      { label: "Time Remaining", render: (row) => row.next_due_at ? timeRemaining(row.next_due_at) : "n/a" },
       { label: "Last started", render: (row) => row.last_started_at ? `${relativeTime(row.last_started_at)}<div class="muted">${row.last_started_at}</div>` : "n/a" },
     ],
     profile.scheduled_issues,

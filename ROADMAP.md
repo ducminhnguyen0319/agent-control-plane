@@ -122,7 +122,7 @@ ACP should eventually support a broader adapter model for:
 
 ### 4. Operator Experience
 
-- richer dashboard filtering and run-history views
+- ~~richer dashboard filtering and run-history views~~ done: filter UI added (search + status/result filters), run-history already existed
 - better visibility into cooldowns, retries, queue state, and failover events
 - clearer status reporting for recurring and scheduled workflows
 - simpler tooling for troubleshooting real live profiles
