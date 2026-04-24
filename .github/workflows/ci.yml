@@ -51,6 +51,9 @@ jobs:
           echo "$PR_BODY" > /tmp/pr_body.txt
           bash tools/tests/test-cla-signed.sh /tmp/pr_body.txt || echo "WARN: CLA not signed yet"
 
+      - name: Check docs links
+        run: bash tools/tests/test-docs-links.sh
+
       - name: Verify public repo docs
         run: bash tools/tests/test-public-repo-docs.sh
 
