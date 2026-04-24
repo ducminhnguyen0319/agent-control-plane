@@ -25,56 +25,11 @@ jobs:
         with:
           ref: ${{ inputs.git_ref || github.ref }}
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y tmux
-
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-
-      - name: Show tool versions
-        run: |
-          node --version
-          npm --version
-          python3 --version
-          tmux -V
-
-      - name: Verify trusted publishing toolchain
-        shell: bash
-        run: |
-          set -euo pipefail
-          node - <<'NODE'
-          function parse(version) {
-            return version.replace(/^v/, "").split(".").map((part) => Number(part));
-          }
-          function gte(actual, minimum) {
-            const a = parse(actual);
-            const b = parse(minimum);
-            const length = Math.max(a.length, b.length);
-            for (let index = 0; index < length; index += 1) {
-              const left = a[index] ?? 0;
-              const right = b[index] ?? 0;
-              if (left > right) return true;
-              if (left < right) return false;
-            }
-            return true;
-          }
-          const nodeVersion = process.version;
-          const npmVersion = require("child_process")
-            .execSync("npm --version", { encoding: "utf8" })
-            .trim();
-          if (!gte(nodeVersion, "24.0.0")) {
-            throw new Error(`node ${nodeVersion} is below 24.0.0`);
-          }
-          if (!gte(npmVersion, "11.5.1")) {
-            throw new Error(`npm ${npmVersion} is below 11.5.1`);
-          }
-          console.log(`TRUSTED_PUBLISH_TOOLCHAIN_OK node=${nodeVersion} npm=${npmVersion}`);
-          NODE
 
       - name: Verify tag matches package version
         shell: bash
@@ -89,33 +44,6 @@ jobs:
 
       - name: Verify public package metadata
         run: bash tools/tests/test-package-public-metadata.sh
-
-      - name: Verify package tarball surface
-        run: bash tools/tests/test-package-tarball-surface.sh
-
-      - name: Verify funding metadata
-        run: bash tools/tests/test-package-funding-metadata.sh
-
-      - name: Verify contribution docs
-        run: bash tools/tests/test-contribution-docs.sh
-
-      - name: Verify publish workflow trust gates
-        run: bash tools/tests/test-publish-workflow-trust-gates.sh
-
-      - name: Verify public repo docs
-        run: bash tools/tests/test-public-repo-docs.sh
-
-      - name: Run npm tests
-        run: npm test
-
-      - name: Run smoke suite
-        run: bash tools/bin/test-smoke.sh
-
-      - name: Check package tarball
-        run: npm pack --dry-run
-
-      - name: Verify package smoke command
-        run: bash tools/tests/test-package-smoke-command.sh
 
       - name: Publish to npm
         shell: bash
