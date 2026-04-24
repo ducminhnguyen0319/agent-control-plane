@@ -130,9 +130,11 @@ ACP should eventually support a broader adapter model for:
 ### 5. Team and Ecosystem Features
 
 - ~~easier profile sharing across machines or team members~~ done: profile export + import fully implemented (API + dashboard buttons)
-- ~~stronger contribution workflow and automation around CLA and docs policy~~ in progress: CLA.md added, test-cla-signed.sh + CI check added, docs links check added to CI
-- ~~more reusable backend adapters so ACP is not locked to one agent ecosystem~~ done: all 6 adapters implement adapter-interface.sh (codex, claude, pi, opencode, kilo, openclaw), run-codex-task.sh refactored
-- interoperability experiments with adjacent runtimes such as `nanoclaw` and `picoclaw`
+- ~~stronger contribution workflow and automation around CLA and docs policy~~ done: CLA.md + test-cla-signed.sh + docs links check in CI
+- ~~more reusable backend adapters so ACP is not locked to one agent ecosystem~~ done: all 6 adapters implement adapter-interface.sh (codex, claude, pi, opencode, kilo, openclaw)
+- ~~interoperability experiments with adjacent runtimes such as `nanoclaw` and `picoclaw`~~ done: confirmed not integrable (standalone systems), documented in README
+
+## ROADMAP STATUS: ✅ COMPLETE (as of v0.6.0)
 - interoperability experiments with adjacent runtimes such as `nanoclaw` and `picoclaw`
 
 ## Notes
