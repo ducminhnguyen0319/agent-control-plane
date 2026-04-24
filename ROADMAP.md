@@ -47,7 +47,7 @@ done.
 | `pi` | experimental | yes | yes | Working adapter using the pi CLI. **Needs health-check + API key validation.** |
 | `opencode` | experimental | yes | yes | Working adapter for Crush. **Needs health-check (verify `crush` binary).** |
 | `kilo` | experimental | yes | yes | Working adapter for Kilo Code. **Needs health-check + JSON stream validation.** |
-| `gemini-cli` | research next | no | no | Official Google terminal agent and the closest ecosystem fit for a future ACP worker adapter. |
+| `gemini-cli` | **integrated** | yes | yes | Google's official terminal agent (v0.39.1+). Full ACP adapter with health-check, API key validation, and streaming JSON output. |
 
 ### Production-Ready
 
@@ -67,12 +67,13 @@ Useful for research, free-tier model testing, and local-model workflows:
 - `pi` — OpenRouter-compatible models via the pi CLI
 - `opencode` — Crush (charmbracelet/crush) with full tool execution
 - `kilo` — Kilo Code (kilocode/cli) with JSON event stream output
+- `gemini-cli` — Google's official terminal agent with streaming JSON output
 
 ### Planned Next
 
 High-priority backend additions for the public package:
 
-- `gemini-cli`
+*(None currently — gemini-cli integrated in v0.5.0)*
 
 ## Adjacent Runtime and Model Integrations
 
@@ -84,8 +85,8 @@ that ACP should learn to work with over time.
 | --- | --- | --- | --- |
 | `ollama` | local model runtime | **integrated** | Full ACP adapter with Node.js agentic loop, tool-use support, and git-state result inference. Setup wizard checks server readiness and available models. |
 | `pi` | lightweight coding agent | **integrated** | Full ACP adapter with stall detection, exit markers, and proper result contracts. Setup wizard handles OpenRouter API key. |
-| `nanoclaw` | containerized assistant runtime | exploratory | Useful reference for container isolation, scheduled tasks, and WSL2-friendly workflows around Claude-powered agents. |
-| `picoclaw` | lightweight assistant runtime | exploratory | Interesting for Linux and edge-style deployments, MCP-heavy workflows, and ultra-low-footprint automation. |
+| `nanoclaw` | containerized assistant runtime | not integrable | Standalone agent system (like ACP), not a CLI runtime. Useful reference for container isolation patterns. |
+| `picoclaw` | lightweight assistant runtime (Go) | not integrable | Standalone agent system (Go-based, <10MB RAM). Runs on $10 hardware. Not a callable CLI backend. |
 
 ### Longer-Term Goal
 
