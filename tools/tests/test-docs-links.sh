@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # test-docs-links.sh
-# Simple check for broken internal links in markdown files
+# Simple check for broken internal links in markdown files.
 
 set -euo pipefail
 
@@ -14,9 +14,17 @@ while IFS= read -r -d '' file; do
   # Get directory of the file for resolving relative links
   file_dir="$(dirname "$file")"
   
-  # Extract markdown links using grep
-  # Pattern: [text](url)
+  # Skip node_modules, .git, etc.
+  if [[ "$file" =~ (node_modules|\.git|dist|build)/ ]]; then
+    continue
+  fi
+  
+  # Extract markdown links [text](url) - one per line
+  # Using grep to find all [text](url) patterns
   grep -o '\[[^]]*\]([^)]*)' "$file" 2>/dev/null | while IFS= read -r match; do
+    # Skip if empty
+    [[ -z "$match" ]] && continue
+    
     # Extract URL from [text](url)
     url="$(echo "$match" | sed 's/.*(//;s/)$//')"
     
@@ -25,7 +33,7 @@ while IFS= read -r -d '' file; do
       continue
     fi
     
-    # Skip anchor links
+    # Skip anchor links (just #section)
     if [[ "$url" =~ ^# ]]; then
       continue
     fi
@@ -33,9 +41,13 @@ while IFS= read -r -d '' file; do
     # Remove anchor from URL for file check
     file_url="$(echo "$url" | sed 's/#.*//')"
     
+    # Skip empty after removing anchor
+    [[ -z "$file_url" ]] && continue
+    
     # Resolve relative path
     target="$file_dir/$file_url"
     
+    # Check if target exists (file or directory)
     if [[ ! -f "$target" && ! -d "$target" ]]; then
       echo "  BROKEN LINK: $url (in $file)"
       EXIT_CODE=1
