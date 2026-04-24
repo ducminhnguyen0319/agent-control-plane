@@ -65,7 +65,7 @@
     "tools/templates/scheduled-issue-prompt-template.md",
     "tools/vendor/codex-quota/LICENSE",
     "tools/vendor/codex-quota/codex-quota.js",
-    "tools/vendor/codex-quota/lib/",
+    "tools/vendor/codex-quota/lib",
     "tools/vendor/codex-quota-manager/scripts"
   ],
   "publishConfig": {
