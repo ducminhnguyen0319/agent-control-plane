@@ -1,0 +1,479 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-project-run-gemini-session --mode safe|bypass --session <id> --worktree <path> --prompt-file <path> --runs-root <path> --adapter-id <id> --task-kind <kind> --task-id <id> [options]
+
+Launch a Pi coding agent worker session inside tmux for a project adapter and
+persist the standard run artifacts.
+
+Pi supports any OpenRouter model (or other providers) via -m provider/id.
+
+Options:
+  --env-prefix <prefix>             Export prefixed runtime/context env vars inside the worker
+  --context <KEY=VALUE>             Extra metadata written to run.env and exported to the worker
+  --collect-file <name>             Copy sandbox artifact file into the host run dir after execution
+  --reconcile-command <cmd>         Host-side command queued after the worker exits
+  --sandbox-subdir <name>           Subdir under the worktree for worker artifacts (default: .gemini-artifacts)
+  --pi-model <id>                   Model ID for pi (e.g. openrouter/qwen/qwen3.6-plus:free)
+  --pi-thinking <level>             Thinking level: off, minimal, low, medium, high, xhigh (default: low)
+  --pi-timeout-seconds <secs>       Hard timeout in seconds (default: 900)
+  --pi-stall-seconds <secs>         Abort if no output for this long, 0 disables (default: 300)
+  --help                            Show this help
+EOF
+}
+
+mode=""
+session=""
+worktree=""
+prompt_file=""
+runs_root=""
+adapter_id=""
+task_kind=""
+task_id=""
+env_prefix=""
+sandbox_subdir=".gemini-artifacts"
+reconcile_command=""
+pi_model="${ACP_GEMINI_MODEL:-${F_LOSNING_GEMINI_MODEL:-openrouter/qwen/qwen3.6-plus:free}}"
+pi_thinking="${ACP_GEMINI_THINKING:-${F_LOSNING_GEMINI_THINKING:-low}}"
+pi_timeout_seconds="${ACP_GEMINI_TIMEOUT_SECONDS:-${F_LOSNING_GEMINI_TIMEOUT_SECONDS:-900}}"
+pi_stall_seconds="${ACP_GEMINI_STALL_SECONDS:-${F_LOSNING_GEMINI_STALL_SECONDS:-300}}"
+declare -a context_items=()
+declare -a collect_files=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --mode) mode="${2:-}"; shift 2 ;;
+    --session) session="${2:-}"; shift 2 ;;
+    --worktree) worktree="${2:-}"; shift 2 ;;
+    --prompt-file) prompt_file="${2:-}"; shift 2 ;;
+    --runs-root) runs_root="${2:-}"; shift 2 ;;
+    --adapter-id) adapter_id="${2:-}"; shift 2 ;;
+    --task-kind) task_kind="${2:-}"; shift 2 ;;
+    --task-id) task_id="${2:-}"; shift 2 ;;
+    --env-prefix) env_prefix="${2:-}"; shift 2 ;;
+    --context) context_items+=("${2:-}"); shift 2 ;;
+    --collect-file) collect_files+=("${2:-}"); shift 2 ;;
+    --reconcile-command) reconcile_command="${2:-}"; shift 2 ;;
+    --sandbox-subdir) sandbox_subdir="${2:-}"; shift 2 ;;
+    --pi-model) pi_model="${2:-}"; shift 2 ;;
+    --pi-thinking) pi_thinking="${2:-}"; shift 2 ;;
+    --pi-timeout-seconds) pi_timeout_seconds="${2:-}"; shift 2 ;;
+    --pi-stall-seconds) pi_stall_seconds="${2:-}"; shift 2 ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+if [[ -z "$mode" || -z "$session" || -z "$worktree" || -z "$prompt_file" || -z "$runs_root" || -z "$adapter_id" || -z "$task_kind" || -z "$task_id" ]]; then
+  usage >&2
+  exit 1
+fi
+
+case "$mode" in
+  safe|bypass) ;;
+  *) echo "--mode must be safe or bypass" >&2; exit 1 ;;
+esac
+
+case "$pi_thinking" in
+  off|minimal|low|medium|high|xhigh) ;;
+  *) echo "--pi-thinking must be one of: off, minimal, low, medium, high, xhigh" >&2; exit 1 ;;
+esac
+
+case "$pi_timeout_seconds" in
+  ''|*[!0-9]*|0) echo "--pi-timeout-seconds must be a positive integer" >&2; exit 1 ;;
+esac
+
+case "$pi_stall_seconds" in
+  ''|*[!0-9]*) echo "--pi-stall-seconds must be numeric" >&2; exit 1 ;;
+esac
+
+resolve_gemini_bin() {
+  local configured_bin="${GEMINI_BIN:-${ACP_GEMINI_BIN:-${F_LOSNING_GEMINI_BIN:-}}}"
+  if [[ -n "${configured_bin}" && -x "${configured_bin}" ]]; then
+    printf '%s\n' "${configured_bin}"
+    return 0
+  fi
+  if command -v pi >/dev/null 2>&1; then
+    command -v pi
+    return 0
+  fi
+  local -a fallback_paths=(
+    "/opt/homebrew/bin/pi"
+    "/usr/local/bin/pi"
+    "${HOME}/.local/bin/pi"
+    "${HOME}/.nvm/versions/node/$(node --version 2>/dev/null || true)/bin/pi"
+  )
+  local p
+  for p in "${fallback_paths[@]}"; do
+    if [[ -x "${p}" ]]; then
+      printf '%s\n' "${p}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+gemini_bin="$(resolve_gemini_bin || true)"
+if [[ -z "${gemini_bin}" || ! -x "${gemini_bin}" ]]; then
+  echo "unable to resolve a runnable pi binary — install with: npm install -g @mariozechner/pi-coding-agent" >&2
+  exit 1
+fi
+
+artifact_dir="${runs_root}/${session}"
+output_file="${artifact_dir}/${session}.log"
+inner_script="${artifact_dir}/${session}.sh"
+meta_file="${artifact_dir}/run.env"
+result_file="${artifact_dir}/result.env"
+runner_state_file="${artifact_dir}/runner.env"
+sandbox_run_dir="${worktree%/}/${sandbox_subdir}/${session}"
+retained_repo_root="${ACP_RETAINED_REPO_ROOT:-${F_LOSNING_RETAINED_REPO_ROOT:-}}"
+started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+mkdir -p "$artifact_dir"
+mkdir -p "$sandbox_run_dir"
+
+if tmux has-session -t "$session" 2>/dev/null; then
+  echo "tmux session already exists: $session" >&2
+  exit 1
+fi
+
+branch_name="$(git -C "$worktree" branch --show-current 2>/dev/null || true)"
+
+printf -v session_q '%q' "$session"
+printf -v task_kind_q '%q' "$task_kind"
+printf -v task_id_q '%q' "$task_id"
+printf -v mode_q '%q' "$mode"
+printf -v worktree_q '%q' "$worktree"
+printf -v prompt_q '%q' "$prompt_file"
+printf -v output_q '%q' "$output_file"
+printf -v artifact_dir_q '%q' "$artifact_dir"
+printf -v script_q '%q' "$inner_script"
+printf -v result_q '%q' "$result_file"
+printf -v meta_file_q '%q' "$meta_file"
+printf -v runner_state_q '%q' "$runner_state_file"
+printf -v branch_q '%q' "$branch_name"
+printf -v sandbox_run_dir_q '%q' "$sandbox_run_dir"
+printf -v retained_repo_root_q '%q' "$retained_repo_root"
+printf -v adapter_id_q '%q' "$adapter_id"
+printf -v started_at_q '%q' "$started_at"
+printf -v gemini_bin_q '%q' "$gemini_bin"
+printf -v pi_model_q '%q' "$pi_model"
+printf -v pi_thinking_q '%q' "$pi_thinking"
+printf -v pi_timeout_q '%q' "$pi_timeout_seconds"
+printf -v pi_stall_q '%q' "$pi_stall_seconds"
+
+{
+  printf 'TASK_KIND=%s\n' "$task_kind_q"
+  printf 'TASK_ID=%s\n' "$task_id_q"
+  printf 'SESSION=%s\n' "$session_q"
+  printf 'MODE=%s\n' "$mode_q"
+  printf 'WORKTREE=%s\n' "$worktree_q"
+  printf 'PROMPT_FILE=%s\n' "$prompt_q"
+  printf 'OUTPUT_FILE=%s\n' "$output_q"
+  printf 'SCRIPT=%s\n' "$script_q"
+  printf 'BRANCH=%s\n' "$branch_q"
+  printf 'RESULT_FILE=%s\n' "$result_q"
+  printf 'RUNNER_STATE_FILE=%s\n' "$runner_state_q"
+  printf 'SANDBOX_RUN_DIR=%s\n' "$sandbox_run_dir_q"
+  printf 'ADAPTER_ID=%s\n' "$adapter_id_q"
+  printf 'STARTED_AT=%s\n' "$started_at_q"
+  printf 'GEMINI_BIN=%s\n' "$gemini_bin_q"
+  printf 'GEMINI_MODEL=%s\n' "$pi_model_q"
+  printf 'GEMINI_THINKING=%s\n' "$pi_thinking_q"
+  printf 'GEMINI_TIMEOUT_SECONDS=%s\n' "$pi_timeout_q"
+  printf 'GEMINI_STALL_SECONDS=%s\n' "$pi_stall_q"
+} >"$meta_file"
+
+context_exports=""
+if ((${#context_items[@]} > 0)); then
+  for item in "${context_items[@]}"; do
+    if [[ "$item" != *=* ]]; then
+      echo "--context must use KEY=VALUE syntax: $item" >&2
+      exit 1
+    fi
+    key="${item%%=*}"
+    value="${item#*=}"
+    if [[ ! "$key" =~ ^[A-Z0-9_]+$ ]]; then
+      echo "Invalid context key: $key" >&2
+      exit 1
+    fi
+    printf -v value_q '%q' "$value"
+    printf '%s=%s\n' "$key" "$value_q" >>"$meta_file"
+    if [[ -n "$env_prefix" ]]; then
+      context_exports+="export ${env_prefix}${key}=${value_q}"$'\n'
+    fi
+    context_exports+="export ACP_${key}=${value_q}"$'\n'
+    if [[ "$env_prefix" != "F_LOSNING_" ]]; then
+      context_exports+="export F_LOSNING_${key}=${value_q}"$'\n'
+    fi
+  done
+fi
+
+runtime_exports=$(
+  cat <<EOF
+export AGENT_PROJECT_SESSION=${session_q}
+export AGENT_PROJECT_RUN_DIR=${sandbox_run_dir_q}
+export AGENT_PROJECT_HOST_RUN_DIR=${artifact_dir_q}
+export AGENT_PROJECT_RESULT_FILE=${sandbox_run_dir_q}/result.env
+export AGENT_PROJECT_GEMINI_BIN=${gemini_bin_q}
+export AGENT_PROJECT_RETAINED_REPO_ROOT=${retained_repo_root_q}
+export ACP_SESSION=${session_q}
+export ACP_RUN_DIR=${sandbox_run_dir_q}
+export ACP_HOST_RUN_DIR=${artifact_dir_q}
+export ACP_RESULT_FILE=${sandbox_run_dir_q}/result.env
+export ACP_GEMINI_BIN=${gemini_bin_q}
+export ACP_GEMINI_MODEL=${pi_model_q}
+export ACP_GEMINI_THINKING=${pi_thinking_q}
+export ACP_GEMINI_TIMEOUT_SECONDS=${pi_timeout_q}
+export ACP_RETAINED_REPO_ROOT=${retained_repo_root_q}
+export F_LOSNING_SESSION=${session_q}
+export F_LOSNING_RUN_DIR=${sandbox_run_dir_q}
+export F_LOSNING_HOST_RUN_DIR=${artifact_dir_q}
+export F_LOSNING_RESULT_FILE=${sandbox_run_dir_q}/result.env
+export F_LOSNING_GEMINI_BIN=${gemini_bin_q}
+export F_LOSNING_GEMINI_MODEL=${pi_model_q}
+export F_LOSNING_GEMINI_THINKING=${pi_thinking_q}
+export F_LOSNING_GEMINI_TIMEOUT_SECONDS=${pi_timeout_q}
+export F_LOSNING_RETAINED_REPO_ROOT=${retained_repo_root_q}
+EOF
+)
+
+if [[ -n "$env_prefix" ]]; then
+  runtime_exports+=$'\n'
+  runtime_exports+=$(cat <<EOF
+export ${env_prefix}SESSION=${session_q}
+export ${env_prefix}RUN_DIR=${sandbox_run_dir_q}
+export ${env_prefix}HOST_RUN_DIR=${artifact_dir_q}
+export ${env_prefix}RESULT_FILE=${sandbox_run_dir_q}/result.env
+export ${env_prefix}GEMINI_BIN=${gemini_bin_q}
+export ${env_prefix}GEMINI_MODEL=${pi_model_q}
+export ${env_prefix}GEMINI_THINKING=${pi_thinking_q}
+export ${env_prefix}GEMINI_TIMEOUT_SECONDS=${pi_timeout_q}
+EOF
+)
+fi
+
+collect_copy_snippet=""
+if ((${#collect_files[@]} > 0)); then
+  for artifact_name in "${collect_files[@]}"; do
+    [[ -z "$artifact_name" ]] && continue
+    printf -v artifact_q '%q' "$artifact_name"
+    collect_copy_snippet+=$(
+      cat <<EOF
+if [[ -f ${sandbox_run_dir_q}/${artifact_q} ]]; then
+  cp ${sandbox_run_dir_q}/${artifact_q} ${artifact_dir_q}/${artifact_q}
+fi
+EOF
+    )
+    collect_copy_snippet+=$'\n'
+  done
+fi
+
+# Always collect result.env from sandbox to artifact_dir
+collect_copy_snippet+=$(
+  cat <<EOF
+if [[ -f ${sandbox_run_dir_q}/result.env ]]; then
+  cp ${sandbox_run_dir_q}/result.env ${result_q}
+fi
+EOF
+)
+
+reconcile_snippet=""
+if [[ -n "$reconcile_command" ]]; then
+  printf -v delayed_reconcile_q '%q' "export ACP_EXPECTED_RUN_STARTED_AT=${started_at_q}; export F_LOSNING_EXPECTED_RUN_STARTED_AT=${started_at_q}; while tmux has-session -t ${session_q} 2>/dev/null; do sleep 1; done; sleep 2; $reconcile_command"
+  reconcile_snippet="nohup bash -lc ${delayed_reconcile_q} >> ${output_q} 2>&1 </dev/null &"
+fi
+
+cat >"$inner_script" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+${runtime_exports}
+${context_exports}cd ${worktree_q}
+
+runner_state_file=${runner_state_q}
+output_file=${output_q}
+sandbox_run_dir=${sandbox_run_dir_q}
+artifact_dir=${artifact_dir_q}
+result_file_path=${sandbox_run_dir_q}/result.env
+host_result_file=${result_q}
+gemini_bin=${gemini_bin_q}
+pi_model=${pi_model_q}
+pi_thinking=${pi_thinking_q}
+pi_timeout_seconds=${pi_timeout_q}
+pi_stall_seconds=${pi_stall_q}
+prompt_file=${prompt_q}
+worktree=${worktree_q}
+
+write_state() {
+  local runner_state="\${1:?runner state required}"
+  local last_exit_code="\${2:-}"
+  local failure_reason="\${3:-}"
+  local updated_at tmp_file
+
+  updated_at="\$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  tmp_file="\${runner_state_file}.tmp.\$\$"
+  {
+    printf 'RUNNER_STATE=%q\n' "\${runner_state}"
+    printf 'ATTEMPT=1\n'
+    printf 'RESUME_COUNT=0\n'
+    printf 'LAST_EXIT_CODE=%q\n' "\${last_exit_code}"
+    printf 'LAST_FAILURE_REASON=%q\n' "\${failure_reason}"
+    printf 'LAST_TRIGGER_REASON=%q\n' ''
+    printf 'AUTH_WAIT_STARTED_AT=%q\n' ''
+    printf 'UPDATED_AT=%q\n' "\${updated_at}"
+  } >"\${tmp_file}"
+  mv "\${tmp_file}" "\${runner_state_file}"
+}
+
+write_result_fallback() {
+  local detail="\${1:-missing-result-contract}"
+  local tmp_file
+  tmp_file="\${result_file_path}.tmp.\$\$"
+  {
+    printf 'OUTCOME=blocked\n'
+    printf 'ACTION=host-comment-blocker\n'
+    printf 'DETAIL=%s\n' "\${detail}"
+  } >"\${tmp_file}"
+  mv "\${tmp_file}" "\${result_file_path}"
+}
+
+record_final_git_state() {
+  local final_head final_branch tmp_file
+  final_head="\$(git -C ${worktree_q} rev-parse HEAD 2>/dev/null || true)"
+  final_branch="\$(git -C ${worktree_q} branch --show-current 2>/dev/null || true)"
+  tmp_file=${meta_file_q}.tmp.final.$$
+  grep -vE '^(FINAL_HEAD|FINAL_BRANCH)=' ${meta_file_q} >"\${tmp_file}" 2>/dev/null || true
+  {
+    printf 'FINAL_HEAD=%q\n' "\${final_head}"
+    printf 'FINAL_BRANCH=%q\n' "\${final_branch}"
+  } >>"\${tmp_file}"
+  mv "\${tmp_file}" ${meta_file_q}
+}
+
+${reconcile_snippet}
+
+write_state running
+
+mkdir -p "\${sandbox_run_dir}"
+
+# Run pi in print mode (non-interactive, single-shot)
+# --no-session: ephemeral, don't persist session state
+# --thinking: reasoning depth
+# @prompt_file: pass prompt as file reference
+pi_exit_code=0
+# macOS does not ship 'timeout'; prefer it when available, else use background watchdog
+if command -v timeout >/dev/null 2>&1; then
+  timeout "\${pi_timeout_seconds}" \\
+    "\${gemini_bin}" -p --no-session \\
+      -m "\${pi_model}" \\
+      --thinking "\${pi_thinking}" \\
+      "@\${prompt_file}" \\
+    2>&1 | tee -a "\${output_file}" || pi_exit_code=\$?
+elif command -v gtimeout >/dev/null 2>&1; then
+  gtimeout "\${pi_timeout_seconds}" \\
+    "\${gemini_bin}" -p --no-session \\
+      -m "\${pi_model}" \\
+      --thinking "\${pi_thinking}" \\
+      "@\${prompt_file}" \\
+    2>&1 | tee -a "\${output_file}" || pi_exit_code=\$?
+else
+  "\${gemini_bin}" -p --no-session \\
+    -m "\${pi_model}" \\
+    --thinking "\${pi_thinking}" \\
+    "@\${prompt_file}" \\
+    2>&1 >> "\${output_file}" &
+  _pi_bgpid=\$!
+  # Hard timeout watchdog
+  ( sleep "\${pi_timeout_seconds}" && kill "\${_pi_bgpid}" 2>/dev/null \\
+      && printf '[pi] timed out after %s seconds\n' "\${pi_timeout_seconds}" >> "\${output_file}" ) &
+  _pi_timeout_wd=\$!
+  # Stall watchdog: kill if output file stops growing for pi_stall_seconds
+  if [[ "\${pi_stall_seconds}" -gt 0 ]]; then
+    (
+      _prev_size=-1
+      while kill -0 "\${_pi_bgpid}" 2>/dev/null; do
+        _cur_size="\$(wc -c < "\${output_file}" 2>/dev/null || echo 0)"
+        if [[ "\${_cur_size}" -eq "\${_prev_size}" ]]; then
+          if [[ -z "\${_idle_since:-}" ]]; then _idle_since="\$(date +%s)"; fi
+          if (( \$(date +%s) - _idle_since >= pi_stall_seconds )); then
+            printf '[pi] no output for %s seconds — aborting stalled worker\n' "\${pi_stall_seconds}" >> "\${output_file}"
+            kill "\${_pi_bgpid}" 2>/dev/null
+            break
+          fi
+        else
+          _idle_since=""
+          _prev_size="\${_cur_size}"
+        fi
+        sleep 5
+      done
+    ) &
+    _pi_stall_wd=\$!
+  fi
+  wait "\${_pi_bgpid}" || pi_exit_code=\$?
+  kill "\${_pi_timeout_wd}" 2>/dev/null || true
+  wait "\${_pi_timeout_wd}" 2>/dev/null || true
+  if [[ -n "\${_pi_stall_wd:-}" ]]; then
+    kill "\${_pi_stall_wd}" 2>/dev/null || true
+    wait "\${_pi_stall_wd}" 2>/dev/null || true
+  fi
+  if [[ "\${pi_exit_code}" -eq 143 ]]; then
+    pi_exit_code=124
+  fi
+fi
+
+if [[ "\${pi_exit_code}" -eq 0 ]]; then
+  # Pi runs in -p mode and cannot write result.env itself.
+  # If the result file is missing, write a blocked fallback so reconcile
+  # sees a valid contract instead of an invalid-result-contract failure.
+  if [[ ! -f "\${result_file_path}" ]]; then
+    write_result_fallback "missing-result-contract"
+  fi
+  write_state succeeded 0
+else
+  failure_reason="pi-exit-\${pi_exit_code}"
+  if [[ "\${pi_exit_code}" -eq 124 ]]; then
+    failure_reason="timeout"
+  fi
+  if [[ ! -f "\${result_file_path}" ]]; then
+    write_result_fallback "\${failure_reason}"
+  fi
+  write_state failed "\${pi_exit_code}" "\${failure_reason}"
+fi
+
+record_final_git_state
+
+${collect_copy_snippet}
+printf '\n__CODEX_EXIT__:%s\n' "\${pi_exit_code}" | tee -a "\${output_file}"
+exit "\${pi_exit_code}"
+EOF
+
+chmod +x "$inner_script"
+
+# Write initial runner state
+{
+  printf 'RUNNER_STATE=%q\n' "running"
+  printf 'ATTEMPT=1\n'
+  printf 'RESUME_COUNT=0\n'
+  printf "LAST_EXIT_CODE=''\n"
+  printf "LAST_FAILURE_REASON=''\n"
+  printf "LAST_TRIGGER_REASON=''\n"
+  printf "AUTH_WAIT_STARTED_AT=''\n"
+  printf 'UPDATED_AT=%q\n' "$started_at"
+  printf 'RUNNER_STATE_FILE=%q\n' "$runner_state_file"
+} >"$runner_state_file"
+
+# Append pi-specific metadata to run.env for dashboard/status visibility
+{
+  printf 'GEMINI_MODEL=%s\n' "$pi_model_q"
+  printf 'GEMINI_THINKING=%s\n' "$pi_thinking_q"
+  printf 'GEMINI_TIMEOUT_SECONDS=%s\n' "$pi_timeout_q"
+  printf 'GEMINI_STALL_SECONDS=%s\n' "$pi_stall_q"
+  printf 'GEMINI_BIN=%s\n' "$gemini_bin_q"
+} >>"$meta_file"
+
+tmux new-session -d -s "$session" -x 220 -y 50 \
+  "bash -l $script_q >> $output_q 2>&1; tmux wait-for -S $session_q-done" \; \
+  wait-for "$session-done" || true
