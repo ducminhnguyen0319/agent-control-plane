@@ -43,10 +43,10 @@ done.
 | `codex` | production-ready | yes | yes | First-class worker path for Codex-backed runs. |
 | `claude` | production-ready | yes | yes | First-class worker path for Claude-backed runs. Retry, timeout, and provider-quota handling. |
 | `openclaw` | production-ready | yes | yes | First-class worker path with resident workflow support, stall detection, and host-side result inference. |
-| `ollama` | **hardening** | yes | yes | Working adapter with Node.js agentic loop. **v0.4.9+: Added health-check + context detection.** Moved toward production-ready. |
-| `pi` | experimental | yes | yes | Working adapter using the pi CLI. **Needs health-check + API key validation.** |
-| `opencode` | experimental | yes | yes | Working adapter for Crush. **Needs health-check (verify `crush` binary).** |
-| `kilo` | experimental | yes | yes | Working adapter for Kilo Code. **Needs health-check + JSON stream validation.** |
+| `ollama` | **hardened** | yes | yes | Working adapter with Node.js agentic loop. **v0.4.9+: Added health-check + context detection. v0.7.0: Auto-pull model + context detection in health-check.** |
+| `pi` | **hardened** | yes | yes | Working adapter using the pi CLI. **v0.7.0: API connectivity test + model validation + OPENROUTER_API_KEY check.** |
+| `opencode` | **hardened** | yes | yes | Working adapter for Crush. **v0.7.0: version check + model validation + improved error handling.** |
+| `kilo` | **hardened** | yes | yes | Working adapter for Kilo Code. **v0.7.0: version check + JSON stream validation + prompt file validation.** |
 | `gemini-cli` | **integrated** | yes | yes | Google's official terminal agent (v0.39.1+). Full ACP adapter with health-check, API key validation, and streaming JSON output. |
 
 ### Production-Ready

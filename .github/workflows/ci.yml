@@ -17,5 +17,21 @@ jobs:
         with:
           node-version: 22
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Python deps (for adapter tests)
+        run: pip install websockets aiohttp aiohttp-cors
+
+      - name: Run adapter tests (allow failures - CLIs not installed in CI)
+        run: bash tools/bin/test-adapters.sh
+        continue-on-error: true
+
+      - name: Run smoke tests
+        run: cd tools/bin && bash check-skill-contracts.sh
+        continue-on-error: true
+
       - name: Pass CI
-        run: echo "CI passed (simplified)"
+        run: echo "CI completed (adapter tests may show failures - expected without CLIs)"
