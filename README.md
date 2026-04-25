@@ -143,9 +143,24 @@ familiar:
 ## Roadmap
 
 ACP is moving toward a true multi-backend control plane. The goal is one runtime
-and one dashboard for many coding-agent backends, across macOS, Linux, and Windows (WSL2)
-Windows.
+and one dashboard for many coding-agent backends, across macOS, Linux, Windows (WSL2),
+and **native Windows** (service model).
 
+### Windows Support
+
+ACP now supports running as a native Windows Service!
+
+- **Docs**: See [Windows Setup Guide](docs/WINDOWS_SETUP.md)
+- **Service managers**: NSSM (recommended), sc.exe, or PowerShell cmdlets
+- **Quick start**:
+  ```powershell
+  # Using NSSM (download from https://nssm.cc/download)
+  nssm install "ACP_Dashboard" "C:\Path\To\python.exe" "C:\Path\To\agent-control-plane\tools\dashboard\server.py"
+  nssm start "ACP_Dashboard"
+  ```
+- **PowerShell installer**: `tools/bin/install-windows-service.ps1`
+
+### Windows
 ### Backend Status
 
 | Backend | Status | Notes |
