@@ -7,6 +7,13 @@ layout for public releases.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-04-25
+
+### Fixed
+- **Package Contents**: Include all adapter files in npm package (codex, claude, openclaw, ollama, pi, opencode, kilo)
+- **Ollama Adapter**: Fix context window detection to parse `model_info` correctly (e.g., `qwen2.context_length`)
+- **Package Cleanup**: Remove `__pycache__` directories from published package
+
 ## [0.7.0] - 2026-04-25
 
 ### Added
