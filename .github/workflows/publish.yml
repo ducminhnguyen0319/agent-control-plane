@@ -74,7 +74,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           # Extract section for this version from CHANGELOG.md
-          python3 << 'PY' >> $GITHUB_OUTPUT
+          python3 << 'PY' > /tmp/changelog_body.txt
           import re, sys, os
           
           version = os.environ.get("VERSION")
@@ -90,12 +90,16 @@ jobs:
               lines = section.split("\n")
               # Skip the first line (header)
               body = "\n".join(lines[1:]).strip()
-              print("body<<EOF")
               print(body)
-              print("EOF")
           else:
-              print(f"body=No changelog found for version {version}")
+              print(f"No changelog found for version {version}")
           PY
+          
+          # Read the output and set as multiline GitHub Actions output
+          BODY=$(cat /tmp/changelog_body.txt)
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "$BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
