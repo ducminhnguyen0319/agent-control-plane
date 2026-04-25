@@ -55,7 +55,14 @@ adapter_health_check() {
   
   # Detect context window and update capability dynamically
   local context_window
-  context_window="$(curl -sf "${ADAPTER_BASE_URL}/api/show" -d "{\"name\":\"${ADAPTER_MODEL}\"}" 2>/dev/null | grep -o '"context_length":[0-9]*' | cut -d: -f2 || true)"
+  # Ollama API returns context_length inside model_info with architecture prefix
+  # e.g., qwen2.context_length, llama.context_length, etc.
+  if command -v jq &>/dev/null; then
+    context_window="$(curl -sf "${ADAPTER_BASE_URL}/api/show" -d "{\"name\":\"${ADAPTER_MODEL}\"}" 2>/dev/null | jq -r '.model_info // {} | to_entries[] | select(.key | endswith("context_length")) | .value' 2>/dev/null | head -1 || true)"
+  else
+    # Fallback: use grep for common patterns
+    context_window="$(curl -sf "${ADAPTER_BASE_URL}/api/show" -d "{\"name\":\"${ADAPTER_MODEL}\"}" 2>/dev/null | grep -o '"[a-z]*\.context_length":[0-9]*' | head -1 | grep -o '[0-9]*$' || true)"
+  fi
   if [[ -n "$context_window" ]]; then
     ADAPTER_CAP_CONTEXT_WINDOW="$context_window"
     echo "INFO: Detected context window: $context_window tokens"
