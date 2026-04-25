@@ -809,17 +809,17 @@ flow_provider_pool_kilo_timeout_seconds() {
 
 flow_sanitize_provider_key() {
   local raw_key="${1:?raw key required}"
-
+  
   printf '%s' "${raw_key}" \
     | tr '[:upper:]' '[:lower:]' \
-    | sed -E 's/[^a-z0-9._-]+/-/g; s/^-+//; s/-+$//; s/-+/-/g'
+    | sed -E 's/[^a-z0-9._-]+/-/g; s/^-+//; s/-+$//; s/-\+/-/g'
 }
 
 flow_provider_pool_model_identity() {
   local config_file="${1:?config file required}"
   local pool_name="${2:?pool name required}"
   local backend=""
-
+  
   backend="$(flow_provider_pool_backend "${config_file}" "${pool_name}")"
   case "${backend}" in
     codex)
@@ -847,5 +847,135 @@ flow_provider_pool_model_identity() {
       printf '\n'
       ;;
   esac
+}
+
+# Check health of a specific provider pool
+# Returns: 0 = healthy, 1 = unhealthy
+flow_provider_pool_health_check() {
+  local config_file="${1:?config file required}"
+  local pool_name="${2:?pool name required}"
+  local backend=""
+  local adapter_script=""
+  local SCRIPT_DIR=""
+  
+  backend="$(flow_provider_pool_backend "${config_file}" "${pool_name}")"
+  if [[ -z "${backend}" ]]; then
+    echo "ERROR: No backend found for pool ${pool_name}"
+    return 1
+  fi
+  
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  adapter_script="${SCRIPT_DIR}/${backend}-adapter.sh"
+  
+  if [[ ! -f "${adapter_script}" ]]; then
+    echo "WARN: Adapter script not found: ${adapter_script}"
+    return 1
+  fi
+  
+  # Source adapter and run health check
+  source "${SCRIPT_DIR}/adapter-interface.sh"
+  source "${SCRIPT_DIR}/adapter-capabilities.sh"
+  source "${adapter_script}"
+  
+  adapter_health_check
+  return $?
+}
+
+# Get healthy pools in priority order
+# Returns list of pool names that are healthy
+flow_healthy_pools() {
+  local config_file="${1:-}"
+  local pool_name=""
+  local healthy_pools=""
+  
+  if [[ -z "${config_file}" ]]; then
+    config_file="$(resolve_flow_config_yaml "${BASH_SOURCE[1]:-${BASH_SOURCE[0]}}")"
+  fi
+  
+  for pool_name in $(flow_provider_pool_names "${config_file}"); do
+    if flow_provider_pool_health_check "${config_file}" "${pool_name}" >/dev/null 2>&1; then
+      healthy_pools="${healthy_pools} ${pool_name}"
+    fi
+  done
+  
+  printf '%s\n' "${healthy_pools}"
+}
+
+# Enhanced provider pool selection with failover
+# Returns: environment variables for the best available provider pool
+flow_selected_provider_pool_env() {
+  local config_file="${1:-}"
+  local pool_name=""
+  local selected_pool=""
+  local backend=""
+  local health_output=""
+  
+  if [[ -z "${config_file}" ]]; then
+    config_file="$(resolve_flow_config_yaml "${BASH_SOURCE[1]:-${BASH_SOURCE[0]}}")"
+  fi
+  
+  # Try pools in order, pick first healthy one
+  for pool_name in $(flow_provider_pool_names "${config_file}"); do
+    health_output="$(flow_provider_pool_health_check "${config_file}" "${pool_name}" 2>&1)"
+    if [[ $? -eq 0 ]]; then
+      selected_pool="${pool_name}"
+      echo "INFO: Selected healthy provider pool: ${selected_pool}"
+      echo "${health_output}"
+      break
+    else
+      echo "WARN: Provider pool '${pool_name}' is unhealthy, trying next: ${health_output}"
+    fi
+  done
+  
+  if [[ -z "${selected_pool}" ]]; then
+    echo "ERROR: No healthy provider pools available!"
+    return 1
+  fi
+  
+  # Export environment for selected pool
+  backend="$(flow_provider_pool_backend "${config_file}" "${selected_pool}")"
+  echo "INFO: Active provider backend: ${backend}"
+  echo "ACP_PROVIDER_POOL_NAME=${selected_pool}"
+  echo "ACP_PROVIDER_POOL_BACKEND=${backend}"
+  
+  # Export backend-specific settings
+  case "${backend}" in
+    claude)
+      echo "ACP_CLAUDE_MODEL=$(flow_provider_pool_claude_model "${config_file}" "${selected_pool}")"
+      echo "ACP_CLAUDE_PERMISSION_MODE=$(flow_provider_pool_claude_permission_mode "${config_file}" "${selected_pool}")"
+      echo "ACP_CLAUDE_EFFORT=$(flow_provider_pool_claude_effort "${config_file}" "${selected_pool}")"
+      echo "ACP_CLAUDE_TIMEOUT_SECONDS=$(flow_provider_pool_claude_timeout_seconds "${config_file}" "${selected_pool}")"
+      echo "ACP_CLAUDE_MAX_ATTEMPTS=$(flow_provider_pool_claude_max_attempts "${config_file}" "${selected_pool}")"
+      echo "ACP_CLAUDE_RETRY_BACKOFF_SECONDS=$(flow_provider_pool_claude_retry_backoff_seconds "${config_file}" "${selected_pool}")"
+      ;;
+    openclaw)
+      echo "ACP_OPENCLAW_MODEL=$(flow_provider_pool_openclaw_model "${config_file}" "${selected_pool}")"
+      echo "ACP_OPENCLAW_THINKING=$(flow_provider_pool_openclaw_thinking "${config_file}" "${selected_pool}")"
+      echo "ACP_OPENCLAW_TIMEOUT_SECONDS=$(flow_provider_pool_openclaw_timeout_seconds "${config_file}" "${selected_pool}")"
+      ;;
+    ollama)
+      echo "ACP_OLLAMA_MODEL=$(flow_provider_pool_ollama_model "${config_file}" "${selected_pool}")"
+      echo "ACP_OLLAMA_BASE_URL=$(flow_provider_pool_ollama_base_url "${config_file}" "${selected_pool}")"
+      echo "ACP_OLLAMA_TIMEOUT_SECONDS=$(flow_provider_pool_ollama_timeout_seconds "${config_file}" "${selected_pool}")"
+      ;;
+    pi)
+      echo "ACP_PI_MODEL=$(flow_provider_pool_pi_model "${config_file}" "${selected_pool}")"
+      echo "ACP_PI_THINKING=$(flow_provider_pool_pi_thinking "${config_file}" "${selected_pool}")"
+      echo "ACP_PI_TIMEOUT_SECONDS=$(flow_provider_pool_pi_timeout_seconds "${config_file}" "${selected_pool}")"
+      ;;
+    opencode)
+      echo "ACP_OPENCODE_MODEL=$(flow_provider_pool_opencode_model "${config_file}" "${selected_pool}")"
+      echo "ACP_OPENCODE_TIMEOUT_SECONDS=$(flow_provider_pool_opencode_timeout_seconds "${config_file}" "${selected_pool}")"
+      ;;
+    kilo)
+      echo "ACP_KILO_MODEL=$(flow_provider_pool_kilo_model "${config_file}" "${selected_pool}")"
+      echo "ACP_KILO_TIMEOUT_SECONDS=$(flow_provider_pool_kilo_timeout_seconds "${config_file}" "${selected_pool}")"
+      ;;
+    codex)
+      echo "INFO: Codex uses quota manager, no additional env needed"
+      ;;
+  esac
+  
+  return 0
 }
 
