@@ -6,12 +6,19 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/adapter-interface.sh"
+source "${SCRIPT_DIR}/adapter-capabilities.sh"
 
 ADAPTER_ID="pi"
 ADAPTER_NAME="Pi Coding Agent"
 ADAPTER_TYPE="cloud-api"
 ADAPTER_VERSION="1.0.0"
 ADAPTER_MODEL="${PI_MODEL:-openrouter/qwen/qwen3.5-plus:free}"
+
+# Pi capabilities
+ADAPTER_CAP_CLOUD_API=true
+ADAPTER_CAP_STREAMING=true
+ADAPTER_CAP_JSON_OUTPUT=true
+ADAPTER_CAP_MAX_TIMEOUT=900
 
 adapter_info() {
   cat <<EOF

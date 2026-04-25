@@ -7,14 +7,21 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/adapter-interface.sh"
+source "${SCRIPT_DIR}/adapter-capabilities.sh"
 
 # Codex adapter metadata
 ADAPTER_ID="codex"
 ADAPTER_NAME="Codex (Claude CLI)"
 ADAPTER_TYPE="cloud-api"
 ADAPTER_VERSION="1.0.0"
-ADAPTER_MODEL="${CLAUDE_MODEL:-sonnet}"
+ADAPTER_MODEL="${CODEX_MODEL:-sonnet}"
 ADAPTER_BASE_URL=""
+
+# Codex capabilities
+ADAPTER_CAP_CLOUD_API=true
+ADAPTER_CAP_STREAMING=true
+ADAPTER_CAP_JSON_OUTPUT=true
+ADAPTER_CAP_MAX_TIMEOUT=900
 
 # Print adapter info
 adapter_info() {

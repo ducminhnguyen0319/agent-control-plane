@@ -7,6 +7,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/adapter-interface.sh"
+source "${SCRIPT_DIR}/adapter-capabilities.sh"
 
 # Ollama adapter metadata
 ADAPTER_ID="ollama"
@@ -15,6 +16,13 @@ ADAPTER_TYPE="local-model"
 ADAPTER_VERSION="1.0.0"
 ADAPTER_MODEL="${OLLAMA_MODEL:-qwen2.5-coder:7b}"
 ADAPTER_BASE_URL="${OLLAMA_BASE_URL:-http://localhost:11434}"
+
+# Ollama capabilities
+ADAPTER_CAP_LOCAL_MODEL=true
+ADAPTER_CAP_STREAMING=true
+ADAPTER_CAP_TOOLS_SUPPORT=true
+ADAPTER_CAP_CONTEXT_WINDOW=32768  # Default, will be detected dynamically
+ADAPTER_CAP_MAX_TIMEOUT=3600
 
 # Print adapter info
 adapter_info() {
@@ -45,11 +53,14 @@ adapter_health_check() {
     fi
   fi
   
-  # Detect context window (already done in run, but verify here)
+  # Detect context window and update capability dynamically
   local context_window
   context_window="$(curl -sf "${ADAPTER_BASE_URL}/api/show" -d "{\"name\":\"${ADAPTER_MODEL}\"}" 2>/dev/null | grep -o '"context_length":[0-9]*' | cut -d: -f2 || true)"
   if [[ -n "$context_window" ]]; then
+    ADAPTER_CAP_CONTEXT_WINDOW="$context_window"
     echo "INFO: Detected context window: $context_window tokens"
+  else
+    echo "WARN: Could not detect context window from Ollama API"
   fi
   
   echo "OK: Ollama healthy, model ${ADAPTER_MODEL} available"

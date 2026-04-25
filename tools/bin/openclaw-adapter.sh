@@ -6,12 +6,20 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/adapter-interface.sh"
+source "${SCRIPT_DIR}/adapter-capabilities.sh"
 
 ADAPTER_ID="openclaw"
 ADAPTER_NAME="OpenClaw"
 ADAPTER_TYPE="cloud-api"
 ADAPTER_VERSION="1.0.0"
 ADAPTER_MODEL="${OPENCLAW_MODEL:-openrouter/qwen/qwen3.5-plus:free}"
+
+# OpenClaw capabilities
+ADAPTER_CAP_CLOUD_API=true
+ADAPTER_CAP_STREAMING=true
+ADAPTER_CAP_JSON_OUTPUT=true
+ADAPTER_CAP_RESIDENT_MODE=true
+ADAPTER_CAP_MAX_TIMEOUT=900
 
 adapter_info() {
   cat <<EOF
