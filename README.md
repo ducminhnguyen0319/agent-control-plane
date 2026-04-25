@@ -150,6 +150,14 @@ familiar:
 - Your local machine should behave like a reliable operator box, not a pile of
   shell history that breaks after a reboot.
 
+## Screenshots
+
+### Light Mode
+![ACP Dashboard - Light Mode](docs/screenshots/dashboard-main.png)
+
+### Dark Mode  
+![ACP Dashboard - Dark Mode](docs/screenshots/dashboard-dark.png)
+
 ## Roadmap
 
 ACP is moving toward a true multi-backend control plane. The goal is one runtime
