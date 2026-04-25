@@ -7,6 +7,31 @@ layout for public releases.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-04-25
+
+### Added
+- **WebSocket Dashboard**: Real-time updates via WebSocket (replaced 5s polling)
+- **Native Windows Support**: Run as Windows Service (NSSM/sc.exe/PowerShell)
+- **Release Automation**: Auto-create GitHub Releases with CHANGELOG sections
+- **Screenshots**: Light/dark mode dashboard screenshots in docs/screenshots/
+
+### Changed
+- **Adapters Hardened**: All 6 backends now production-ready:
+  - ollama: Auto-pull model + context window detection
+  - pi: API connectivity test + OPENROUTER_API_KEY validation
+  - opencode: Version check + model validation
+  - kilo: Version check + JSON stream validation
+  - claude, codex, openclaw: Enhanced health-checks
+- **Standardized Capabilities**: `adapter-capabilities.sh` for all adapters
+- **Provider Failover**: Auto-switch when backend is rate-limited/degraded
+- **Code Quality**: Refactored `flow-config-lib.sh` (3516 lines → 5 modules)
+- **README**: Updated with v0.7.0 info, screenshots, Windows support
+
+### Security
+- All adapters validate prompt files (exists + not empty)
+- Better error handling and logging across all adapters
+- Provider pool health checks before selection
+
 ## [0.6.0] - 2026-04-24
 
 ### Added
