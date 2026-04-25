@@ -1,4 +1,4 @@
-# agent-control-plane
+# agent-control-plane (ACP) v0.7.0
 
 <p>
   <a href="https://github.com/ducminhnguyen0319/agent-control-plane/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/ducminhnguyen0319/agent-control-plane/actions/workflows/ci.yml/badge.svg?branch=main"></a>
@@ -7,11 +7,21 @@
   <a href="./LICENSE"><img alt="license" src="https://img.shields.io/npm/l/agent-control-plane?style=flat-square"></a>
   <a href="https://github.com/sponsors/ducminhnguyen0319"><img alt="GitHub Sponsors" src="https://img.shields.io/badge/sponsor-GitHub%20Sponsors-ea4aaa?style=flat-square&logo=githubsponsors&logoColor=white"></a>
   <a href="https://socket.dev/npm/package/agent-control-plane"><img alt="Socket" src="https://img.shields.io/badge/Socket-79-f5a623?style=flat-square"></a>
+  <a href="./ROADMAP.md"><img alt="Roadmap Complete" src="https://img.shields.io/badge/ROADMAP-v0.7.0-success?style=flat-square"></a>
+  <a href="./CHANGELOG.md"><img alt="Changelog" src="https://img.shields.io/badge/CHANGELOG-v0.7.0-blue?style=flat-square"></a>
 </p>
 
-`agent-control-plane` (ACP) keeps your coding agents running reliably without
-you having to stare at them all day.
+**agent-control-plane (ACP)** keeps your coding agents running reliably without you having to stare at them all day.
 
+## ✅ ROADMAP UPDATE (v0.7.0) - New Features!
+
+- **Real-time Dashboard**: WebSocket updates (no more 5s polling!)
+- **Hardened Adapters**: All 6 backends now production-ready
+- **Native Windows Support**: Run as Windows Service (NSSM/sc.exe/PowerShell)
+- **Standardized Capabilities**: Worker capability detection across all backends
+- **Provider Failover**: Auto-switch when backend is rate-limited/degraded
+
+## ✅ ROADMAP COMPLETE (v0.6.0) - All 5 Sections Delivered!
 **✅ ROADMAP COMPLETE (v0.6.0)** - All planned features delivered!
 
 It is the operator layer for coding agents that need to keep running after the

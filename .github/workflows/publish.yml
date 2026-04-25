@@ -58,3 +58,49 @@ jobs:
           fi
 
           npm publish --provenance --access public
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: |
+          TAG="${{ inputs.git_ref || github.ref }}"
+          VERSION="${TAG#refs/tags/v}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Read CHANGELOG for this version
+        id: changelog
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Extract section for this version from CHANGELOG.md
+          python3 << 'PY'
+          import re, sys
+
+          version = "${{ steps.version.outputs.version }}"
+          with open("CHANGELOG.md", "r") as f:
+              content = f.read()
+
+          # Find section for this version
+          pattern = rf"##\s+\[{re.escape(version)}\].*?(?=\n##\s+\[|\Z)"
+          match = re.search(pattern, content, re.DOTALL)
+          if match:
+              section = match.group(0).strip()
+              # Remove the header line
+              lines = section.split("\n")
+              # Skip the first line (header)
+              body = "\n".join(lines[1:]).strip()
+              print(body)
+          else:
+              print(f"No changelog found for version {version}")
+          PY'
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: agent-control-plane v${{ steps.version.outputs.version }}
+          body: ${{ steps.changelog.outputs.body }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
