@@ -72,8 +72,7 @@
     "tools/vendor/codex-quota-manager/scripts"
   ],
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   },
   "engines": {
     "node": ">=18"
