@@ -92,7 +92,7 @@ jobs:
               print(body)
           else:
               print(f"No changelog found for version {version}")
-          PY'
+          PY
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
