@@ -28,7 +28,27 @@ adapter_health_check() {
     echo "ERROR: crush CLI not found in PATH"
     return 1
   fi
-  echo "OK: OpenCode adapter healthy"
+  
+  # Verify crush can actually run (version check)
+  if ! crush --version >/dev/null 2>&1; then
+    echo "ERROR: crush CLI cannot run (check installation)"
+    return 1
+  fi
+  
+  local version
+  version="$(crush --version 2>/dev/null || true)"
+  if [[ -z "$version" ]]; then
+    echo "WARN: Could not detect crush version"
+  else
+    echo "INFO: Crush version: $version"
+  fi
+  
+  # Verify model is specified
+  if [[ -z "${ADAPTER_MODEL}" ]]; then
+    echo "WARN: No model specified for OpenCode adapter"
+  fi
+  
+  echo "OK: OpenCode adapter healthy (model: ${ADAPTER_MODEL})"
   return 0
 }
 
@@ -38,9 +58,19 @@ adapter_run() {
   local worktree="${3:?usage: adapter_run MODE SESSION WORKTREE PROMPT_FILE}"
   local prompt_file="${4:?usage: adapter_run MODE SESSION WORKTREE PROMPT_FILE}"
   
+  # Validate prompt file
+  if [[ ! -f "${prompt_file}" ]]; then
+    echo "ERROR: Prompt file not found: ${prompt_file}"
+    return 1
+  fi
+  if [[ ! -s "${prompt_file}" ]]; then
+    echo "ERROR: Prompt file is empty: ${prompt_file}"
+    return 1
+  fi
+  
   local timeout_seconds="${OPENCODE_TIMEOUT_SECONDS:-900}"
   
-  echo "OpenCode adapter: Running session ${session}"
+  echo "OpenCode adapter: Running session ${session} with model ${ADAPTER_MODEL}"
   
   cd "${worktree}" || return 1
   

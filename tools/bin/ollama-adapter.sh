@@ -36,10 +36,20 @@ adapter_health_check() {
     return 1
   fi
   
-  # Check if model is available
+  # Check if model is available (try to pull if not)
   if ! ollama list 2>/dev/null | grep -q "${ADAPTER_MODEL}"; then
-    echo "ERROR: Model ${ADAPTER_MODEL} not found. Pull it with: ollama pull ${ADAPTER_MODEL}"
-    return 1
+    echo "WARN: Model ${ADAPTER_MODEL} not found locally. Attempting pull..."
+    if ! ollama pull "${ADAPTER_MODEL}" 2>&1; then
+      echo "ERROR: Failed to pull model ${ADAPTER_MODEL}"
+      return 1
+    fi
+  fi
+  
+  # Detect context window (already done in run, but verify here)
+  local context_window
+  context_window="$(curl -sf "${ADAPTER_BASE_URL}/api/show" -d "{\"name\":\"${ADAPTER_MODEL}\"}" 2>/dev/null | grep -o '"context_length":[0-9]*' | cut -d: -f2 || true)"
+  if [[ -n "$context_window" ]]; then
+    echo "INFO: Detected context window: $context_window tokens"
   fi
   
   echo "OK: Ollama healthy, model ${ADAPTER_MODEL} available"
@@ -52,6 +62,16 @@ adapter_run() {
   local session="${2:?usage: adapter_run MODE SESSION WORKTREE PROMPT_FILE}"
   local worktree="${3:?usage: adapter_run MODE SESSION WORKTREE PROMPT_FILE}"
   local prompt_file="${4:?usage: adapter_run MODE SESSION WORKTREE PROMPT_FILE}"
+  
+  # Validate prompt file
+  if [[ ! -f "${prompt_file}" ]]; then
+    echo "ERROR: Prompt file not found: ${prompt_file}"
+    return 1
+  fi
+  if [[ ! -s "${prompt_file}" ]]; then
+    echo "ERROR: Prompt file is empty: ${prompt_file}"
+    return 1
+  fi
   
   local timeout_seconds="${OLLAMA_TIMEOUT_SECONDS:-900}"
   

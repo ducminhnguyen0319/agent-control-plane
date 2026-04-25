@@ -30,10 +30,22 @@ adapter_health_check() {
   fi
   
   if [[ -z "${OPENROUTER_API_KEY:-}" ]]; then
-    echo "WARN: OPENROUTER_API_KEY not set"
+    echo "ERROR: OPENROUTER_API_KEY is required for Pi adapter"
+    return 1
   fi
   
-  echo "OK: Pi adapter healthy"
+  # Test API connectivity with a simple model list call
+  if ! pi models 2>/dev/null | grep -q "."; then
+    echo "ERROR: Pi CLI cannot connect to OpenRouter API (check OPENROUTER_API_KEY)"
+    return 1
+  fi
+  
+  # Verify configured model is available
+  if [[ -n "${ADAPTER_MODEL}" ]] && ! pi models 2>/dev/null | grep -q "${ADAPTER_MODEL}"; then
+    echo "WARN: Configured model ${ADAPTER_MODEL} not found in available models"
+  fi
+  
+  echo "OK: Pi adapter healthy (model: ${ADAPTER_MODEL})"
   return 0
 }
 
@@ -42,6 +54,16 @@ adapter_run() {
   local session="${2:?usage: adapter_run MODE SESSION WORKTREE PROMPT_FILE}"
   local worktree="${3:?usage: adapter_run MODE SESSION WORKTREE PROMPT_FILE}"
   local prompt_file="${4:?usage: adapter_run MODE SESSION WORKTREE PROMPT_FILE}"
+  
+  # Validate prompt file
+  if [[ ! -f "${prompt_file}" ]]; then
+    echo "ERROR: Prompt file not found: ${prompt_file}"
+    return 1
+  fi
+  if [[ ! -s "${prompt_file}" ]]; then
+    echo "ERROR: Prompt file is empty: ${prompt_file}"
+    return 1
+  fi
   
   local timeout_seconds="${PI_TIMEOUT_SECONDS:-900}"
   
