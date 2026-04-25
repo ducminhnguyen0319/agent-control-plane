@@ -73,7 +73,7 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           # Extract section for this version from CHANGELOG.md
-          python3 << 'PY'
+          BODY=$(python3 << 'PY'
           import re, sys
 
           version = "${{ steps.version.outputs.version }}"
@@ -93,6 +93,10 @@ jobs:
           else:
               print(f"No changelog found for version {version}")
           PY
+          )
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "$BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
