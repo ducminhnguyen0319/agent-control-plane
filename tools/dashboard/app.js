@@ -734,6 +734,43 @@ refreshButton.addEventListener("click", () => {
 
 initializeTheme();
 void loadSnapshot();
-window.setInterval(() => {
-  void loadSnapshot();
-}, 5000);
+
+// WebSocket live updates
+let wsReconnectDelay = 1000;
+let wsConnectionActive = false;
+
+function connectWebSocket() {
+  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  const wsUrl = `${protocol}//${location.host}/ws`;
+  const ws = new WebSocket(wsUrl);
+
+  ws.onopen = () => {
+    wsReconnectDelay = 1000;
+    wsConnectionActive = true;
+    console.log("ACP Dashboard: WebSocket connected");
+  };
+
+  ws.onmessage = (event) => {
+    try {
+      const snapshot = JSON.parse(event.data);
+      window._acpSnapshot = snapshot;
+      renderFromSnapshot(snapshot);
+      maybeNotifyAlerts(snapshot);
+    } catch (error) {
+      console.error("ACP Dashboard: Failed to parse WebSocket message", error);
+    }
+  };
+
+  ws.onclose = () => {
+    wsConnectionActive = false;
+    console.log(`ACP Dashboard: WebSocket disconnected, reconnecting in ${wsReconnectDelay}ms`);
+    setTimeout(connectWebSocket, wsReconnectDelay);
+    wsReconnectDelay = Math.min(wsReconnectDelay * 2, 30000);
+  };
+
+  ws.onerror = (error) => {
+    console.error("ACP Dashboard: WebSocket error", error);
+  };
+}
+
+connectWebSocket();
