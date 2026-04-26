@@ -74,6 +74,33 @@ failure_reason_from_output() {
   return 1
 }
 
+next_step_message() {
+  local reason="${1:-}"
+  case "$reason" in
+    usage-limit)
+      echo "Wait for quota reset (usually 24h), or switch to another provider/account in the profile"
+      ;;
+    no-codex-output-before-stall-threshold|no-codex-progress-before-stall-threshold)
+      echo "Check worker log for stall patterns, restart the session, or switch to a different backend"
+      ;;
+    no-agent-output-before-stall-threshold|no-agent-progress-before-stall-threshold)
+      echo "Check worker log for stall patterns, restart the session, or switch to a different backend"
+      ;;
+    claude-exit-failed|openclaw-exit-failed)
+      echo "Investigate worker logs, check if the binary crashed, or try re-running the session"
+      ;;
+    worker-exit-failed)
+      echo "Check the worker process logs and verify the backend is installed and configured correctly"
+      ;;
+    runner-aborted-before-completion)
+      echo "The worker process was killed before completion. Check system resources and re-run the session"
+      ;;
+    *)
+      echo "Check the session logs and re-run the session if needed"
+      ;;
+  esac
+}
+
 if tmux has-session -t "$session" 2>/dev/null; then
   status="RUNNING"
 fi
@@ -182,6 +209,7 @@ if [[ -n "$exit_code" ]]; then
 fi
 if [[ -n "$failure_reason" ]]; then
   printf 'FAILURE_REASON=%s\n' "$failure_reason"
+  printf 'NEXT_STEP=%s\n' "$(next_step_message "$failure_reason")"
 fi
 if [[ -n "$thread_id" ]]; then
   printf 'THREAD_ID=%s\n' "$thread_id"
