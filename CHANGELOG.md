@@ -7,6 +7,20 @@ layout for public releases.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-04-26
+
+### Added
+- Dashboard: Auto theme (light/dark/auto), Print button, CSV export, Search/Filter, Refresh toggle
+- Scheduler: Error tracking, metrics collection, stale lock cleanup, system resource monitoring
+- Docs: FAQ, QuickStart, Common Workflows, Advanced Config, Community, Benchmarks, Quick Tips
+- Release: automate-release.sh, verify-package.sh, security-scan.sh, setup-ci.sh
+- Shell completion scripts for bash and zsh
+
+### Changed
+- Improved onboarding with interactive setup wizard and migration script
+- Enhanced dashboard with WebSocket status indicator and last updated timestamp
+- Better package trust with npm provenance and Dependabot
+
 ### Fixed
 - Harden recurring issue execution with timeout and logging
 - Cross-platform timeout detection for onboarding
