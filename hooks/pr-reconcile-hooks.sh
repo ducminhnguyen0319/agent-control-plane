@@ -77,13 +77,24 @@ pr_cleanup_linked_issue_session() {
   should_close="$(pr_linked_issue_should_close "$issue_id")"
   update_args=(--remove agent-running --remove agent-blocked --remove agent-e2e-heavy --remove agent-automerge --remove agent-exclusive)
   pr_best_effort_update_labels --repo-slug "${REPO_SLUG}" --number "$issue_id" "${update_args[@]}"
-
+  
+  # Clean up stale session state
   local issue_session="${ISSUE_SESSION_PREFIX}${issue_id}"
   local issue_meta="${RUNS_ROOT}/${issue_session}/run.env"
   if [[ -f "$issue_meta" ]]; then
     local issue_worktree
     issue_worktree="$(awk -F= '/^WORKTREE=/{print $2}' "$issue_meta" | head -n 1)"
     "${FLOW_TOOLS_DIR}/cleanup-worktree.sh" "${issue_worktree:-}" "$issue_session" >/dev/null || true
+    
+    # Check for stale PID files and clean them
+    local pid_file="${RUNS_ROOT}/${issue_session}/pid"
+    if [[ -f "$pid_file" ]]; then
+      local stale_pid="$(cat "$pid_file" 2>/dev/null || true)"
+      if [[ -n "$stale_pid" ]] && ! kill -0 "$stale_pid" 2>/dev/null; then
+        echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") [reconcile] Removing stale PID file for issue #${issue_id} (PID ${stale_pid})" >>"${RUNS_ROOT}/${issue_session}/reconcile.log" 2>/dev/null || true
+        rm -f "$pid_file"
+      fi
+    fi
   fi
 }
 
