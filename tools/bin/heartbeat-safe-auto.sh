@@ -92,6 +92,53 @@ log_event() {
   echo "{\"timestamp\": \"${timestamp}\", \"event\": \"${event_type}\", \"pid\": ${$}${extra_fields}}" >> "${LOG_FILE}"
 }
 
+# Health check: monitor system resources
+check_system_resources() {
+  local cpu_usage mem_usage disk_usage
+  local warn=0
+  
+  # CPU usage (1-min load average / number of cores)
+  if command -v nproc >/dev/null 2>&1 && command -v awk >/dev/null 2>&1; then
+    local load_1min disk_avail disk_total
+    load_1min=$(cat /proc/loadavg 2>/dev/null | awk '{print $1}' || echo "0")
+    local cores
+    cores=$(nproc 2>/dev/null || echo "1")
+    cpu_usage=$(echo "$load_1min $cores" | awk '{printf "%.0f", ($1/$2)*100}' 2>/dev/null || echo "0")
+  fi
+  
+  # Memory usage
+  if command -v free >/dev/null 2>&1; then
+    mem_usage=$(free | awk '/Mem:/ {printf "%.0f", ($3/$2)*100}' 2>/dev/null || echo "0")
+  elif [[ -f /proc/meminfo ]]; then
+    local mem_total mem_available
+    mem_total=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo "1")
+    mem_available=$(grep MemAvailable /proc/meminfo 2>/dev/null | awk '{print $2}' || echo "0")
+    mem_usage=$(echo "$mem_total $mem_available" | awk '{printf "%.0f", (($1-$2)/$1)*100}' 2>/dev/null || echo "0")
+  fi
+  
+  # Disk usage for STATE_ROOT
+  disk_usage=$(df "${STATE_ROOT}" 2>/dev/null | awk 'NR==2 {gsub(/%/,"",$5); print $5}' || echo "0")
+  
+  # Log resource status
+  log_event "system_resources" "cpu_pct" "${cpu_usage:-0}" "mem_pct" "${mem_usage:-0}" "disk_pct" "${disk_usage:-0}"
+  
+  # Warnings
+  if [[ "${cpu_usage:-0}" -gt 80 ]]; then
+    log_event "resource_warning" "type" "cpu" "value" "${cpu_usage}"
+    warn=1
+  fi
+  if [[ "${mem_usage:-0}" -gt 90 ]]; then
+    log_event "resource_warning" "type" "memory" "value" "${mem_usage}"
+    warn=1
+  fi
+  if [[ "${disk_usage:-0}" -gt 90 ]]; then
+    log_event "resource_warning" "type" "disk" "value" "${disk_usage}"
+    warn=1
+  fi
+  
+  return $warn
+}
+
 mkdir -p "${AGENT_ROOT}" "${RUNS_ROOT}" "${STATE_ROOT}" "${HISTORY_ROOT}" "${WORKTREE_ROOT}" "${MEMORY_DIR}"
 
 log_event "heartbeat_start" "repo_slug" "${REPO_SLUG}"
