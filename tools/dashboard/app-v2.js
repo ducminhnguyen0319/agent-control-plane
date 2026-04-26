@@ -820,6 +820,7 @@ refreshButton.addEventListener("click", () => {
 
 initializeTheme();
 void loadSnapshot();
+setupSearch();
 
 // WebSocket live updates
 let wsReconnectDelay = 1000;
@@ -891,6 +892,40 @@ connectWebSocket();
 
 // Scheduler Status
 let schedulerStatus = null;
+let dashboardSearchTerm = '';
+
+function filterTableData(data, searchTerm) {
+  if (!searchTerm) return data;
+  const term = searchTerm.toLowerCase();
+  return data.filter(row => {
+    return Object.values(row).some(value => 
+      String(value).toLowerCase().includes(term)
+    );
+  });
+}
+
+function setupSearch() {
+  // Create search input if it doesn't exist
+  let searchInput = document.getElementById('dashboard-search');
+  if (!searchInput) {
+    searchInput = document.createElement('input');
+    searchInput.id = 'dashboard-search';
+    searchInput.type = 'text';
+    searchInput.placeholder = 'Search tables...';
+    searchInput.style.cssText = 'padding: 6px 12px; margin: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px;';
+    const header = document.querySelector('header') || document.querySelector('#dashboard-header');
+    if (header) {
+      header.appendChild(searchInput);
+    }
+  }
+  
+  searchInput.addEventListener('input', (e) => {
+    dashboardSearchTerm = e.target.value;
+    if (window._acpSnapshot) {
+      renderFromSnapshot(window._acpSnapshot);
+    }
+  });
+}
 
 function exportSnapshot() {
   if (!window._acpSnapshot) {
