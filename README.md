@@ -881,6 +881,30 @@ export ACP_CODEX_QUOTA_SOFT_THRESHOLD=55
 export ACP_CODEX_QUOTA_EMERGENCY_THRESHOLD=65
 ```
 
+## Community
+
+Join the ACP community for help, discussions, and updates:
+
+| Channel | Link | Purpose |
+| --- | --- | --- |
+| **GitHub Discussions** | [Join here](https://github.com/ducminhnguyen0319/agent-control-plane/discussions) | Q&A, ideas, announcements |
+| **GitHub Issues** | [Report bugs](https://github.com/ducminhnguyen0319/agent-control-plane/issues) | Bug reports, feature requests |
+| **GitHub PRs** | [Contribute](https://github.com/ducminhnguyen0319/agent-control-plane/pulls) | Code contributions |
+| **GitHub Sponsors** | [Support us](https://github.com/sponsors/ducminhnguyen0319) | Financial support |
+
+### Getting Help
+
+- **Documentation**: Start with [README.md](./README.md) and [CONTRIBUTING.md](./CONTRIBUTING.md)
+- **Common Issues**: Check the [FAQ](#faq) section in README
+- **Discussions**: Ask questions on [GitHub Discussions](https://github.com/ducminhnguyen0319/agent-control-plane/discussions)
+- **Bug Reports**: Open an issue with reproduction steps
+
+### Stay Updated
+
+- Watch the repo on [GitHub](https://github.com/ducminhnguyen0319/agent-control-plane)
+- Star the repo if ACP helps you!
+- Check the [Roadmap](./ROADMAP.md) for upcoming features
+
 ## Command Summary
 
 | Command | Purpose |
