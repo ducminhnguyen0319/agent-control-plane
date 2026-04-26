@@ -1,3 +1,665 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>ACP Worker Dashboard</title>
+    <style>
+:root {
+  --bg: #f5f5f7;
+  --panel: #ffffff;
+  --panel-strong: #f8f8fa;
+  --ink: #1a1a2e;
+  --muted: #6b7280;
+  --line: #e5e7eb;
+  --accent: #0ea5e9;
+  --accent-soft: #e0f2fe;
+  --warn: #f59e0b;
+  --warn-soft: #fef3c7;
+  --danger: #ef4444;
+  --danger-soft: #fee2e2;
+  --shadow: 0 1px 3px rgba(0,0,0,0.08);
+  --button-bg: var(--ink);
+  --button-ink: #ffffff;
+  --button-hover: #2d2d44;
+  --hero-bg: rgba(255,255,255,0.95);
+  --profile-bg: rgba(255,255,255,0.97);
+  --body-gradient-top: transparent;
+  --body-gradient-bottom: #f5f5f7;
+  --theme-toggle-bg: var(--panel);
+  --theme-toggle-ink: var(--ink);
+  --theme-toggle-line: var(--line);
+  --theme-toggle-hover: var(--panel-strong);
+  --reported-soft: #dbeafe;
+  --reported-ink: #2563eb;
+  --implemented-soft: #dcfce7;
+  --implemented-ink: #16a34a;
+  --blocked-soft: #fef3c7;
+  --blocked-ink: #d97706;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0f0f1a;
+  --panel: #1a1a2e;
+  --panel-strong: #23233a;
+  --ink: #e5e7eb;
+  --muted: #9ca3af;
+  --line: #2d2d44;
+  --accent: #38bdf8;
+  --accent-soft: #0c2a3d;
+  --warn: #fbbf24;
+  --warn-soft: #2d2410;
+  --danger: #f87171;
+  --danger-soft: #2d1a1a;
+  --shadow: 0 1px 3px rgba(0,0,0,0.3);
+  --button-bg: #e5e7eb;
+  --button-ink: #0f0f1a;
+  --button-hover: #d1d5db;
+  --hero-bg: rgba(26,26,46,0.95);
+  --profile-bg: rgba(26,26,46,0.97);
+  --body-gradient-top: transparent;
+  --body-gradient-bottom: #0a0a14;
+  --theme-toggle-bg: #23233a;
+  --theme-toggle-ink: #e5e7eb;
+  --theme-toggle-line: #2d2d44;
+  --theme-toggle-hover: #2d2d44;
+  --reported-soft: #1e3a5f;
+  --reported-ink: #60a5fa;
+  --implemented-soft: #1a3a2a;
+  --implemented-ink: #4ade80;
+  --blocked-soft: #2d2410;
+  --blocked-ink: #fbbf24;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.page {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 16px 16px 32px;
+}
+
+.hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--hero-bg);
+  box-shadow: var(--shadow);
+  margin-bottom: 16px;
+}
+
+.eyebrow {
+  margin: 0 0 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.subtitle {
+  max-width: 760px;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.hero-actions {
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.hero-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+button {
+  appearance: none;
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 13px;
+  background: var(--button-bg);
+  color: var(--button-ink);
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+
+button:hover {
+  background: var(--button-hover);
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+#theme-toggle {
+  background: var(--theme-toggle-bg);
+  color: var(--theme-toggle-ink);
+  border: 1px solid var(--theme-toggle-line);
+}
+
+#theme-toggle:hover {
+  background: var(--theme-toggle-hover);
+}
+
+.meta {
+  text-align: right;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.overview {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.card {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.stat-label {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 500;
+}
+
+.stat-value {
+  margin-top: 4px;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.profiles {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.profile {
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--profile-bg);
+  box-shadow: var(--shadow);
+}
+
+.profile-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.profile-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.profile-title h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.profile-subtitle {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  background: var(--panel-strong);
+  border: 1px solid var(--line);
+}
+
+.badge.good {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: transparent;
+}
+
+.badge.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: transparent;
+}
+
+.badge.danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: transparent;
+}
+
+.profile-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 8px;
+}
+
+.panel {
+  grid-column: span 12;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.panel.half {
+  grid-column: span 6;
+}
+
+.panel.third {
+  grid-column: span 4;
+}
+
+.panel h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.panel-subtitle {
+  margin: -4px 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.alert-list {
+  display: grid;
+  gap: 8px;
+}
+
+.alert-card {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel-strong);
+}
+
+.alert-card.warn {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.alert-card h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.alert-card p {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.alert-header {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.alert-meta {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th,
+td {
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+  border-top: 1px solid var(--line);
+}
+
+th {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+  border-top: 0;
+  background: var(--panel-strong);
+  position: sticky;
+  top: 0;
+}
+
+.mono {
+  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--panel-strong);
+  border: 1px solid var(--line);
+}
+
+.status-pill.RUNNING,
+.status-pill.waiting-worker,
+.status-pill.launching,
+.status-pill.reconciling {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: transparent;
+}
+
+.status-pill.waiting-provider,
+.status-pill.waiting-due,
+.status-pill.waiting-open-pr,
+.status-pill.idle,
+.status-pill.sleeping {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: transparent;
+}
+
+.status-pill.FAILED,
+.status-pill.stopped,
+.status-pill.launch-failed {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: transparent;
+}
+
+.status-pill.implemented {
+  background: var(--implemented-soft);
+  color: var(--implemented-ink);
+  border-color: transparent;
+}
+
+.status-pill.reported,
+.status-pill.completed {
+  background: var(--reported-soft);
+  color: var(--reported-ink);
+  border-color: transparent;
+}
+
+.status-pill.blocked {
+  background: var(--blocked-soft);
+  color: var(--blocked-ink);
+  border-color: transparent;
+}
+
+.status-pill.failed,
+.status-pill.unknown {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: transparent;
+}
+
+.status-pill.running {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: transparent;
+}
+
+.empty-state {
+  color: var(--muted);
+  padding: 8px 4px;
+  font-size: 13px;
+}
+
+/* Filter bar */
+.filter-bar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.filter-search {
+  flex: 1;
+  min-width: 180px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.filter-search:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.filter-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+
+.filter-btn:hover {
+  background: var(--panel-strong);
+}
+
+.filter-btn.active {
+  background: var(--accent);
+  color: var(--button-ink);
+  border-color: transparent;
+}
+
+/* Pagination */
+.pagination {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.pagination-info {
+  font-size: 12px;
+}
+
+.pagination-controls {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.pagination-controls button {
+  padding: 4px 8px;
+  font-size: 12px;
+  min-width: 28px;
+  text-align: center;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.pagination-controls button:hover {
+  background: var(--panel-strong);
+}
+
+.pagination-controls button.active {
+  background: var(--accent);
+  color: var(--button-ink);
+  border-color: transparent;
+}
+
+.pagination-controls button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pagination-ellipsis {
+  padding: 4px 4px;
+  color: var(--muted);
+}
+
+/* Icon-only action buttons */
+.action-btn {
+  padding: 4px 6px;
+  font-size: 14px;
+  line-height: 1;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid transparent;
+  border-radius: 4px;
+}
+
+.action-btn:hover {
+  background: var(--panel-strong);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+@media (max-width: 960px) {
+  .hero,
+  .profile-header {
+    flex-direction: column;
+  }
+
+  .hero-actions,
+  .badge-row {
+    align-items: flex-start;
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .hero-controls {
+    justify-content: flex-start;
+  }
+
+  .panel.half,
+  .panel.third {
+    grid-column: span 12;
+  }
+}
+
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Agent Control Plane</p>
+          <h1>Worker Dashboard</h1>
+          <p class="subtitle">
+            Track active runs, resident controllers, queue pressure, and provider failover in one place.
+          </p>
+          <p class="subtitle">
+            Lifecycle shows whether a worker session finished cleanly. Result shows whether that cycle implemented work, reported findings, or stopped blocked.
+          </p>
+        </div>
+        <div class="hero-actions">
+          <div class="hero-controls">
+            <button id="theme-toggle" type="button" aria-label="Toggle dark mode">Dark mode</button>
+            <button id="refresh-button" type="button">Refresh now</button>
+          </div>
+          <div class="meta">
+            <div>Auto refresh: <strong>5s</strong></div>
+            <div id="generated-at">Loading snapshot...</div>
+          </div>
+        </div>
+      </header>
+
+      <section id="overview" class="overview"></section>
+      <section id="scheduler-status" class="scheduler-status"></section>
+      <section id="profiles" class="profiles"></section>
+    </main>
+
+    <template id="empty-table-template">
+      <div class="empty-state">No data right now.</div>
+    </template>
+
+    <script>
 const refreshButton = document.querySelector("#refresh-button");
 const themeToggleButton = document.querySelector("#theme-toggle");
 const generatedAtNode = document.querySelector("#generated-at");
@@ -865,3 +1527,7 @@ function connectWebSocket() {
 }
 
 connectWebSocket();
+
+    </script>
+  </body>
+</html>
