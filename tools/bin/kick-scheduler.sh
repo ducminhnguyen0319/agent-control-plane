@@ -69,24 +69,27 @@ if [[ -f "${PID_FILE}" ]]; then
   fi
 fi
 
-export DELAY_SECONDS BOOTSTRAP_SCRIPT FLOW_SAFE_AUTO_SCRIPT PID_FILE REPO_SLUG
-nohup bash -lc '
-  trap '\''rm -f "$PID_FILE"'\'' EXIT
-  sleep "$DELAY_SECONDS"
-  active_pid="$(ps -ax -o pid=,command= | while read -r pid command; do
-    [[ -n "${pid:-}" ]] || continue
-    case "$command" in
-      *"$BOOTSTRAP_SCRIPT"*|*"$FLOW_SAFE_AUTO_SCRIPT"*|*"agent-project-heartbeat-loop --repo-slug $REPO_SLUG"*)
-        printf "%s\n" "$pid"
-        break
-        ;;
-    esac
-  done)"
-  if [[ -n "$active_pid" ]]; then
-    exit 0
+export DELAY_SECONDS BOOTSTRAP_SCRIPT FLOW_SAFE_AUTO_SCRIPT PID_FILE REPO_SLUG STATE_DIR
+KICK_LOG="${STATE_DIR}/kick-scheduler.log"
+KICK_TIMEOUT_SECONDS="${ACP_KICK_TIMEOUT_SECONDS:-3600}"
+
+# Cleanup stale PID file if process not running
+if [[ -f "${PID_FILE}" ]]; then
+  stale_pid="$(cat "${PID_FILE}" 2>/dev/null || true)"
+  if [[ -n "${stale_pid}" ]] && ! kill -0 "${stale_pid}" 2>/dev/null; then
+    echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") [cleanup] Removing stale PID file (PID ${stale_pid})" >>"${KICK_LOG}"
+    rm -f "${PID_FILE}"
   fi
-  "$BOOTSTRAP_SCRIPT" >/dev/null 2>&1 || true
-' >/dev/null 2>&1 &
+fi
+
+nohup "${SCRIPT_DIR}/kick-scheduler-wrapper.sh" \
+  "${PID_FILE}" \
+  "${DELAY_SECONDS}" \
+  "${BOOTSTRAP_SCRIPT}" \
+  "${FLOW_SAFE_AUTO_SCRIPT}" \
+  "${REPO_SLUG}" \
+  "${STATE_DIR}" \
+  >/dev/null 2>&1 &
 
 bg_pid="$!"
 printf '%s\n' "${bg_pid}" >"${PID_FILE}"
