@@ -754,6 +754,72 @@ npx agent-control-plane@latest sync
 ### Q: How do I contribute to ACP?
 **A:** See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines. PRs welcome!
 
+## Common Workflows
+
+### Workflow 1: Automate GitHub Issues
+
+1. Label any issue with `agent-keep-open`
+2. ACP will automatically pick it up and start working
+3. Monitor progress at the dashboard (http://127.0.0.1:8765)
+4. Review the PR when ACP creates one
+
+```bash
+# Check what ACP is working on
+agent-control-plane runtime status --profile-id my-repo
+
+# View recent runs
+ls -la ~/.agent-runtime/projects/my-repo/runs/
+```
+
+### Workflow 2: Switch Coding Worker
+
+```bash
+# 1. Update profile configuration
+nano ~/.agent-runtime/control-plane/profiles/my-repo/control-plane.yaml
+# Change: coding_worker: codex -> claude
+
+# 2. Restart runtime
+agent-control-plane runtime restart --profile-id my-repo
+```
+
+### Workflow 3: Monitor API Usage
+
+```bash
+# Check provider cooldowns
+cat ~/.agent-runtime/projects/my-repo/state/provider-cooldowns.json
+
+# View scheduler metrics (if enabled)
+tail -f ~/.agent-runtime/projects/my-repo/state/scheduler-events.jsonl
+```
+
+### Workflow 4: Handle Failed Runs
+
+```bash
+# 1. Check the error
+cat ~/.agent-runtime/projects/my-repo/runs/<session-id>/main.log
+
+# 2. Fix the issue (auth, dependencies, etc.)
+
+# 3. Retry the issue
+agent-control-plane runtime restart --profile-id my-repo
+```
+
+### Workflow 5: Update ACP Safely
+
+```bash
+# 1. Update package
+npm update -g agent-control-plane
+
+# 2. Sync runtime
+npx agent-control-plane@latest sync
+
+# 3. Verify
+agent-control-plane doctor
+
+# 4. Restart runtime
+agent-control-plane runtime restart --profile-id my-repo
+```
+
 ## Command Summary
 
 | Command | Purpose |
