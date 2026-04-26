@@ -1,0 +1,49 @@
+version: 2
+updates:
+  # npm dependencies
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "ducminhnguyen0319"
+    labels:
+      - "dependencies"
+      - "automerge"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      # Group minor and patch updates together
+      production-dependencies:
+        dependency-type: "production"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
+      development-dependencies:
+        dependency-type: "development"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
+    ignore:
+      # Ignore major version updates (require manual review)
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
+    
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
