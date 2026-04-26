@@ -11,6 +11,9 @@
     "url": "git+https://github.com/ducminhnguyen0319/agent-control-plane.git"
   },
   "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "funding": [
     "https://github.com/sponsors/ducminhnguyen0319"
   ],
