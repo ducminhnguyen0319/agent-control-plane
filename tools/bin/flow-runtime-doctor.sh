@@ -96,7 +96,37 @@ else
 fi
 printf 'DOCTOR_STATUS=%s\n' "${status}"
 
+# Provide clear next steps based on state
+printf '\n=== NEXT STEPS ===\n'
+if [[ "${status}" == "ok" ]]; then
+  printf '✓ All checks passed! No action required.\n'
+  printf 'Run ACP: bash %s/tools/bin/setup.sh --profile-id <id>\n' "${FLOW_SKILL_DIR}"
+elif [[ "${status}" == "needs-sync" ]]; then
+  printf 'Status: NEEDS-SYNC\n'
+  printf 'Run sync to fix issues:\n'
+  printf '  bash %q %q %q\n' "${SYNC_SCRIPT}" "${SHARED_AGENT_HOME}" "${RUNTIME_HOME}"
+  printf '\nOr run setup with resume:\n'
+  printf '  bash %s/tools/bin/setup.sh --resume\n' "${FLOW_SKILL_DIR}"
+  if [[ -n "${PROFILE_SELECTION_HINT}" ]]; then
+    printf '\nProfile selection hint: %s\n' "${PROFILE_SELECTION_HINT}"
+  fi
+else
+  printf 'Status: %s\n' "${status}"
+  printf 'Check the output above for details.\n'
+fi
+
+# Cross-platform tips
+if [[ "${TIMEOUT_CMD}" == *"missing"* ]]; then
+  printf '\n⚠ Cross-Platform Tip: Install coreutils for timeout command:\n'
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    printf '  macOS: brew install coreutils\n'
+  else
+    printf '  Linux: sudo apt-get install coreutils (usually pre-installed)\n'
+  fi
+fi
+
 if [[ -n "${PROFILE_SELECTION_HINT}" ]]; then
+  printf '\n=== PROFILE SELECTION ===\n'
   printf 'PROFILE_SELECTION_NEXT_STEP=ACP_PROJECT_ID=<id> bash %s/tools/bin/render-flow-config.sh\n' "${FLOW_SKILL_DIR}"
 fi
 
