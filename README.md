@@ -937,6 +937,26 @@ Join the ACP community for help, discussions, and updates:
 3. **Use SSD storage** for worktrees and state
 4. **Monitor usage** via dashboard at http://127.0.0.1:8765
 
+## Quick Tips
+
+### For Beginners
+- Start with `agent-control-plane setup` (wizard mode)
+- Use `codex` or `claude` workers (most reliable)
+- Keep dashboard open at http://127.0.0.1:8765
+- Label issues with `agent-keep-open` to let ACP work
+
+### For Power Users
+- Set `ACP_MAX_CONCURRENT_WORKERS` to limit resource usage
+- Use `ollama` for free local execution
+- Monitor `provider-cooldowns.json` for API quota
+- Run `agent-control-plane doctor` weekly for health checks
+
+### For Contributors
+- Read `CONTRIBUTING.md` first
+- Run `bash tools/scripts/verify-package.sh` before submitting PR
+- Test with `npm test` and `npm run doctor`
+- Keep PRs focused on single concerns
+
 ## Command Summary
 
 | Command | Purpose |
