@@ -86,6 +86,14 @@ printf 'RUNTIME_COMPAT_SKILL_DIR=%s\n' "${RUNTIME_COMPAT_SKILL_DIR}"
 printf 'RUNTIME_COMPAT_EXISTS=%s\n' "${runtime_compat_exists}"
 printf 'WORKFLOW_CATALOG=%s\n' "${CATALOG_FILE}"
 printf 'WORKFLOW_CATALOG_EXISTS=%s\n' "${catalog_exists}"
+# Check timeout command (needed for scheduler cross-platform)
+if command -v timeout &>/dev/null; then
+  printf 'TIMEOUT_CMD=%s\n' "timeout"
+elif command -v gtimeout &>/dev/null; then
+  printf 'TIMEOUT_CMD=%s\n' "gtimeout (from coreutils)"
+else
+  printf 'TIMEOUT_CMD=%s\n' "missing (install coreutils for timeout command)"
+fi
 printf 'DOCTOR_STATUS=%s\n' "${status}"
 
 if [[ -n "${PROFILE_SELECTION_HINT}" ]]; then
