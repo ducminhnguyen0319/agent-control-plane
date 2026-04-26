@@ -100,6 +100,7 @@ const result = {
   size: pack.size,
   unpackedSize: pack.unpackedSize,
   entryCount: pack.entryCount,
+  averageFileSize: Math.round(pack.size / pack.entryCount),
 };
 
 console.log(JSON.stringify(result));
@@ -107,6 +108,11 @@ console.log(JSON.stringify(result));
 // Compressed-size budget guard: fail if the tarball creeps above 400 KB.
 if (pack.size > 400 * 1024) {
   fail(`tarball compressed size ${Math.round(pack.size / 1024)} KB exceeds 400 KB budget`);
+}
+
+// Unpacked-size budget guard: fail if unpacked size exceeds 1.5 MB.
+if (pack.unpackedSize > 1.5 * 1024 * 1024) {
+  fail(`tarball unpacked size ${Math.round(pack.unpackedSize / 1024 / 1024 * 10) / 10} MB exceeds 1.5 MB budget`);
 }
 NODE
 
