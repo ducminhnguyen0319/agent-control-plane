@@ -983,15 +983,17 @@ function setupSearch() {
     }
   }
   
-  // Create last updated display
-  let lastUpdated = document.getElementById('last-updated');
-  if (!lastUpdated) {
-    lastUpdated = document.createElement('span');
-    lastUpdated.id = 'last-updated';
-    lastUpdated.style.cssText = 'padding: 6px 12px; margin: 8px; font-size: 12px; color: #666;';
-    lastUpdated.textContent = 'Last updated: never';
+  // Create export CSV button
+  let csvBtn = document.getElementById('export-csv');
+  if (!csvBtn) {
+    csvBtn = document.createElement('button');
+    csvBtn.id = 'export-csv';
+    csvBtn.className = 'btn btn-secondary';
+    csvBtn.style.cssText = 'padding: 6px 12px; margin: 8px;';
+    csvBtn.textContent = 'Export CSV';
+    csvBtn.onclick = exportToCSV;
     if (header) {
-      header.appendChild(lastUpdated);
+      header.appendChild(csvBtn);
     }
   }
   
@@ -1001,6 +1003,42 @@ function setupSearch() {
       renderFromSnapshot(window._acpSnapshot);
     }
   });
+}
+
+function exportToCSV() {
+  if (!window._acpSnapshot) {
+    alert('No snapshot data available yet.');
+    return;
+  }
+  
+  let csv = 'Profile,Session,Task,Lifecycle,Worker,Provider,Result,Updated\n';
+  const snapshot = window._acpSnapshot;
+  
+  if (snapshot.profiles) {
+    snapshot.profiles.forEach(profile => {
+      const runs = filterTableData(profile.runs || [], dashboardSearchTerm);
+      if (runs.length > 0) {
+        csv += `\n${profile.id} - Runs\n`;
+        runs.forEach(row => {
+          csv += `"${row.session || 'n/a'}","${row.task_kind || 'n/a'} ${row.task_id || ''}","${row.lifecycle || 'n/a'}","${row.coding_worker || 'n/a'}","${row.provider_model || 'n/a'}","${row.result || 'n/a'}","${row.updated_at || 'n/a'}"\n`;
+        });
+      }
+    });
+  }
+  
+  if (!csv.includes('\n', 1)) {
+    alert('No data to export.');
+    return;
+  }
+  
+  const BOM = '\uFEFF';
+  const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `acp-dashboard-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function exportSnapshot() {
