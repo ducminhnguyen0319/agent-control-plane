@@ -56,6 +56,7 @@
     "tools/bin/heartbeat-*.sh",
     "tools/bin/github-*.sh",
     "tools/bin/profile-*.sh",
+    "tools/bin/render-flow-config.sh",
     "tools/bin/test-smoke.sh",
     "tools/bin/*-adapter.sh",
     "tools/bin/adapter-*.sh",
