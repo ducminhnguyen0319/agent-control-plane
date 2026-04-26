@@ -75,22 +75,22 @@ npx agent-control-plane@latest runtime status --profile-id demo
 
 ## Flow 4: Dashboard Quick View
 
-**Goal**: Launch dashboard and see live state.
+**Goal**: Launch dashboard and see live state (WebSocket updates).
 
 ```bash
 # Start dashboard (background)
-npx agent-control-plane@latest dashboard --host 127.0.0.1 --port 3180 &
+npx agent-control-plane@latest dashboard --host 127.0.0.1 --port 8765 &
 
 # Open in browser:
-# http://localhost:3180
+# http://localhost:8765
 
 # Expected: Dashboard shows:
-# - Profiles card (1 profile)#
-# - Run sessions card#
-# - Implemented runs card#
-# - Alerts card (0)#
+# - Profiles card (1+ profiles)
+# - Run sessions card
+# - Implemented runs card
+# - Alerts card (0+)
+# - Real-time WebSocket updates (no more 5s polling!)
 ```
-
 **Verify**:
 - [x] Dashboard loads in browser
 - [x] Cards show correct counts
