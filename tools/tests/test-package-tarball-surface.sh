@@ -68,6 +68,9 @@ for (const requiredPath of [
   "tools/bin/test-smoke.sh",
   "tools/dashboard/app.js",
   "tools/vendor/codex-quota/codex-quota.js",
+  "tools/bin/kick-scheduler-wrapper.sh",
+  "tools/tests/test-kick-scheduler-wrapper.sh",
+  "tools/tests/test-runtime-operator-smoke.sh",
 ]) {
   if (!paths.has(requiredPath)) {
     fail(`required tarball path missing: ${requiredPath}`);
