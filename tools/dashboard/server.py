@@ -27,11 +27,11 @@ async def broadcast_snapshot():
     if not ws_clients:
         return
     payload = build_snapshot()
-    encoded = json.dumps(payload, indent=2).encode("utf-8")
+    encoded = json.dumps(payload, indent=2)
     disconnected = set()
     for ws in ws_clients:
         try:
-            await ws.send_bytes(encoded)
+            await ws.send_str(encoded)
         except Exception:
             disconnected.add(ws)
     for ws in disconnected:
@@ -40,13 +40,20 @@ async def broadcast_snapshot():
 
 async def snapshot_handler(request: web.Request) -> web.Response:
     """HTTP endpoint: GET /api/snapshot.json"""
-    payload = build_snapshot()
-    encoded = json.dumps(payload, indent=2).encode("utf-8")
-    return web.Response(
-        body=encoded,
-        content_type="application/json; charset=utf-8",
-        headers={"Cache-Control": "no-store"},
-    )
+    try:
+        payload = build_snapshot()
+        encoded = json.dumps(payload, indent=2).encode("utf-8")
+        return web.Response(
+            body=encoded,
+            content_type="application/json",
+            headers={"Cache-Control": "no-store"},
+        )
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"ERROR in snapshot_handler: {e}", flush=True)
+        print(error_detail, flush=True)
+        raise
 
 
 async def doctor_handler(request: web.Request) -> web.Response:
@@ -80,7 +87,7 @@ async def doctor_handler(request: web.Request) -> web.Response:
         payload = {"output": output.decode("utf-8", errors="replace")}
         return web.Response(
             body=json.dumps(payload),
-            content_type="application/json; charset=utf-8",
+            content_type="application/json",
         )
     except asyncio.TimeoutError:
         return web.Response(
@@ -92,7 +99,7 @@ async def doctor_handler(request: web.Request) -> web.Response:
         payload = {"error": exc.returncode, "output": exc.output}
         return web.Response(
             body=json.dumps(payload),
-            content_type="application/json; charset=utf-8",
+            content_type="application/json",
         )
 
 
@@ -133,7 +140,7 @@ async def scheduler_status_handler(request: web.Request) -> web.Response:
     }
     return web.Response(
         body=json.dumps(payload, indent=2),
-        content_type="application/json; charset=utf-8",
+        content_type="application/json",
     )
 
 
@@ -164,7 +171,7 @@ async def profile_export_handler(request: web.Request) -> web.Response:
         payload = {"profile_id": profile_id, "config": config, "config_file": str(config_file)}
         return web.Response(
             body=json.dumps(payload),
-            content_type="application/json; charset=utf-8",
+            content_type="application/json",
         )
     except Exception as exc:
         return web.Response(
@@ -205,7 +212,7 @@ async def profile_import_handler(request: web.Request) -> web.Response:
         payload = {"status": "ok", "profile_id": profile_id, "config_file": str(config_file)}
         return web.Response(
             body=json.dumps(payload),
-            content_type="application/json; charset=utf-8",
+            content_type="application/json",
         )
     except Exception as exc:
         return web.Response(
@@ -223,8 +230,8 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
     try:
         # Send initial snapshot
         payload = build_snapshot()
-        encoded = json.dumps(payload, indent=2).encode("utf-8")
-        await ws.send_bytes(encoded)
+        encoded = json.dumps(payload, indent=2)
+        await ws.send_str(encoded)
         # Keep connection alive, listen for client messages (ping/pong)
         async for msg in ws:
             if msg.type == WSMsgType.TEXT:
