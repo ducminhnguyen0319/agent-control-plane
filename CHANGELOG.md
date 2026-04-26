@@ -7,6 +7,13 @@ layout for public releases.
 
 ## [Unreleased]
 
+### Fixed
+- Harden recurring issue execution with timeout and logging
+- Cross-platform timeout detection for onboarding
+- Add regression test for kick-scheduler-wrapper
+- Add scheduler-status endpoint placeholder
+- Improve doctor output with timeout check
+
 ## [0.7.1] - 2026-04-25
 
 ### Fixed
