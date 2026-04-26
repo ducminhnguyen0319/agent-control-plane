@@ -820,6 +820,67 @@ agent-control-plane doctor
 agent-control-plane runtime restart --profile-id my-repo
 ```
 
+## Advanced Configuration
+
+### Environment Variables
+
+ACP uses these environment variables (prefix: `ACP_` or `F_LOSNING_`):
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `ACP_CODING_WORKER` | Default coding worker | `codex` |
+| `ACP_MAX_CONCURRENT_WORKERS` | Max concurrent workers | `20` |
+| `ACP_MAX_LAUNCHES_PER_HEARTBEAT` | Max launches per heartbeat | `20` |
+| `ACP_CATCHUP_TIMEOUT_SECONDS` | Timeout for catchup phase | `180` |
+| `ACP_HEARTBEAT_LOOP_TIMEOUT_SECONDS` | Timeout for heartbeat loop | `720` |
+| `ACP_CODEX_QUOTA_AUTOSWITCH_ENABLED` | Auto-switch on quota exhaustion | `1` |
+| `ACP_RETAINED_WORKTREE_AUDIT_ENABLED` | Audit worktree retention | `1` |
+
+### Profile Configuration
+
+Edit `~/.agent-runtime/control-plane/profiles/<id>/control-plane.yaml`:
+
+```yaml
+execution:
+  coding_worker: codex
+  ollama:
+    model: "qwen3.5:9b"
+    base_url: "http://localhost:11434"
+    timeout_seconds: 900
+
+scheduler:
+  max_concurrent_workers: 20
+  max_launches_per_heartbeat: 20
+  catchup_timeout_seconds: 180
+```
+
+### Scheduler Tuning
+
+For busy repos (many issues):
+```bash
+export ACP_MAX_CONCURRENT_WORKERS=50
+export ACP_MAX_LAUNCHES_PER_HEARTBEAT=50
+```
+
+For slow workers (complex tasks):
+```bash
+export ACP_CATCHUP_TIMEOUT_SECONDS=300
+export ACP_HEARTBEAT_LOOP_TIMEOUT_SECONDS=1200
+```
+
+### Quota Management (Codex Only)
+
+```bash
+# Enable auto-switch on quota exhaustion
+export ACP_CODEX_QUOTA_AUTOSWITCH_ENABLED=1
+
+# Set soft threshold (warning)
+export ACP_CODEX_QUOTA_SOFT_THRESHOLD=55
+
+# Set emergency threshold (switch worker)
+export ACP_CODEX_QUOTA_EMERGENCY_THRESHOLD=65
+```
+
 ## Command Summary
 
 | Command | Purpose |
