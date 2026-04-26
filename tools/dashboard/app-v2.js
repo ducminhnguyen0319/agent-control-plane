@@ -824,6 +824,21 @@ void loadSnapshot();
 // WebSocket live updates
 let wsReconnectDelay = 1000;
 let wsConnectionActive = false;
+let wsReconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
+
+function updateConnectionStatus(connected) {
+  const statusEl = document.getElementById('ws-status');
+  if (!statusEl) return;
+  if (connected) {
+    statusEl.textContent = '● Live';
+    statusEl.className = 'connection-status connected';
+    wsReconnectAttempts = 0;
+  } else {
+    statusEl.textContent = `● Reconnecting (${wsReconnectAttempts})`;
+    statusEl.className = 'connection-status disconnected';
+  }
+}
 
 function connectWebSocket() {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
@@ -833,6 +848,8 @@ function connectWebSocket() {
   ws.onopen = () => {
     wsReconnectDelay = 1000;
     wsConnectionActive = true;
+    wsReconnectAttempts++;
+    updateConnectionStatus(true);
     console.log("ACP Dashboard: WebSocket connected");
   };
 
@@ -854,7 +871,13 @@ function connectWebSocket() {
 
   ws.onclose = () => {
     wsConnectionActive = false;
+    wsReconnectAttempts++;
+    updateConnectionStatus(false);
     console.log(`ACP Dashboard: WebSocket disconnected, reconnecting in ${wsReconnectDelay}ms`);
+    if (wsReconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      console.error(`ACP Dashboard: Max reconnection attempts (${MAX_RECONNECT_ATTEMPTS}) reached`);
+      return;
+    }
     setTimeout(connectWebSocket, wsReconnectDelay);
     wsReconnectDelay = Math.min(wsReconnectDelay * 2, 30000);
   };
