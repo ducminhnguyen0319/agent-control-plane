@@ -7,7 +7,14 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node-version: [18, 20, 22]
+        include:
+          - os: windows-latest
+            node-version: 22
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -15,7 +22,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: ${{ matrix.node-version }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -25,13 +32,23 @@ jobs:
       - name: Install Python deps (for adapter tests)
         run: pip install websockets aiohttp aiohttp-cors
 
-      - name: Run adapter tests (allow failures - CLIs not installed in CI)
+      - name: Install rsync (if not present)
+        if: runner.os == 'Windows'
+        run: choco install rsync -y
+
+      - name: Run package tests
+        run: npm test
+
+      - name: Run smoke tests
+        run: bash tools/bin/check-skill-contracts.sh
+
+      - name: Run adapter tests
         run: bash tools/bin/test-adapters.sh
         continue-on-error: true
 
-      - name: Run smoke tests
-        run: cd tools/bin && bash check-skill-contracts.sh
+      - name: Run dashboard snapshot tests
+        run: bash tools/tests/test-render-dashboard-snapshot.sh
         continue-on-error: true
 
       - name: Pass CI
-        run: echo "CI completed (adapter tests may show failures - expected without CLIs)"
+        run: echo "CI completed for ${{ matrix.os }} with Node ${{ matrix.node-version }}"
