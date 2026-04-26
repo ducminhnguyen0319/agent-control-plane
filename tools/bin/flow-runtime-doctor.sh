@@ -137,3 +137,32 @@ if [[ "${status}" != "ok" ]]; then
   printf '  bash %q %q %q\n' "${SYNC_SCRIPT}" "${SHARED_AGENT_HOME}" "${RUNTIME_HOME}"
   printf '\nOr run: bash %s/tools/bin/setup.sh --resume\n' "${FLOW_SKILL_DIR}"
 fi
+
+# Cross-Platform Dependencies Check
+printf '\n=== CROSS-PLATFORM DEPENDENCIES ===\n'
+for cmd in rsync git python3 jq curl; do
+  if command -v "$cmd" &>/dev/null; then
+    printf '✓ %s: available\n' "$cmd"
+  else
+    printf '✗ %s: MISSING\n' "$cmd"
+    case "$cmd" in
+      rsync)
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+          printf '  macOS: brew install rsync\n'
+        else
+          printf '  Linux: sudo apt-get install rsync\n'
+        fi
+        ;;
+      python3)
+        printf '  Install Python 3 from https://python.org\n'
+        ;;
+      jq|curl)
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+          printf '  macOS: brew install %s\n' "$cmd"
+        else
+          printf '  Linux: sudo apt-get install %s\n' "$cmd"
+        fi
+        ;;
+    esac
+  fi
+done
