@@ -75,7 +75,26 @@ QUOTA_LOCK_DIR="${STATE_ROOT}/quota-preflight.lock"
 QUOTA_PID_FILE="${QUOTA_LOCK_DIR}/pid"
 python_bin="$(flow_resolve_python_bin || true)"
 
+# Structured logging for scheduler observability
+LOG_FILE="${STATE_ROOT}/scheduler-events.jsonl"
+mkdir -p "$(dirname "${LOG_FILE}")"
+
+log_event() {
+  local event_type="$1"
+  shift
+  local timestamp
+  timestamp="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  local extra_fields=""
+  while [[ $# -gt 0 ]]; do
+    extra_fields="${extra_fields}, \"$1\": \"$2\""
+    shift 2
+  done
+  echo "{\"timestamp\": \"${timestamp}\", \"event\": \"${event_type}\", \"pid\": ${$}${extra_fields}}" >> "${LOG_FILE}"
+}
+
 mkdir -p "${AGENT_ROOT}" "${RUNS_ROOT}" "${STATE_ROOT}" "${HISTORY_ROOT}" "${WORKTREE_ROOT}" "${MEMORY_DIR}"
+
+log_event "heartbeat_start" "repo_slug" "${REPO_SLUG}"
 
 if [[ -z "${python_bin}" || ! -x "${python_bin}" ]]; then
   echo "unable to resolve a runnable python interpreter for heartbeat-safe-auto.sh" >&2
@@ -605,6 +624,7 @@ write_shared_loop_status "running" ""
       --heavy-deferred-message "E2E-heavy issues remain queued until the single e2e slot is free."; then
   write_shared_loop_status "idle" "0"
   printf '[%s] shared heartbeat loop end status=0\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  log_event "heartbeat_complete" "status" "0"
 else
   loop_status=$?
   write_shared_loop_status "idle" "${loop_status}"
@@ -612,6 +632,7 @@ else
     printf 'HEARTBEAT_LOOP_TIMEOUT=yes\n'
   fi
   printf '[%s] shared heartbeat loop end status=%s\n' "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "${loop_status}"
+  log_event "heartbeat_complete" "status" "${loop_status}"
   exit "${loop_status}"
 fi
 
