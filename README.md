@@ -352,10 +352,48 @@ ACP is a shell-first operator tool. Most install problems become easier to
 debug once it is clear which dependency is responsible for which part of the
 system.
 
+### Cross-Platform Installation
+
+**macOS:**
+```bash
+# Install Node.js (if needed)
+brew install node
+
+# Install required tools
+brew install bash git jq python3 tmux
+brew install gh          # for GitHub-first setups
+```
+
+**Linux (Ubuntu/Debian):**
+```bash
+# Install Node.js (if needed)
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# Install required tools
+sudo apt-get install -y bash git jq python3 tmux
+sudo apt-get install -y gh          # for GitHub-first setups
+```
+
+**Linux (RHEL/CentOS/Fedora):**
+```bash
+# Install Node.js (if needed)
+curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash -
+sudo yum install -y nodejs
+
+# Install required tools
+sudo yum install -y bash git jq python3 tmux
+sudo yum install -y gh             # for GitHub-first setups
+```
+
+**Windows:** See [Windows Setup Guide](docs/WINDOWS_SETUP.md) for native Windows Service setup.
+
+### Dependency Table
+
 | Tool | Required | Purpose | Notes |
 | --- | --- | --- | --- |
 | Node.js `>= 18` | yes | Runs the npm package entrypoint and `npx` wrapper. | CI runs on Node `22`. Node `20` or `22` both work fine. |
-| `bash` | yes | All runtime, profile, and worker orchestration scripts are Bash. | Your login shell can be `zsh`; `bash` just needs to be on `PATH`. |
+| `bash` | yes | All runtime, profile, and worker orchestration scripts are Bash. | Your login shell can be `zsh` or `fish`; `bash` just needs to be on `PATH`. |
 | `git` | yes | Manages worktrees, checks branch state, and coordinates repo automation. | Required even if you interact only through forge issues and PRs. |
 | `gh` | for GitHub-first setups | GitHub CLI auth and API access for issues, PRs, labels, and metadata. | Run `gh auth login` before first use when `--forge-provider github`. |
 | `jq` | yes | Parses JSON from `gh` output and worker metadata throughout. | Missing `jq` will break GitHub-heavy and Gitea-heavy runtime flows. |
@@ -364,7 +402,7 @@ system.
 | Worker CLI (backend-specific) | depends on backend | The coding agent for a profile. Supported: `codex`, `claude`, `openclaw` (production); `ollama`, `pi`, `opencode`, `kilo` (experimental). | Install and authenticate your chosen backend before starting background runs. |
 | `ollama` | for `ollama` backend | Serves local models via OpenAI-compatible API at `http://localhost:11434`. | Install from [ollama.com](https://ollama.com) and pull a model (e.g. `ollama pull qwen3.5:9b`) before use. |
 | `pi` CLI | for `pi` backend | Lightweight coding agent using OpenRouter-compatible APIs. | Install via `npm i -g @mariozechner/pi-coding-agent`. Set `OPENROUTER_API_KEY` before use. |
-| `crush` (opencode) | for `opencode` backend | Go-based coding agent by Charm ([charmbracelet/crush](https://github.com/charmbracelet/crush)). | Install via `brew install charmbracelet/tap/crush`. |
+| `crush` (opencode) | for `opencode` backend | Go-based coding agent by Charm ([charmbracelet/crush](https://github.com/charmbracelet/crush)). | **macOS:** `brew install charmbracelet/tap/crush`. **Linux:** download from [releases page](https://github.com/charmbracelet/crush/releases). |
 | `kilo` CLI | for `kilo` backend | TypeScript coding agent ([kilocode/cli](https://github.com/Kilo-Org/kilocode)). | Install via `npm i -g @kilocode/cli`. |
 | Bundled `codex-quota` + ACP quota manager | automatic for Codex | Quota-aware failover and health signals for Codex profiles. | Bundled by default. Override with `ACP_CODEX_QUOTA_BIN` only if you have a custom setup. |
 
