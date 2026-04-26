@@ -17,7 +17,18 @@ log() {
   echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") [wrapper] $*" >>"${KICK_LOG}"
 }
 
-log "Delay ${DELAY_SECONDS}s, timeout ${KICK_TIMEOUT_SECONDS}s"
+# Cross-platform timeout command detection
+TIMEOUT_CMD=""
+if command -v timeout &>/dev/null; then
+  TIMEOUT_CMD="timeout"
+elif command -v gtimeout &>/dev/null; then
+  # macOS with coreutils installed via brew
+  TIMEOUT_CMD="gtimeout"
+else
+  log "WARNING: 'timeout' command not found, bootstrap will run without timeout"
+fi
+
+log "Delay ${DELAY_SECONDS}s, timeout ${KICK_TIMEOUT_SECONDS}s (timeout cmd: ${TIMEOUT_CMD:-none})"
 
 sleep "${DELAY_SECONDS}"
 
@@ -37,6 +48,11 @@ if [[ -n "$active_pid" ]]; then
   exit 0
 fi
 
-log "Starting bootstrap with timeout ${KICK_TIMEOUT_SECONDS}s"
-timeout "${KICK_TIMEOUT_SECONDS}" "${BOOTSTRAP_SCRIPT}" >>"${KICK_LOG}" 2>&1 || true
+if [[ -n "${TIMEOUT_CMD}" ]]; then
+  log "Starting bootstrap with timeout ${KICK_TIMEOUT_SECONDS}s using ${TIMEOUT_CMD}"
+  "${TIMEOUT_CMD}" "${KICK_TIMEOUT_SECONDS}" "${BOOTSTRAP_SCRIPT}" >>"${KICK_LOG}" 2>&1 || true
+else
+  log "Starting bootstrap without timeout (timeout command not available)"
+  "${BOOTSTRAP_SCRIPT}" >>"${KICK_LOG}" 2>&1 || true
+fi
 log "Bootstrap completed with exit code $?"
