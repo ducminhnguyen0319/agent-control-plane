@@ -39,6 +39,7 @@ going completely off the rails.
 - Roadmap: [ROADMAP.md](./ROADMAP.md)
 - Architecture: [references/architecture.md](./references/architecture.md)
 - Commands: [references/commands.md](./references/commands.md)
+- Examples: [docs/examples.md](./docs/examples.md)
 
 ## The Big Idea
 
