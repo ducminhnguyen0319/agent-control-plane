@@ -75,6 +75,41 @@ QUOTA_LOCK_DIR="${STATE_ROOT}/quota-preflight.lock"
 QUOTA_PID_FILE="${QUOTA_LOCK_DIR}/pid"
 python_bin="$(flow_resolve_python_bin || true)"
 
+# Stale lock detection and cleanup
+cleanup_stale_locks() {
+  local lock_dir pid_file pid max_age_seconds=${1:-1800}  # default 30 minutes
+  local lock_dirs=(
+    "${STATE_ROOT}/heartbeat-loop.lock"
+    "${STATE_ROOT}/quota-preflight.lock"
+  )
+  
+  for lock_dir in "${lock_dirs[@]}"; do
+    pid_file="${lock_dir}/pid"
+    if [[ -f "$pid_file" ]]; then
+      pid=$(cat "$pid_file" 2>/dev/null | tr -d '[:space:]')
+      if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+        # Process is still running, check if parent is init (orphan)
+        local ppid
+        ppid=$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d '[:space:]')
+        if [[ "$ppid" == "1" ]]; then
+          log_event "stale_lock_detected" "type" "orphan" "pid" "$pid" "lock_dir" "$lock_dir"
+          echo "Warning: Removing orphan lock (PID $pid, lock: $lock_dir)"
+          rm -rf "$lock_dir"
+        fi
+      else
+        # Process not running, check lock age
+        local lock_age
+        lock_age=$(($(date +%s) - $(stat -f %m "$pid_file" 2>/dev/null || stat -c %Y "$pid_file" 2>/dev/null || echo "0")))
+        if [[ $lock_age -gt $max_age_seconds ]]; then
+          log_event "stale_lock_detected" "type" "timeout" "pid" "$pid" "age_seconds" "$lock_age" "lock_dir" "$lock_dir"
+          echo "Warning: Removing stale lock (PID $pid, age: ${lock_age}s, lock: $lock_dir)"
+          rm -rf "$lock_dir"
+        fi
+      fi
+    fi
+  done
+}
+
 # Structured logging for scheduler observability
 LOG_FILE="${STATE_ROOT}/scheduler-events.jsonl"
 mkdir -p "$(dirname "${LOG_FILE}")"
@@ -141,6 +176,7 @@ check_system_resources() {
 
 mkdir -p "${AGENT_ROOT}" "${RUNS_ROOT}" "${STATE_ROOT}" "${HISTORY_ROOT}" "${WORKTREE_ROOT}" "${MEMORY_DIR}"
 
+cleanup_stale_locks 1800  # Clean locks older than 30 minutes
 log_event "heartbeat_start" "repo_slug" "${REPO_SLUG}"
 
 if [[ -z "${python_bin}" || ! -x "${python_bin}" ]]; then
