@@ -1,4 +1,4 @@
-# agent-control-plane (ACP) v0.7.0
+# agent-control-plane (ACP) v0.7.1
 
 <p>
   <a href="https://github.com/ducminhnguyen0319/agent-control-plane/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/ducminhnguyen0319/agent-control-plane/actions/workflows/ci.yml/badge.svg?branch=main"></a>
@@ -7,14 +7,20 @@
   <a href="./LICENSE"><img alt="license" src="https://img.shields.io/npm/l/agent-control-plane?style=flat-square"></a>
   <a href="https://github.com/sponsors/ducminhnguyen0319"><img alt="GitHub Sponsors" src="https://img.shields.io/badge/sponsor-GitHub%20Sponsors-ea4aaa?style=flat-square&logo=githubsponsors&logoColor=white"></a>
   <a href="https://socket.dev/npm/package/agent-control-plane"><img alt="Socket" src="https://img.shields.io/badge/Socket-79-f5a623?style=flat-square"></a>
-  <a href="./ROADMAP.md"><img alt="Roadmap Complete" src="https://img.shields.io/badge/ROADMAP-v0.7.0-success?style=flat-square"></a>
-  <a href="./CHANGELOG.md"><img alt="Changelog" src="https://img.shields.io/badge/CHANGELOG-v0.7.0-blue?style=flat-square"></a>
+  <a href="./ROADMAP.md"><img alt="Roadmap Complete" src="https://img.shields.io/badge/ROADMAP-v0.7.1-success?style=flat-square&logo=markdown"></a>
+  <a href="./CHANGELOG.md"><img alt="Changelog" src="https://img.shields.io/badge/CHANGELOG-v0.7.1-blue?style=flat-square&logo=markdown"></a>
 </p>
 
 **agent-control-plane (ACP)** keeps your coding agents running reliably without you having to stare at them all day.
 
-## ✅ ROADMAP UPDATE (v0.7.0) - New Features!
+## ✅ ROADMAP UPDATE (v0.7.1) - Package Fixes & Hardening!
 
+### v0.7.1 Fixes
+- **Package Contents**: All adapter files now included (codex, claude, openclaw, ollama, pi, opencode, kilo)
+- **Ollama Adapter**: Fixed context window detection to parse `model_info` correctly
+- **Package Cleanup**: Removed `__pycache__` directories from published package
+
+### v0.7.0 Features
 - **Real-time Dashboard**: WebSocket updates (no more 5s polling!)
 - **Hardened Adapters**: All 6 backends now production-ready
 - **Native Windows Support**: Run as Windows Service (NSSM/sc.exe/PowerShell)
