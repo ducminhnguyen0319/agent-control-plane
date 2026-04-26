@@ -36,7 +36,8 @@
     "doctor": "node ./npm/bin/agent-control-plane.js doctor",
     "smoke": "node ./npm/bin/agent-control-plane.js smoke",
     "test": "bash tools/tests/test-package-surface.sh && bash tools/tests/test-package-public-metadata.sh",
-    "prepublishOnly": "npm run test && bash tools/tests/test-package-surface.sh && echo '✓ Package validation passed'"
+    "prepublishOnly": "npm run test && bash tools/tests/test-package-surface.sh && echo '✓ Package validation passed'",
+    "prepublish": "echo 'Use npm publish --provenance for provenance attestation'"
   },
   "files": [
     "README.md",
