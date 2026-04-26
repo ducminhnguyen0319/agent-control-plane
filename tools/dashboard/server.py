@@ -98,13 +98,41 @@ async def doctor_handler(request: web.Request) -> web.Response:
 
 async def scheduler_status_handler(request: web.Request) -> web.Response:
     """HTTP endpoint: GET /api/scheduler-status"""
-    # TODO: integrate real scheduler state
+    
+    # Check if scheduler is running
+    state_dir = Path.home() / ".agent-runtime" / "control-plane" / "kick-scheduler"
+    pid_file = state_dir / "pid"
+    log_file = state_dir / "kick-scheduler.log"
+    
+    is_running = False
+    pid = None
+    if pid_file.is_file():
+        pid = pid_file.read_text().strip()
+        if pid:
+            try:
+                os.kill(int(pid), 0)  # Check if process exists
+                is_running = True
+            except (ProcessLookupError, PermissionError):
+                is_running = False
+    
+    # Read last few lines of log
+    last_log_lines = []
+    if log_file.is_file():
+        try:
+            lines = log_file.read_text().strip().split("\n")
+            last_log_lines = lines[-5:] if len(lines) > 5 else lines
+        except Exception:
+            pass
+    
     payload = {
-        "status": "scheduler endpoint placeholder",
-        "message": "Real scheduler status coming soon",
+        "is_running": is_running,
+        "pid": pid if is_running else None,
+        "state_dir": str(state_dir),
+        "last_log_lines": last_log_lines,
+        "message": "Scheduler status from real state",
     }
     return web.Response(
-        body=json.dumps(payload),
+        body=json.dumps(payload, indent=2),
         content_type="application/json; charset=utf-8",
     )
 
