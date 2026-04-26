@@ -205,6 +205,31 @@ collect_metrics() {
     "failed_today" "$failed_today"
 }
 
+# Error tracking for scheduler observability
+ERROR_LOG="${STATE_ROOT}/scheduler-errors.jsonl"
+error_count=0
+
+track_error() {
+  local error_type="$1"
+  local error_msg="$2"
+  local timestamp
+  timestamp="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  
+  ((error_count++))
+  
+  # Log to JSONL
+  echo "{\"timestamp\": \"${timestamp}\", \"type\": \"${error_type}\", \"message\": \"${error_msg}\", \"pid\": ${$}}" >> "${ERROR_LOG}"
+  
+  # Also log as event
+  log_event "scheduler_error" "type" "${error_type}" "message" "${error_msg}"
+  
+  # Alert if too many errors
+  if [[ $error_count -gt 10 ]]; then
+    log_event "error_threshold_exceeded" "count" "$error_count"
+    echo "Warning: High error count detected ($error_count errors)" >&2
+  fi
+}
+
 mkdir -p "${AGENT_ROOT}" "${RUNS_ROOT}" "${STATE_ROOT}" "${HISTORY_ROOT}" "${WORKTREE_ROOT}" "${MEMORY_DIR}"
 
 cleanup_stale_locks 1800  # Clean locks older than 30 minutes
