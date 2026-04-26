@@ -648,7 +648,28 @@ Also remove ACP-managed repo and worktree directories:
 npx agent-control-plane@latest remove --profile-id my-repo --purge-paths
 ```
 
-Use `--purge-paths` only when you want ACP-managed directories deleted too.
+Use `--purge-paths` only when you want ACP-managed direcories deleted too.
+
+## Cross-Platform Notes
+
+### Timeout Command Requirement
+
+The scheduler wrapper (`kick-scheduler-wrapper.sh`) requires a `timeout` command for process timeout enforcement:
+
+- **Linux**: `timeout` is usually pre-installed (part of `coreutils`)
+- **macOS**: Install via Homebrew: `brew install coreutils` (provides `gtimeout`)
+- **Windows/WSL2**: Available in WSL2 Ubuntu by default
+
+If `timeout` is not available, the scheduler will run without timeout protection. The `flow-runtime-doctor.sh` script now checks for this and reports it in the `TIMEOUT_CMD` output.
+
+### Doctor Output
+
+Run `flow-runtime-doctor.sh` to check your environment:
+```bash
+bash tools/bin/flow-runtime-doctor.sh
+```
+
+Look for `TIMEOUT_CMD=` in the output to verify timeout command availability.
 
 ## Troubleshooting
 
