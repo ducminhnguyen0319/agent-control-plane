@@ -78,6 +78,15 @@ sync_skill_copies() {
   if [[ -n "${TARGET_FLOW_COMPAT_ALIAS}" ]]; then
     sync_tree_into_target "${FLOW_SKILL_SOURCE}" "${TARGET_FLOW_COMPAT_ALIAS}"
   fi
+
+  # Explicitly ensure profile-smoke.sh is synced to runtime home
+  local profile_smoke_source="${FLOW_SKILL_SOURCE}/tools/bin/profile-smoke.sh"
+  local profile_smoke_target="${FLOW_SKILL_TARGET}/tools/bin/profile-smoke.sh"
+  if [[ -f "${profile_smoke_source}" ]]; then
+    mkdir -p "$(dirname "${profile_smoke_target}")"
+    cp "${profile_smoke_source}" "${profile_smoke_target}"
+    chmod +x "${profile_smoke_target}"
+  fi
 }
 
 refresh_legacy_profile_templates() {
