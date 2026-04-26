@@ -35,7 +35,8 @@
   "scripts": {
     "doctor": "node ./npm/bin/agent-control-plane.js doctor",
     "smoke": "node ./npm/bin/agent-control-plane.js smoke",
-    "test": "bash tools/tests/test-package-surface.sh && bash tools/tests/test-package-public-metadata.sh"
+    "test": "bash tools/tests/test-package-surface.sh && bash tools/tests/test-package-public-metadata.sh",
+    "prepublishOnly": "npm run test && bash tools/tests/test-package-surface.sh && echo '✓ Package validation passed'"
   },
   "files": [
     "README.md",
