@@ -174,9 +174,41 @@ check_system_resources() {
   return $warn
 }
 
+# Collect scheduler metrics for observability
+collect_metrics() {
+  local active_sessions=0
+  local queued_issues=0
+  local completed_today=0
+  local failed_today=0
+  
+  # Count active tmux sessions for this repo
+  if command -v tmux >/dev/null 2>&1; then
+    active_sessions=$(tmux ls 2>/dev/null | grep -c "agent-" || echo "0")
+  fi
+  
+  # Count queued issues (issues with agent-keep-open label but no active session)
+  if command -v gh >/dev/null 2>&1 && [[ -n "${REPO_SLUG:-}" ]]; then
+    queued_issues=$(gh issue list --repo "${REPO_SLUG}" --label "agent-keep-open" --state open --json number 2>/dev/null | grep -c '"number"' || echo "0")
+  fi
+  
+  # Count completed/failed sessions from history (last 24h)
+  if [[ -d "${HISTORY_ROOT}" ]]; then
+    completed_today=$(find "${HISTORY_ROOT}" -name "*.json" -mtime 0 2>/dev/null | xargs grep -l '"status": "completed"' 2>/dev/null | wc -l || echo "0")
+    failed_today=$(find "${HISTORY_ROOT}" -name "*.json" -mtime 0 2>/dev/null | xargs grep -l '"status": "failed"' 2>/dev/null | wc -l || echo "0")
+  fi
+  
+  # Log metrics
+  log_event "scheduler_metrics" \
+    "active_sessions" "$active_sessions" \
+    "queued_issues" "$queued_issues" \
+    "completed_today" "$completed_today" \
+    "failed_today" "$failed_today"
+}
+
 mkdir -p "${AGENT_ROOT}" "${RUNS_ROOT}" "${STATE_ROOT}" "${HISTORY_ROOT}" "${WORKTREE_ROOT}" "${MEMORY_DIR}"
 
 cleanup_stale_locks 1800  # Clean locks older than 30 minutes
+collect_metrics
 log_event "heartbeat_start" "repo_slug" "${REPO_SLUG}"
 
 if [[ -z "${python_bin}" || ! -x "${python_bin}" ]]; then
