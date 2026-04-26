@@ -1,0 +1,91 @@
+# zsh completion for agent-control-plane
+# Save to /path/to/agent-control-plane/tools/completion/_acp
+
+#compdef agent-control-plane
+
+local -a commands
+commands=(
+  'doctor:Check ACP installation health'
+  'smoke:Run smoke tests'
+  'init:Initialize a new profile'
+  'runtime:Manage runtime (start/stop/status)'
+  'dashboard:Manage dashboard (start/stop/status)'
+  'sync:Sync runtime to latest'
+  'help:Show help'
+)
+
+local -a workers
+workers=(codex claude openclaw ollama pi opencode kilo gemini-cli nanoclaw picoclaw)
+
+local -a providers
+providers=(github gitea)
+
+local -a runtime_cmds
+runtime_cmds=(start stop status restart)
+
+local -a dashboard_cmds
+dashboard_cmds=(start stop status)
+
+local curcontext="$curcontext" state line
+typeset -A opt_args
+
+_arguments -C \
+  '1: :->command' \
+  '*::arg:->args' \
+
+case $state in
+  command)
+    _describe 'command' commands
+    ;;
+  args)
+    case $line[1] in
+      doctor)
+        _arguments \
+          '--profile-id[Profile ID]:profile ID:->profiles' \
+          '--json[Output JSON]'
+        ;;
+      smoke)
+        _arguments \
+          '--profile-id[Profile ID]:profile ID:->profiles' \
+          '--json[Output JSON]'
+        ;;
+      init)
+        _arguments \
+          '--profile-id[Profile ID]:profile ID' \
+          '--repo-slug[Repository slug (owner/repo)]:repo slug' \
+          '--forge-provider[Forge provider]:forge provider:($providers)' \
+          '--repo-root[Repository root path]:repo root:_files -/' \
+          '--agent-root[Agent root path]:agent root:_files -/' \
+          '--worktree-root[Worktree root path]:worktree root:_files -/' \
+          '--coding-worker[Coding worker]:worker:($workers)' \
+          '--gitea-base-url[Gitea base URL]:URL' \
+          '--gitea-token[Gitea token]:token'
+        ;;
+      runtime)
+        _arguments \
+          '1:runtime command:($runtime_cmds)' \
+          '--profile-id[Profile ID]:profile ID:->profiles'
+        ;;
+      dashboard)
+        _arguments \
+          '1:dashboard command:($dashboard_cmds)' \
+          '--profile-id[Profile ID]:profile ID:->profiles'
+        ;;
+      sync)
+        _arguments \
+          '--profile-id[Profile ID]:profile ID:->profiles'
+        ;;
+    esac
+    ;;
+esac
+
+case $state in
+  profiles)
+    local profiles_dir="$HOME/.agent-runtime/control-plane/profiles"
+    if [[ -d $profiles_dir ]]; then
+      local -a profiles
+      profiles=($profiles_dir/*(N:t))
+      _describe 'profile' profiles
+    fi
+    ;;
+esac
