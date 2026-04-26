@@ -96,6 +96,19 @@ async def doctor_handler(request: web.Request) -> web.Response:
         )
 
 
+async def scheduler_status_handler(request: web.Request) -> web.Response:
+    """HTTP endpoint: GET /api/scheduler-status"""
+    # TODO: integrate real scheduler state
+    payload = {
+        "status": "scheduler endpoint placeholder",
+        "message": "Real scheduler status coming soon",
+    }
+    return web.Response(
+        body=json.dumps(payload),
+        content_type="application/json; charset=utf-8",
+    )
+
+
 async def profile_export_handler(request: web.Request) -> web.Response:
     """HTTP endpoint: GET /api/profile/export?profile_id=xxx"""
     profile_id = request.query.get("profile_id", "")
@@ -204,6 +217,7 @@ def build_app() -> web.Application:
     app.router.add_get("/api/snapshot.json", snapshot_handler)
     app.router.add_get("/api/doctor", doctor_handler)
     app.router.add_get("/api/profile/export", profile_export_handler)
+    app.router.add_get("/api/scheduler-status", scheduler_status_handler)
     app.router.add_post("/api/profile/import", profile_import_handler)
     app.router.add_get("/ws", websocket_handler)
     # Static files (dashboard HTML/CSS/JS)
