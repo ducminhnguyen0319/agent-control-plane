@@ -1003,6 +1003,20 @@ function setupSearch() {
       renderFromSnapshot(window._acpSnapshot);
     }
   });
+  
+  // Create print button
+  let printBtn = document.getElementById('print-btn');
+  if (!printBtn) {
+    printBtn = document.createElement('button');
+    printBtn.id = 'print-btn';
+    printBtn.className = 'btn btn-secondary';
+    printBtn.style.cssText = 'padding: 6px 12px; margin: 8px;';
+    printBtn.textContent = 'Print';
+    printBtn.onclick = () => window.print();
+    if (header) {
+      header.appendChild(printBtn);
+    }
+  }
 }
 
 function exportToCSV() {
