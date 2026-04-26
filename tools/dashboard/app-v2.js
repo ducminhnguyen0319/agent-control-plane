@@ -892,6 +892,21 @@ connectWebSocket();
 // Scheduler Status
 let schedulerStatus = null;
 
+function exportSnapshot() {
+  if (!window._acpSnapshot) {
+    alert('No snapshot data available yet.');
+    return;
+  }
+  const dataStr = JSON.stringify(window._acpSnapshot, null, 2);
+  const dataBlob = new Blob([dataStr], { type: 'application/json' });
+  const url = URL.createObjectURL(dataBlob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `acp-snapshot-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 async function fetchSchedulerStatus() {
   try {
     const response = await fetch("/api/scheduler-status", { cache: "no-store" });
