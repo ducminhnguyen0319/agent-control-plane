@@ -20,6 +20,25 @@ FLOW_SAFE_AUTO_SCRIPT="${ACP_FLOW_HEARTBEAT_SCRIPT:-${F_LOSNING_FLOW_HEARTBEAT_S
 STATE_DIR="${ACP_SCHEDULER_KICK_STATE_DIR:-${STATE_ROOT}/kick-scheduler}"
 PID_FILE="${STATE_DIR}/pid"
 
+# Validate repo configuration before proceeding
+if [[ -z "${REPO_SLUG:-}" ]]; then
+  echo "KICK_STATUS=repo-not-configured"
+  exit 1
+fi
+
+# Basic format check for repo slug
+if [[ "${REPO_SLUG}" =~ ^https?:// ]]; then
+  # Looks like a URL - validate it's reachable
+  if ! curl -s --connect-timeout 5 "${REPO_SLUG}" >/dev/null 2>&1; then
+    echo "KICK_STATUS=repo-not-reachable"
+    exit 1
+  fi
+elif [[ ! "${REPO_SLUG}" =~ ^[^/]+/[^/]+$ ]]; then
+  # Not a valid owner/repo format
+  echo "KICK_STATUS=repo-invalid-format"
+  exit 1
+fi
+
 mkdir -p "${STATE_DIR}"
 
 active_heartbeat_pid() {
