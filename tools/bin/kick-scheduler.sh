@@ -14,9 +14,9 @@ fi
 CONFIG_YAML="$(resolve_flow_config_yaml "${BASH_SOURCE[0]}")"
 REPO_SLUG="$(flow_resolve_repo_slug "${CONFIG_YAML}")"
 STATE_ROOT="$(flow_resolve_state_root "${CONFIG_YAML}")"
-BOOTSTRAP_SCRIPT="${ACP_BOOTSTRAP_SCRIPT:-${FLOW_BOOTSTRAP_SCRIPT:-${AGENT_SCHEDULER_BOOTSTRAP_SCRIPT:-$HOME/.agent-runtime/control-plane/workspace/bin/agent-scheduler-launchd.sh}}"
+BOOTSTRAP_SCRIPT="${ACP_BOOTSTRAP_SCRIPT:-${F_LOSNING_BOOTSTRAP_SCRIPT:-${AGENT_SCHEDULER_BOOTSTRAP_SCRIPT:-$HOME/.agent-runtime/control-plane/workspace/bin/agent-scheduler-launchd.sh}}}"
 FLOW_SKILL_DIR="$(resolve_flow_skill_dir "${BASH_SOURCE[0]}")"
-FLOW_SAFE_AUTO_SCRIPT="${ACP_FLOW_HEARTBEAT_SCRIPT:-${FLOW_HEARTBEAT_SCRIPT:-${FLOW_SKILL_DIR}/tools/bin/heartbeat-safe-auto.sh}}"
+FLOW_SAFE_AUTO_SCRIPT="${ACP_FLOW_HEARTBEAT_SCRIPT:-${F_LOSNING_FLOW_HEARTBEAT_SCRIPT:-${FLOW_SKILL_DIR}/tools/bin/heartbeat-safe-auto.sh}}"
 STATE_DIR="${ACP_SCHEDULER_KICK_STATE_DIR:-${STATE_ROOT}/kick-scheduler}"
 PID_FILE="${STATE_DIR}/pid"
 
