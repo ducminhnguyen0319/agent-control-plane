@@ -724,6 +724,36 @@ Look for `TIMEOUT_CMD=` in the output to verify timeout command availability.
 | Missing `tmux`, `gh`, or `python3` | Install the dependency, then retry `sync` or `runtime start`. |
 | Missing `codex-quota` warning | This is optional. Core ACP and all non-Codex flows do not require it. |
 
+## FAQ
+
+### Q: Can I run ACP on Windows?
+**A:** Yes! ACP supports native Windows Service mode. See [Windows Setup Guide](docs/WINDOWS_SETUP.md) for details on using NSSM, sc.exe, or PowerShell.
+
+### Q: Which coding worker should I use?
+**A:** For beginners: start with `codex` or `claude` (production-ready). For local/private: use `ollama` (runs offline). For research: try `pi` (OpenRouter free tier models).
+
+### Q: How do I update ACP?
+**A:** 
+```bash
+npm update -g agent-control-plane
+npx agent-control-plane@latest sync
+```
+
+### Q: The dashboard shows "Reconnecting" - what do I do?
+**A:** Check if the dashboard server is running (`npx agent-control-plane@latest dashboard status`). If not, start it. Also check if port 8765 is available.
+
+### Q: Can I run multiple profiles?
+**A:** Yes! Each profile is independent. Just use different `--profile-id` values when running `init`, `runtime`, etc.
+
+### Q: How do I stop ACP from consuming all my API quota?
+**A:** Set `ACP_CODING_WORKER` to a local backend like `ollama`, or configure `ACP_MAX_LAUNCHES_PER_HEARTBEAT` to limit concurrent runs.
+
+### Q: Where are my agent runs stored?
+**A:** In `~/.agent-runtime/projects/<profile-id>/runs/`. Each session has its own directory with logs and metadata.
+
+### Q: How do I contribute to ACP?
+**A:** See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines. PRs welcome!
+
 ## Command Summary
 
 | Command | Purpose |
