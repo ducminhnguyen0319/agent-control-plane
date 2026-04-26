@@ -87,6 +87,20 @@ sync_skill_copies() {
     cp "${profile_smoke_source}" "${profile_smoke_target}"
     chmod +x "${profile_smoke_target}"
   fi
+
+  # Ensure test scripts are synced for regression coverage
+  for test_script in \
+    "${FLOW_SKILL_SOURCE}/tools/bin/kick-scheduler-wrapper.sh" \
+    "${FLOW_SKILL_SOURCE}/tools/tests/test-kick-scheduler-wrapper.sh" \
+    "${FLOW_SKILL_SOURCE}/tools/tests/test-runtime-operator-smoke.sh" \
+    "${FLOW_SKILL_SOURCE}/tools/tests/test-package-tarball-surface.sh"; do
+    if [[ -f "${test_script}" ]]; then
+      target_script="${FLOW_SKILL_TARGET}${test_script#${FLOW_SKILL_SOURCE}}"
+      mkdir -p "$(dirname "${target_script}")"
+      cp "${test_script}" "${target_script}"
+      chmod +x "${target_script}"
+    fi
+  done
 }
 
 refresh_legacy_profile_templates() {
