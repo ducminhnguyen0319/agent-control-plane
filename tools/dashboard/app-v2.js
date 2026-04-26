@@ -7,35 +7,56 @@ const seenAlertIds = new Set();
 let notificationPermissionRequested = false;
 const THEME_STORAGE_KEY = "acp-dashboard-theme";
 const ROWS_PER_PAGE = 10;
+const THEME_OPTIONS = ['light', 'dark', 'auto'];
+let currentThemeIndex = 0;
 
-// Pagination state: { [tableId]: { page: number } }
-window._acpPagination = {};
+// Pagination state: { [tableId]: { page: number }
 
 function systemPrefersDark() {
   return typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
+function getEffectiveTheme(theme) {
+  if (theme === 'auto') {
+    return systemPrefersDark() ? 'dark' : 'light';
+  }
+  return theme;
+}
+
 function currentThemePreference() {
   try {
     const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-    if (stored === "light" || stored === "dark") return stored;
+    if (stored === 'light' || stored === 'dark' || stored === 'auto') return stored;
   } catch (_error) {
     // Ignore storage access issues and fall back to system preference.
   }
-  return systemPrefersDark() ? "dark" : "light";
+  return 'auto'; // Default to auto (follow system)
 }
 
 function updateThemeToggleLabel(theme) {
   if (!themeToggleButton) return;
-  const nextTheme = theme === "dark" ? "light" : "dark";
-  const label = nextTheme === "dark" ? "Dark mode" : "Light mode";
+  const nextIndex = (THEME_OPTIONS.indexOf(theme) + 1) % THEME_OPTIONS.length;
+  const nextTheme = THEME_OPTIONS[nextIndex];
+  const label = nextTheme === 'dark' ? 'Dark mode' : nextTheme === 'light' ? 'Light mode' : 'Auto (system)';
   themeToggleButton.textContent = label;
   themeToggleButton.setAttribute("aria-label", `Switch to ${label.toLowerCase()}`);
 }
 
 function applyTheme(theme) {
-  document.documentElement.dataset.theme = theme;
+  const effectiveTheme = getEffectiveTheme(theme);
+  document.documentElement.dataset.theme = effectiveTheme;
   updateThemeToggleLabel(theme);
+  
+  // Listen for system theme changes if in auto mode
+  if (theme === 'auto' && typeof window.matchMedia === 'function') {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    mediaQuery.onchange = (e) => {
+      if (currentThemePreference() === 'auto') {
+        const newTheme = e.matches ? 'dark' : 'light';
+        document.documentElement.dataset.theme = newTheme;
+      }
+    };
+  }
 }
 
 function persistTheme(theme) {
@@ -47,10 +68,14 @@ function persistTheme(theme) {
 }
 
 function initializeTheme() {
-  applyTheme(currentThemePreference());
+  const theme = currentThemePreference();
+  currentThemeIndex = THEME_OPTIONS.indexOf(theme);
+  applyTheme(theme);
   if (!themeToggleButton) return;
   themeToggleButton.addEventListener("click", () => {
-    const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    const nextIndex = (currentThemeIndex + 1) % THEME_OPTIONS.length;
+    const nextTheme = THEME_OPTIONS[nextIndex];
+    currentThemeIndex = nextIndex;
     applyTheme(nextTheme);
     persistTheme(nextTheme);
   });
