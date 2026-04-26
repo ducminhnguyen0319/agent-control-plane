@@ -847,11 +847,20 @@ function connectWebSocket() {
   const ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
+    if (!autoRefreshEnabled) {
+      ws.close();
+      return;
+    }
     wsReconnectDelay = 1000;
     wsConnectionActive = true;
     wsReconnectAttempts++;
     updateConnectionStatus(true);
     console.log("ACP Dashboard: WebSocket connected");
+    // Update last updated timestamp
+    const lastUpdated = document.getElementById('last-updated');
+    if (lastUpdated) {
+      lastUpdated.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+    }
   };
 
   ws.onmessage = async (event) => {
@@ -892,6 +901,22 @@ connectWebSocket();
 
 // Scheduler Status
 let schedulerStatus = null;
+let autoRefreshEnabled = true;
+
+function toggleAutoRefresh() {
+  autoRefreshEnabled = !autoRefreshEnabled;
+  const toggleBtn = document.getElementById('refresh-toggle');
+  if (toggleBtn) {
+    toggleBtn.textContent = autoRefreshEnabled ? 'Disable Auto-Refresh' : 'Enable Auto-Refresh';
+    toggleBtn.className = autoRefreshEnabled ? 'btn btn-primary' : 'btn btn-secondary';
+  }
+  if (!autoRefreshEnabled && window._wsConnection) {
+    window._wsConnection.close();
+    updateConnectionStatus(false);
+  } else if (autoRefreshEnabled) {
+    connectWebSocket();
+  }
+}
 let dashboardSearchTerm = '';
 
 function filterTableData(data, searchTerm) {
@@ -916,6 +941,32 @@ function setupSearch() {
     const header = document.querySelector('header') || document.querySelector('#dashboard-header');
     if (header) {
       header.appendChild(searchInput);
+    }
+  }
+  
+  // Create refresh toggle button
+  let toggleBtn = document.getElementById('refresh-toggle');
+  if (!toggleBtn) {
+    toggleBtn = document.createElement('button');
+    toggleBtn.id = 'refresh-toggle';
+    toggleBtn.className = 'btn btn-primary';
+    toggleBtn.style.cssText = 'padding: 6px 12px; margin: 8px;';
+    toggleBtn.textContent = 'Disable Auto-Refresh';
+    toggleBtn.onclick = toggleAutoRefresh;
+    if (header) {
+      header.appendChild(toggleBtn);
+    }
+  }
+  
+  // Create last updated display
+  let lastUpdated = document.getElementById('last-updated');
+  if (!lastUpdated) {
+    lastUpdated = document.createElement('span');
+    lastUpdated.id = 'last-updated';
+    lastUpdated.style.cssText = 'padding: 6px 12px; margin: 8px; font-size: 12px; color: #666;';
+    lastUpdated.textContent = 'Last updated: never';
+    if (header) {
+      header.appendChild(lastUpdated);
     }
   }
   
