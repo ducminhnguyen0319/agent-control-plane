@@ -865,3 +865,55 @@ function connectWebSocket() {
 }
 
 connectWebSocket();
+
+// Scheduler Status
+let schedulerStatus = null;
+
+async function fetchSchedulerStatus() {
+  try {
+    const response = await fetch("/api/scheduler-status", { cache: "no-store" });
+    if (response.ok) {
+      schedulerStatus = await response.json();
+      renderSchedulerStatus();
+    }
+  } catch (error) {
+    console.error("ACP Dashboard: Failed to fetch scheduler status", error);
+  }
+}
+
+function renderSchedulerStatus() {
+  const container = document.getElementById("scheduler-status");
+  if (!container) return;
+  if (!schedulerStatus) {
+    container.innerHTML = `<article class="profile"><h3>Scheduler Status</h3><p class="panel-subtitle">Loading scheduler status...</p></article>`;
+    return;
+  }
+  const { is_running, pid, last_log_lines, message } = schedulerStatus;
+  const statusPill = is_running
+    ? `<span class="status-pill RUNNING">Running (PID: ${pid})</span>`
+    : `<span class="status-pill STOPPED">Stopped</span>`;
+  const logHtml = last_log_lines && last_log_lines.length
+    ? `<pre class="mono" style="background:var(--panel-strong); padding:8px; border-radius:4px; font-size:11px; max-height:120px; overflow-y:auto;">${last_log_lines.join("\n")}</pre>`
+    : `<p class="muted">No log data available.</p>`;
+  container.innerHTML = `
+    <article class="profile">
+      <header class="profile-header">
+        <div>
+          <div class="profile-title">
+            <h2>Scheduler Status</h2>
+            ${statusPill}
+          </div>
+          <p class="panel-subtitle">${message || "Scheduler status from real state"}</p>
+        </div>
+      </header>
+      <section class="panel">
+        <h3>Last Log Lines</h3>
+        ${logHtml}
+      </section>
+    </article>
+  `;
+}
+
+// Initial load
+fetchSchedulerStatus();
+setInterval(fetchSchedulerStatus, 30000); // Refresh every 30s
