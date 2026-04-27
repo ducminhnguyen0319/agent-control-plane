@@ -1151,8 +1151,10 @@ flow_github_pr_view_json() {
   fi
 
   if flow_github_graphql_available "${repo_slug}" \
-    && pr_json="$(gh pr view "${pr_number}" -R "${repo_slug}" --json number,title,body,url,headRefName,baseRefName,mergeStateStatus,statusCheckRollup,labels,comments,state,isDraft 2>/dev/null)"; then
-    printf '%s\n' "${pr_json}"
+    && pr_json="$(gh pr view "${pr_number}" -R "${repo_slug}" --json number,title,body,url,headRefName,baseRefName,mergeStateStatus,statusCheckRollup,labels,comments,state,isDraft,author 2>/dev/null)"; then
+    printf '%s\n' "${pr_json}" \
+      | jq '. + {authorLogin: ((.author.login) // "")}' 2>/dev/null \
+      || printf '%s\n' "${pr_json}"
     return 0
   fi
 
