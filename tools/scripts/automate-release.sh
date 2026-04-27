@@ -4,12 +4,12 @@ set -euo pipefail;
 # automate-release.sh - Automated release process
 # Usage: bash tools/scripts/automate-release.sh [--version <x.y.z>] [--no-publish]
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PACKAGE_JSON="$SCRIPT_DIR/package.json"
 CHANGELOG="$SCRIPT_DIR/CHANGELOG.md"
 VERSION=""
-NO_PUBLISH=false"
-ERRORS=0;
+NO_PUBLISH=false
+ERRORS=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -18,7 +18,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --no-publish)
-      NO_PUBLISH=true"
+      NO_PUBLISH=true
       shift
       ;;
     *)
