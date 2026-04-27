@@ -7,6 +7,19 @@ layout for public releases.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-04-27
+
+### Added
+- Fish shell completion script (Issue #109, #111)
+- ACP logo (light/dark SVG) in README (Issue #108, #112)
+- ACP worker usage examples in docs (Issue #110, #113)
+
+### Fixed
+- `reconcile`: include `author` in `gh pr view --json` so `authorLogin` populates; prevents self-approval HTTP 422 stall (#114)
+- Adapters: portable timeout via `adapter_run_with_timeout` fallback chain (gtimeout/timeout/python3/perl) — fixes `timeout: command not found` on macOS without coreutils (#114)
+- Adapters: export `ACP_RESULT_FILE`, `ACP_RUN_DIR`, `ACP_SESSION` (+ `F_LOSNING_*` aliases) on adapter path so headless workers resolve real artifact paths (#114)
+- `flow-runtime-doctor.sh`: `${TIMEOUT_CMD}` unbound under `set -u` (#114)
+
 ## [0.8.0] - 2026-04-26
 
 ### Added
