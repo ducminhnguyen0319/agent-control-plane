@@ -83,7 +83,7 @@ adapter_run() {
   
   prompt="$(cat "${prompt_file}")"
   
-  if ! timeout "${timeout_seconds}" crush --model "${ADAPTER_MODEL}" "${prompt}" 2>&1; then
+  if ! adapter_run_with_timeout "${timeout_seconds}" crush --model "${ADAPTER_MODEL}" "${prompt}" 2>&1; then
     echo "ERROR: OpenCode run failed"
     return 1
   fi

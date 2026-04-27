@@ -49,12 +49,22 @@ adapter_run() {
   local timeout_seconds="${CLAUDE_TIMEOUT_SECONDS:-900}"
   
   echo "Claude adapter: Running session ${session}"
-  
+
   cd "${worktree}" || return 1
-  
+
+  local sandbox_subdir="${ACP_SANDBOX_SUBDIR:-.openclaw-artifacts}"
+  local sandbox_run_dir="${worktree%/}/${sandbox_subdir}/${session}"
+  mkdir -p "${sandbox_run_dir}" 2>/dev/null || true
+  export ACP_SESSION="${session}"
+  export ACP_RUN_DIR="${sandbox_run_dir}"
+  export ACP_RESULT_FILE="${sandbox_run_dir}/result.env"
+  export F_LOSNING_SESSION="${session}"
+  export F_LOSNING_RUN_DIR="${sandbox_run_dir}"
+  export F_LOSNING_RESULT_FILE="${sandbox_run_dir}/result.env"
+
   prompt="$(cat "${prompt_file}")"
-  
-  if ! timeout "${timeout_seconds}" claude \
+
+  if ! adapter_run_with_timeout "${timeout_seconds}" claude \
     --permission-mode "${permission_mode}" \
     --model "${ADAPTER_MODEL}" \
     --print \

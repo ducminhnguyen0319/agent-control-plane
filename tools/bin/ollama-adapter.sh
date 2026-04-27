@@ -99,24 +99,9 @@ adapter_run() {
   local prompt
   prompt="$(cat "${prompt_file}")"
   
-  # Run ollama with the prompt
-  # Use perl for timeout on macOS (which lacks GNU timeout)
-  if command -v timeout >/dev/null 2>&1; then
-    if ! timeout "${timeout_seconds}" ollama run "${ADAPTER_MODEL}" "${prompt}" 2>&1; then
-      echo "ERROR: Ollama run failed or timed out after ${timeout_seconds}s"
-      return 1
-    fi
-  elif command -v perl >/dev/null 2>&1; then
-    if ! perl -e "alarm ${timeout_seconds}; exec @ARGV" ollama run "${ADAPTER_MODEL}" "${prompt}" 2>&1; then
-      echo "ERROR: Ollama run failed or timed out after ${timeout_seconds}s"
-      return 1
-    fi
-  else
-    # No timeout available, run without timeout
-    if ! ollama run "${ADAPTER_MODEL}" "${prompt}" 2>&1; then
-      echo "ERROR: Ollama run failed"
-      return 1
-    fi
+  if ! adapter_run_with_timeout "${timeout_seconds}" ollama run "${ADAPTER_MODEL}" "${prompt}" 2>&1; then
+    echo "ERROR: Ollama run failed or timed out after ${timeout_seconds}s"
+    return 1
   fi
   
   echo "Ollama adapter: Session ${session} completed"

@@ -73,7 +73,7 @@ adapter_run() {
   cd "${worktree}" || return 1
   
   # Run claude with the prompt
-  if ! timeout "${timeout_seconds}" claude \
+  if ! adapter_run_with_timeout "${timeout_seconds}" claude \
     --permission-mode "${permission_mode}" \
     --model "${ADAPTER_MODEL}" \
     --print \

@@ -80,7 +80,7 @@ adapter_run() {
   
   prompt="$(cat "${prompt_file}")"
   
-  if ! timeout "${timeout_seconds}" pi --model "${ADAPTER_MODEL}" "${prompt}" 2>&1; then
+  if ! adapter_run_with_timeout "${timeout_seconds}" pi --model "${ADAPTER_MODEL}" "${prompt}" 2>&1; then
     echo "ERROR: Pi run failed"
     return 1
   fi

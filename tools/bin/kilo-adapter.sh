@@ -85,7 +85,7 @@ adapter_run() {
   
   # Run kilo and capture output
   local output
-  if ! output="$(timeout "${timeout_seconds}" kilo --model "${ADAPTER_MODEL}" "${prompt}" 2>&1)"; then
+  if ! output="$(adapter_run_with_timeout "${timeout_seconds}" kilo --model "${ADAPTER_MODEL}" "${prompt}" 2>&1)"; then
     echo "ERROR: Kilo run failed or timed out after ${timeout_seconds}s"
     return 1
   fi
