@@ -4,7 +4,7 @@ set -euo pipefail
 # verify-package.sh - Verify npm package integrity
 # Usage: bash tools/scripts/verify-package.sh [--fix]
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PACKAGE_JSON="$SCRIPT_DIR/package.json"
 ERRORS=0
 

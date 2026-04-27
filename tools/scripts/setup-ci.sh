@@ -4,7 +4,7 @@ set -euo pipefail;
 # setup-ci.sh - Setup CI environment for ACP
 # Usage: bash tools/scripts/setup-ci.sh
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 echo "=== ACP CI Setup ==="
 echo ""

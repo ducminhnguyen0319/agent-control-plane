@@ -4,7 +4,7 @@ set -euo pipefail
 # security-scan.sh - Security vulnerability scan
 # Usage: bash tools/scripts/security-scan.sh [--fix] [--json]
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PACKAGE_JSON="$SCRIPT_DIR/package.json"
 FIX_MODE=false
 JSON_OUTPUT=false
